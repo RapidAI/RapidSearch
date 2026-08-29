@@ -1,0 +1,14 @@
+# Secrets
+proxy.token
+
+# Chrome user data
+chrome-profile/
+
+# Debug dumps
+debug/
+
+# Built binaries
+search-service
+search-proxy
+search-relay
+*.exe
