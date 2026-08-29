@@ -1,4 +1,6 @@
-# search-service
+# RapidSearch
+
+A search service for Agent.
 
 Local HTTP JSON API that searches the web by driving a real Chrome/Chromium window (go-rod + stealth). It does **not** call third-party search APIs.
 
