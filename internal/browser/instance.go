@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,19 +46,11 @@ func newInstance(id int, opts Options) *instance {
 	if opts.Bin == "" {
 		opts.Bin = findChrome()
 	}
-	w := 1280 + rand.Intn(41) - 20 + id*16
-	h := 800 + rand.Intn(31) - 15 + id*10
-	if w < 1100 {
-		w = 1100
-	}
-	if h < 700 {
-		h = 700
-	}
 	return &instance{
 		id:     id,
 		opts:   opts,
-		width:  w,
-		height: h,
+		width:  viewportWidth,
+		height: viewportHeight,
 	}
 }
 
@@ -112,13 +103,13 @@ func (in *instance) ensureLocked(ctx context.Context) error {
 		return err
 	}
 
-	ua := chromeUA()
+	ua := chromeUAForBin(in.opts.Bin)
 	in.ua = ua
 	if in.width <= 0 {
-		in.width = 1280 + in.id*16
+		in.width = viewportWidth
 	}
 	if in.height <= 0 {
-		in.height = 800 + in.id*10
+		in.height = viewportHeight
 	}
 	l := launcher.New().
 		Bin(in.opts.Bin).
@@ -134,13 +125,12 @@ func (in *instance) ensureLocked(ctx context.Context) error {
 		Set("no-default-browser-check").
 		Set("disable-infobars").
 		Set("mute-audio").
-		Set("disable-features", "Translate,MediaRouter,OptimizationHints,IsolateOrigins,site-per-process").
+		Set("disable-features", "Translate,MediaRouter,OptimizationHints").
 		Set("disable-background-timer-throttling").
 		Set("disable-backgrounding-occluded-windows").
 		Set("disable-renderer-backgrounding").
 		Set("window-size", fmt.Sprintf("%d,%d", in.width, in.height)).
 		Set("window-position", fmt.Sprintf("%d,%d", 20+in.id*48, 20+in.id*36)).
-		Set("user-agent", ua).
 		Set("lang", "zh-CN").
 		Set("accept-lang", "zh-CN,zh;q=0.9,en;q=0.8").
 		Env(append(os.Environ(),
@@ -152,8 +142,11 @@ func (in *instance) ensureLocked(ctx context.Context) error {
 		)...)
 
 	// Hide the "Chrome is being controlled by automated test software" banner.
+	// Do not pass --user-agent: headed Chrome 151 emits its own UA/TLS stack.
+	// Do not disable site isolation (real Chrome keeps IsolateOrigins / site-per-process).
 	l.Delete("enable-automation")
 	l.Delete("no-startup-window")
+	l.Delete("disable-site-isolation-trials")
 	l.Set("excludeSwitches", "enable-automation")
 
 	// Never bind the launcher to a per-request context: cancelling it
@@ -233,18 +226,10 @@ func (in *instance) stealthPage(b *rod.Browser) (*rod.Page, error) {
 func (in *instance) humanizePage(page *rod.Page) {
 	w, h := in.width, in.height
 	if w <= 0 {
-		w = 1280
+		w = viewportWidth
 	}
 	if h <= 0 {
-		h = 800
-	}
-	w += rand.Intn(17) - 8
-	h += rand.Intn(13) - 6
-	if w < 1100 {
-		w = 1100
-	}
-	if h < 700 {
-		h = 700
+		h = viewportHeight
 	}
 	_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
 		Width:             w,
@@ -256,16 +241,17 @@ func (in *instance) humanizePage(page *rod.Page) {
 	_ = proto.EmulationSetLocaleOverride{Locale: "zh-CN"}.Call(page)
 	ua := in.ua
 	if ua == "" {
-		ua = chromeUA()
+		ua = chromeUAForBin(in.opts.Bin)
 	}
+	_, full := normalizeChromeVersion(chromeFullVersion(in.opts.Bin))
 	_ = proto.NetworkSetUserAgentOverride{
 		UserAgent:         ua,
 		AcceptLanguage:    "zh-CN,zh;q=0.9,en;q=0.8",
 		Platform:          "Linux x86_64",
-		UserAgentMetadata: chromeClientHints(chromeMajor()),
+		UserAgentMetadata: chromeClientHints(full),
 	}.Call(page)
 	_, _ = page.Eval(StealthJS)
-	log.Printf("humanize step=stealth instance=%d viewport=%dx%d tz=Asia/Shanghai lang=zh-CN", in.id, w, h)
+	log.Printf("humanize step=stealth instance=%d viewport=%dx%d ua=%q tz=Asia/Shanghai lang=zh-CN", in.id, w, h, ua)
 }
 
 func (in *instance) keepSpare(b *rod.Browser) {

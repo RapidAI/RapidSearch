@@ -3,15 +3,23 @@ package browser
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/go-rod/rod/lib/proto"
 )
 
+const (
+	viewportWidth  = 1280
+	viewportHeight = 800
+	fallbackMajor  = "151"
+)
+
 // StealthJS is injected on every new document. It reinforces go-rod/stealth
-// and keeps the fingerprint consistent with a headed Linux Chrome (zh-CN).
-// It must never advertise HeadlessChrome. SwiftShader/llvmpipe cannot be
-// swapped for a real GPU; we only rewrite those strings.
+// and keeps the fingerprint consistent with this headed Linux Chrome (zh-CN).
+// It must never advertise HeadlessChrome. WebGL must not claim a discrete GPU
+// this process does not have (SwiftShader/ANGLE on the host); we only strip
+// HeadlessChrome from renderer strings.
 const StealthJS = `() => {
   const spoof = (obj, key, value) => {
     try {
@@ -31,6 +39,28 @@ const StealthJS = `() => {
     const ua = String(navigator.userAgent || '').replace(/HeadlessChrome/g, 'Chrome');
     spoof(navigator, 'userAgent', ua);
     spoof(navigator, 'appVersion', ua.replace(/^Mozilla\//, ''));
+  } catch (e) {}
+
+  try {
+    const uad = navigator.userAgentData;
+    if (uad) {
+      spoof(uad, 'mobile', false);
+      spoof(uad, 'platform', 'Linux');
+      const brands = (uad.brands || []).map((b) => ({
+        brand: String(b.brand || '').replace(/HeadlessChrome/g, 'Chrome'),
+        version: b.version
+      }));
+      spoof(uad, 'brands', brands);
+    }
+  } catch (e) {}
+
+  try {
+    spoof(screen, 'width', 1280);
+    spoof(screen, 'height', 800);
+    spoof(screen, 'availWidth', 1280);
+    spoof(screen, 'availHeight', 800);
+    spoof(screen, 'colorDepth', 24);
+    spoof(screen, 'pixelDepth', 24);
   } catch (e) {}
 
   try {
@@ -73,12 +103,9 @@ const StealthJS = `() => {
     if (!proto || !proto.getParameter) return;
     const orig = proto.getParameter;
     proto.getParameter = function (p) {
-      const VENDOR = 0x9245, RENDERER = 0x9246;
-      if (p === VENDOR) return 'Intel Inc.';
-      if (p === RENDERER) return 'Mesa Intel(R) UHD Graphics (CML GT2)';
       const v = orig.apply(this, arguments);
-      if (typeof v === 'string' && /HeadlessChrome|SwiftShader|llvmpipe/i.test(v)) {
-        return v.replace(/HeadlessChrome/ig, 'Chrome').replace(/SwiftShader/ig, 'UHD Graphics').replace(/llvmpipe/ig, 'UHD Graphics');
+      if (typeof v === 'string' && /HeadlessChrome/i.test(v)) {
+        return v.replace(/HeadlessChrome/ig, 'Chrome');
       }
       return v;
     };
@@ -98,54 +125,135 @@ const StealthJS = `() => {
   } catch (e) {}
 }`
 
-func chromeMajor() string {
-	major := "151"
-	if out, err := exec.Command("google-chrome-stable", "--version").Output(); err == nil {
-		var maj, min, build, patch int
-		if _, err := fmt.Sscanf(string(out), "Google Chrome %d.%d.%d.%d", &maj, &min, &build, &patch); err == nil && maj > 0 {
-			major = fmt.Sprintf("%d", maj)
-		}
-	} else if out, err := exec.Command("chromium", "--version").Output(); err == nil {
-		s := string(out)
-		for _, prefix := range []string{"Chromium ", "Chrome "} {
-			if i := strings.Index(s, prefix); i >= 0 {
-				var maj int
-				if _, err := fmt.Sscanf(s[i+len(prefix):], "%d", &maj); err == nil && maj > 0 {
-					major = fmt.Sprintf("%d", maj)
-				}
-			}
+var greaseChars = []string{" ", "(", ":", "-", ".", "/", ")", ";", "=", "?", "_"}
+var greaseVersions = []string{"8", "99", "24"}
+
+// parseChromeVersionOutput extracts a four-part version from `chrome --version` output.
+func parseChromeVersionOutput(out string) (full string, ok bool) {
+	for _, f := range strings.Fields(out) {
+		f = strings.Trim(f, ",;")
+		var a, b, c, d int
+		n, err := fmt.Sscanf(f, "%d.%d.%d.%d", &a, &b, &c, &d)
+		if err == nil && n == 4 && a > 0 {
+			return fmt.Sprintf("%d.%d.%d.%d", a, b, c, d), true
 		}
 	}
+	return "", false
+}
+
+func normalizeChromeVersion(v string) (major, full string) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallbackMajor, fallbackMajor + ".0.0.0"
+	}
+	parts := strings.Split(v, ".")
+	if parts[0] == "" {
+		return fallbackMajor, fallbackMajor + ".0.0.0"
+	}
+	major = parts[0]
+	if len(parts) >= 4 {
+		return major, strings.Join(parts[:4], ".")
+	}
+	return major, major + ".0.0.0"
+}
+
+func chromeFullVersion(bin string) string {
+	try := []string{bin, "google-chrome-stable", "google-chrome", "chromium", "chromium-browser"}
+	seen := map[string]bool{}
+	for _, c := range try {
+		c = strings.TrimSpace(c)
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		out, err := exec.Command(c, "--version").Output()
+		if err != nil {
+			continue
+		}
+		if full, ok := parseChromeVersionOutput(string(out)); ok {
+			return full
+		}
+	}
+	return fallbackMajor + ".0.0.0"
+}
+
+func chromeMajor() string {
+	major, _ := normalizeChromeVersion(chromeFullVersion(""))
 	return major
 }
 
-func chromeUA() string {
-	major := chromeMajor()
-	return fmt.Sprintf("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36", major)
+func formatChromeUA(full string) string {
+	_, full = normalizeChromeVersion(full)
+	return fmt.Sprintf("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", full)
 }
 
-func chromeClientHints(major string) *proto.EmulationUserAgentMetadata {
-	if major == "" {
-		major = chromeMajor()
+func chromeUA() string {
+	return formatChromeUA(chromeFullVersion(findChrome()))
+}
+
+func chromeUAForBin(bin string) string {
+	if bin == "" {
+		bin = findChrome()
 	}
-	full := major + ".0.0.0"
+	return formatChromeUA(chromeFullVersion(bin))
+}
+
+func greaseBrand(seed int) (brand, majorVer, fullVer string) {
+	if seed < 0 {
+		seed = 0
+	}
+	n := len(greaseChars)
+	brand = "Not" + greaseChars[seed%n] + "A" + greaseChars[(seed+1)%n] + "Brand"
+	majorVer = greaseVersions[seed%len(greaseVersions)]
+	fullVer = majorVer + ".0.0.0"
+	return
+}
+
+func shuffleBrandList(items [3]*proto.EmulationUserAgentBrandVersion, seed int) []*proto.EmulationUserAgentBrandVersion {
+	orders := [6][3]int{
+		{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
+	}
+	if seed < 0 {
+		seed = 0
+	}
+	order := orders[seed%6]
+	out := make([]*proto.EmulationUserAgentBrandVersion, 3)
+	for i, item := range items {
+		out[order[i]] = item
+	}
+	return out
+}
+
+func chromeClientHints(full string) *proto.EmulationUserAgentMetadata {
+	if strings.TrimSpace(full) == "" {
+		full = chromeFullVersion("")
+	}
+	major, full := normalizeChromeVersion(full)
+	seed := 151
+	if n, err := strconv.Atoi(major); err == nil && n > 0 {
+		seed = n
+	}
+	gBrand, gMajor, gFull := greaseBrand(seed)
 	brand := func(b, v string) *proto.EmulationUserAgentBrandVersion {
 		return &proto.EmulationUserAgentBrandVersion{Brand: b, Version: v}
 	}
+	// Chromium GenerateBrandVersionList order before shuffle: GREASE, Chromium, Google Chrome.
+	brands := shuffleBrandList([3]*proto.EmulationUserAgentBrandVersion{
+		brand(gBrand, gMajor),
+		brand("Chromium", major),
+		brand("Google Chrome", major),
+	}, seed)
+	fullList := shuffleBrandList([3]*proto.EmulationUserAgentBrandVersion{
+		brand(gBrand, gFull),
+		brand("Chromium", full),
+		brand("Google Chrome", full),
+	}, seed)
 	return &proto.EmulationUserAgentMetadata{
-		Brands: []*proto.EmulationUserAgentBrandVersion{
-			brand("Not:A-Brand", "99"),
-			brand("Google Chrome", major),
-			brand("Chromium", major),
-		},
-		FullVersionList: []*proto.EmulationUserAgentBrandVersion{
-			brand("Not:A-Brand", "10.0.0.4"),
-			brand("Google Chrome", full),
-			brand("Chromium", full),
-		},
+		Brands:          brands,
+		FullVersionList: fullList,
 		FullVersion:     full,
 		Platform:        "Linux",
-		PlatformVersion: "6.12.0",
+		PlatformVersion: "",
 		Architecture:    "x86",
 		Model:           "",
 		Mobile:          false,
