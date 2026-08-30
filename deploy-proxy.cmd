@@ -46,4 +46,4 @@ if errorlevel 1 exit /b 1
 
 echo deploying to root@%SEARCH_PROXY_HOST% (ssh will prompt for root password once)...
 REM One ssh: stream linux binary + deploy-proxy-remote.sh. type is not binary-safe, so tar is used.
-tar -cf - search-proxy deploy-proxy-remote.sh | ssh -o StrictHostKeyChecking=accept-new root@%SEARCH_PROXY_HOST% "tar -xf - -C /tmp && mv -f /tmp/search-proxy /tmp/search-proxy.new && bash /tmp/deploy-proxy-remote.sh"
+tar -cf - search-proxy deploy-proxy-remote.sh | ssh -o StrictHostKeyChecking=accept-new root@%SEARCH_PROXY_HOST% "tar -xf - -C /tmp && mv -f /tmp/search-proxy /tmp/search-proxy.new && sed -i 's/\r$//' /tmp/deploy-proxy-remote.sh && bash /tmp/deploy-proxy-remote.sh"
