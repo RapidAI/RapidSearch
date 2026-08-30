@@ -13,12 +13,12 @@ import (
 )
 
 const (
-	indexName          = "index.json"
-	defaultTTL         = time.Hour
-	refreshEvery       = 5 * time.Minute
-	deferContentBytes  = 4 << 10 // strip landing-page content on first write if larger
-	maxBlobBytes       = 2 << 20
-	blobsDirName       = "blobs"
+	indexName         = "index.json"
+	defaultTTL        = time.Hour
+	refreshEvery      = 5 * time.Minute
+	deferContentBytes = 4 << 10 // strip landing-page content on first write if larger
+	maxBlobBytes      = 2 << 20
+	blobsDirName      = "blobs"
 )
 
 // Payload is the cacheable success body (no took_ms / cached flags).
@@ -27,6 +27,7 @@ type Payload struct {
 	Engine          string          `json:"engine"`
 	RequestedEngine string          `json:"requested_engine"`
 	Tried           []string        `json:"tried"`
+	Skipped         []string        `json:"skipped,omitempty"`
 	Results         []search.Result `json:"results"`
 	Count           int             `json:"count"`
 }
@@ -43,8 +44,8 @@ type Stats struct {
 }
 
 type Options struct {
-	Dir      string
-	TTL      time.Duration
+	Dir string
+	TTL time.Duration
 	// MaxBytes, if > 0, overrides the Statfs-derived budget (tests).
 	MaxBytes int64
 	Now      func() time.Time

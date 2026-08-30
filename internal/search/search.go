@@ -51,11 +51,13 @@ func CodeOf(err error) string {
 }
 
 const (
-	CodeCaptcha    = "captcha"
-	CodeTimeout    = "timeout"
-	CodeParse      = "parse"
-	CodeBadRequest = "bad_request"
-	CodeEngine     = "engine"
+	CodeCaptcha      = "captcha"
+	CodeTimeout      = "timeout"
+	CodeParse        = "parse"
+	CodeBadRequest   = "bad_request"
+	CodeEngine       = "engine"
+	CodeOffline      = "offline"
+	CodeUnauthorized = "unauthorized"
 )
 
 // Engine metadata.

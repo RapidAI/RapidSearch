@@ -66,14 +66,16 @@ curl -sS -X POST http://127.0.0.1:18765/search \
   -d '{"query":"golang http server","engine":"google","limit":5}'
 ```
 
-Success:
+Success (HTTP 200):
 
 ```json
 {
+  "ok": true,
   "query": "golang http server",
   "engine": "bing",
   "requested_engine": "auto",
-  "tried": ["google", "bing"],
+  "tried": ["bing"],
+  "skipped": ["google"],
   "results": [
     {
       "rank": 1,
@@ -89,9 +91,23 @@ Success:
 }
 ```
 
-`engine` is the engine that actually produced results (never `"auto"`). `requested_engine` is what the caller asked for. `tried` lists every engine attempted.
+`ok` is always `true` on HTTP 200. `engine` is the engine that actually produced results (never `"auto"`). `requested_engine` is what the caller asked for. `tried` lists every engine attempted. `skipped` is present when the Google circuit breaker dropped Google from an auto/fallback chain (so Bing winning is expected, not a silent engine swap).
 
-Errors: HTTP 4xx/5xx with `{"error":"...","code":"captcha"|"timeout"|"parse"|"bad_request"|"engine"}`.
+**Non-200 is a failure.** Do not treat HTTP 4xx/5xx as “no hits”. The discriminator is `code`, not an empty `results` array. Engine failure (captcha, timeout, parse, offline) is **never** HTTP 200 with `results: []`. A genuine zero-hit success would be HTTP 200 + `ok: true` + empty `results`; this service currently returns an error instead of 200-empty when the engine fails to parse organic hits.
+
+Errors: HTTP 4xx/5xx with:
+
+```json
+{
+  "ok": false,
+  "error": "search blocked by captcha",
+  "code": "captcha",
+  "engine": "google",
+  "tried": ["google"]
+}
+```
+
+`code` is one of `captcha` | `timeout` | `parse` | `offline` | `unauthorized` | `engine` | `bad_request`. `error` is short English. `engine` is the last engine tried when known. Error responses are not cached.
 
 
 ## Result cache / 结果缓存
@@ -100,8 +116,8 @@ Successful search JSON (after preprocess) is stored under `./cache` on disk. Err
 
 成功的搜索 JSON（预处理后）写入 `./cache`。错误、验证码、超时、空结果不缓存。
 
-- Key = SHA-256 of normalized query + engine + limit + content flag + region/locale/hl + fallback. `content=0` and `content=1` are different keys.
-- 缓存键 = 规范化查询 + 引擎 + limit + content + region/locale/hl + fallback 的 SHA-256。`content=0` 与 `content=1` 是不同的键。
+- Key = SHA-256 of `v3|` + normalized query + engine + limit + content flag + region/locale/hl + fallback. `content=0` and `content=1` are different keys. Version bump avoids serving pre-`ok` bodies as `ok: false`.
+- 缓存键 = `v3|` + 规范化查询 + 引擎 + limit + content + region/locale/hl + fallback 的 SHA-256。`content=0` 与 `content=1` 是不同的键。
 - Eviction is LFU then LRU. TTL default **1 hour** (`CACHE_TTL`, e.g. `1h`).
 - 淘汰：先 LFU 再 LRU。TTL 默认 1 小时（`CACHE_TTL`）。
 - **Disk budget**: `syscall.Statfs` on the cache dir. Budget = clamp(5% of filesystem size, 64MB min, 2GB max) **and** never more than 25% of currently free space. Recomputed on start, every 5 minutes, and before write.
@@ -166,11 +182,15 @@ Failover chains (next engine on captcha, timeout, parse error, or empty results;
 
 Google is **not** on the China chain (captcha-prone here, wrong corpus).
 
+**Google circuit breaker** (process-wide, in addition to per-instance quarantine): after a Google captcha or “no Google Chrome instance”, auto/fallback chains **skip Google for ~15 minutes** (global becomes `bing` → `duckduckgo`). A half-open probe allows one Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` is still attempted: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait), or skips to the next engine when `fallback=1`.
+
+**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts on another Chrome instance in parallel (cap 2 in-flight engines per request). First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
+
 Explicit `engine=google|bing|baidu|duckduckgo` is predictable: no failover unless `fallback=1`. Auto defaults to failover on (`fallback=0` disables it).
 
-Per-try Chrome timeout ~40s; whole request ~3 min. One engine per `mgr.Do` (that instance’s SERP slot released between attempts). Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
+Per-try Chrome timeout ~40s; whole request ~3 min. Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/DDG）。缓存命中、预处理和正文抽取不受此限制。
+Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -256,7 +276,7 @@ Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy
 
 Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight SERPs = instance count. `SEARCH_BROWSER_SLOTS` if set caps that total (`min(instances, slots)`); per-process is always 1.
 
-Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). The next Google uses a non-quarantined instance, or the engine schedule failovers (already baidu/bing/ddg).
+Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). A **process-wide Google breaker** then skips Google on auto/fallback for ~15 minutes so later requests do not queue behind captcha. Hedged failover may start the next engine after ~3s on another instance (max 2 in-flight engines per request).
 
 Instances launch lazily (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone; the pool is not killed. Downloads (`WithPage`) use any idle instance and do not take a SERP slot.
 

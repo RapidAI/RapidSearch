@@ -173,16 +173,16 @@ func (h *hub) authorized(r *http.Request) bool {
 
 func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodHead {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed", "code": "bad_request"})
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", "bad_request")
 		return
 	}
 	if !h.authorized(r) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized", "code": "unauthorized"})
+		writeErr(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
 		return
 	}
 	s := h.current()
 	if s == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "search backend offline", "code": "offline"})
+		writeErr(w, http.StatusServiceUnavailable, "search backend offline", "offline")
 		return
 	}
 
@@ -228,15 +228,15 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.roundTrip(ctx, fr)
 	if err != nil {
 		if err == errReplaced || strings.Contains(err.Error(), "offline") {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "search backend offline", "code": "offline"})
+			writeErr(w, http.StatusServiceUnavailable, "search backend offline", "offline")
 			return
 		}
 		log.Printf("proxy forward %s %s: %v", r.Method, path, err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "tunnel error", "code": "tunnel"})
+		writeErr(w, http.StatusBadGateway, "tunnel error", "tunnel")
 		return
 	}
 	if resp.Error != "" && resp.Status == 0 {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "backend error", "code": "tunnel"})
+		writeErr(w, http.StatusBadGateway, "backend error", "tunnel")
 		return
 	}
 	raw, err := base64.StdEncoding.DecodeString(resp.Body)
@@ -265,7 +265,7 @@ func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "search backend offline", "code": "offline"})
+		writeErr(w, http.StatusServiceUnavailable, "search backend offline", "offline")
 		return
 	}
 	s.pend[fr.ID] = ch
@@ -280,7 +280,7 @@ func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session
 		}()
 	}()
 	if err := s.write(fr); err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "tunnel error", "code": "tunnel"})
+		writeErr(w, http.StatusBadGateway, "tunnel error", "tunnel")
 		return
 	}
 	wroteHead := false
@@ -288,7 +288,7 @@ func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session
 		select {
 		case <-ctx.Done():
 			if !wroteHead {
-				writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "download timed out", "code": "timeout"})
+				writeErr(w, http.StatusGatewayTimeout, "download timed out", "timeout")
 			}
 			return
 		case f, ok := <-ch:
@@ -350,7 +350,7 @@ func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session
 			case tunnel.TypeRespEnd:
 				if !wroteHead {
 					if f.Error != "" {
-						writeJSON(w, http.StatusBadGateway, map[string]string{"error": "download failed", "code": "fetch"})
+						writeErr(w, http.StatusBadGateway, "download failed", "fetch")
 					} else {
 						w.WriteHeader(http.StatusOK)
 					}
@@ -463,6 +463,16 @@ func (s *session) close(err error) {
 	}
 	s.mu.Unlock()
 	_ = s.conn.Close()
+}
+
+type proxyErr struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+func writeErr(w http.ResponseWriter, status int, msg, code string) {
+	writeJSON(w, status, proxyErr{OK: false, Error: msg, Code: code})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

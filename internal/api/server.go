@@ -25,10 +25,15 @@ type Server struct {
 	dl       *download.Downloader
 	mux      *http.ServeMux
 	flight   flightGroup
+	breaker  *search.GoogleBreaker
+	// hedgeAfter overrides the 3s hedged-failover delay (tests).
+	hedgeAfter time.Duration
+	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
+	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
 }
 
 func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Downloader) http.Handler {
-	s := &Server{mgr: mgr, debugDir: debugDir, cache: c, dl: dl, mux: http.NewServeMux()}
+	s := &Server{mgr: mgr, debugDir: debugDir, cache: c, dl: dl, mux: http.NewServeMux(), breaker: search.DefaultGoogleBreaker()}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
 	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
@@ -46,7 +51,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
 	if s.cache == nil {
@@ -58,11 +63,11 @@ func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodHead {
-		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
 	if s.dl == nil {
-		writeErr(w, http.StatusBadGateway, "download not configured", "fetch", nil)
+		writeErr(w, http.StatusBadGateway, "download not configured", "fetch", nil, "")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.dl.Timeout())
@@ -81,10 +86,12 @@ type postBody struct {
 }
 
 type successBody struct {
+	OK              bool            `json:"ok"`
 	Query           string          `json:"query"`
 	Engine          string          `json:"engine"`
 	RequestedEngine string          `json:"requested_engine"`
 	Tried           []string        `json:"tried"`
+	Skipped         []string        `json:"skipped,omitempty"`
 	Results         []search.Result `json:"results"`
 	Count           int             `json:"count"`
 	TookMs          int64           `json:"took_ms"`
@@ -93,9 +100,11 @@ type successBody struct {
 }
 
 type errBody struct {
-	Error string   `json:"error"`
-	Code  string   `json:"code"`
-	Tried []string `json:"tried,omitempty"`
+	OK     bool     `json:"ok"`
+	Error  string   `json:"error"`
+	Code   string   `json:"code"`
+	Engine string   `json:"engine,omitempty"`
+	Tried  []string `json:"tried,omitempty"`
 }
 
 const (
@@ -105,7 +114,7 @@ const (
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil)
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
 
@@ -141,7 +150,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		var body postBody
 		dec := json.NewDecoder(r.Body)
 		if err := dec.Decode(&body); err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid json body", search.CodeBadRequest, nil)
+			writeErr(w, http.StatusBadRequest, "invalid json body", search.CodeBadRequest, nil, "")
 			return
 		}
 		q = body.Query
@@ -160,12 +169,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	q = strings.TrimSpace(q)
 	if q == "" {
-		writeErr(w, http.StatusBadRequest, "query is required", search.CodeBadRequest, nil)
+		writeErr(w, http.StatusBadRequest, "query is required", search.CodeBadRequest, nil, "")
 		return
 	}
 	requested, err := search.NormalizeEngine(engine)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error(), search.CodeEngine, nil)
+		writeErr(w, http.StatusBadRequest, err.Error(), search.CodeEngine, nil, "")
 		return
 	}
 	limit = search.ClampLimit(limit)
@@ -174,7 +183,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	useFallback := search.ShouldFallback(requested, fallbackSet, fallback)
 	chain := search.Schedule(requested, useFallback, hints)
 	if len(chain) == 0 {
-		writeErr(w, http.StatusBadRequest, "no engines scheduled", search.CodeEngine, nil)
+		writeErr(w, http.StatusBadRequest, "no engines scheduled", search.CodeEngine, nil, "")
 		return
 	}
 
@@ -199,10 +208,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 			log.Printf("search cache=hit query=%q engine=%s content=%v age_ms=%d", shortQuery(q), requested, wantContent, age)
 			writeJSON(w, http.StatusOK, successBody{
+				OK:              true,
 				Query:           hit.Query,
 				Engine:          hit.Engine,
 				RequestedEngine: hit.RequestedEngine,
 				Tried:           hit.Tried,
+				Skipped:         hit.Skipped,
 				Results:         hit.Results,
 				Count:           hit.Count,
 				TookMs:          time.Since(start).Milliseconds(),
@@ -228,7 +239,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	out := v.(liveSearchOut)
 	if out.errStatus != 0 {
 		log.Printf("search query=%q requested=%s tried=%v count=0 took_ms=%d error=%s code=%s", shortQuery(q), requested, out.tried, time.Since(start).Milliseconds(), out.errMsg, out.errCode)
-		writeErr(w, out.errStatus, out.errMsg, out.errCode, out.tried)
+		writeErr(w, out.errStatus, out.errMsg, out.errCode, out.tried, out.errEngine)
 		return
 	}
 	body := out.body
@@ -241,7 +252,22 @@ type liveSearchOut struct {
 	errStatus int
 	errMsg    string
 	errCode   string
+	errEngine string
 	tried     []string
+}
+
+func (s *Server) googleBreaker() *search.GoogleBreaker {
+	if s != nil && s.breaker != nil {
+		return s.breaker
+	}
+	return search.DefaultGoogleBreaker()
+}
+
+func (s *Server) hedgeDelay() time.Duration {
+	if s != nil && s.hedgeAfter > 0 {
+		return s.hedgeAfter
+	}
+	return defaultHedgeDelay
 }
 
 func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, useFallback bool, chain []string, keyIn cache.KeyInput) liveSearchOut {
@@ -249,69 +275,47 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 	defer cancel()
 	start := time.Now()
 
-	var (
-		results   []search.Result
-		tried     []string
-		wonEngine string
-		lastErr   error
-	)
-
-	for _, eng := range chain {
-		if ctx.Err() != nil {
-			lastErr = ctx.Err()
-			break
-		}
-		tried = append(tried, eng)
-		log.Printf("search attempt engine=%s requested=%s query=%q fallback=%v chain=%v", eng, requested, shortQuery(q), useFallback, chain)
-
-		err := s.mgr.Do(ctx, eng, func(page *rod.Page) error {
-			searchCtx, cancelSearch := context.WithTimeout(ctx, perTryTimeout)
-			defer cancelSearch()
-			page = page.Context(searchCtx)
-			var e error
-			results, e = search.Run(page, eng, q, limit)
-			if e != nil && search.Is(e, search.CodeCaptcha) {
-				_ = s.mgr.Screenshot(page, "captcha-"+eng)
-			}
-			return e
-		})
-		if err == nil && len(results) > 0 {
-			wonEngine = eng
-			log.Printf("search attempt engine=%s ok count=%d", eng, len(results))
-			break
-		}
-		lastErr = err
-		if errors.Is(err, browser.ErrNoGoogleInstance) {
-			lastErr = search.NewError(search.CodeCaptcha, "all chrome instances quarantined from google")
-		}
-		if err == nil && len(results) == 0 {
-			lastErr = search.NewError(search.CodeParse, "no organic results parsed from "+eng)
-		}
-		code := search.CodeOf(lastErr)
-		log.Printf("search attempt engine=%s failed code=%s err=%v; next in chain", eng, code, lastErr)
-		results = nil
+	br := s.googleBreaker()
+	plan := br.Apply(requested, chain)
+	if len(plan.Skipped) > 0 {
+		log.Printf("google breaker=skip requested=%s skipped=%v chain=%v", requested, plan.Skipped, plan.Engines)
 	}
 
+	if plan.FailFast {
+		tried := plan.Engines
+		if len(tried) == 0 {
+			tried = []string{"google"}
+		}
+		return liveSearchOut{
+			errStatus: http.StatusForbidden,
+			errMsg:    clientMessage(search.CodeCaptcha, ""),
+			errCode:   search.CodeCaptcha,
+			errEngine: "google",
+			tried:     tried,
+		}
+	}
+	if len(plan.Engines) == 0 {
+		return liveSearchOut{
+			errStatus: http.StatusBadRequest,
+			errMsg:    "no engines scheduled",
+			errCode:   search.CodeEngine,
+			tried:     nil,
+		}
+	}
+
+	run := func(tryCtx context.Context, eng string) ([]search.Result, error) {
+		return s.runOneEngine(tryCtx, eng, q, limit)
+	}
+
+	wonEngine, results, tried, lastErr := runHedgedChain(ctx, plan.Engines, s.hedgeDelay(), run)
+
 	if wonEngine == "" {
-		if lastErr == nil {
-			lastErr = search.NewError(search.CodeParse, "all engines failed")
+		code, msg := classifyLiveErr(lastErr)
+		eng := ""
+		if len(tried) > 0 {
+			eng = tried[len(tried)-1]
 		}
-		code := search.CodeOf(lastErr)
-		msg := lastErr.Error()
-		if errors.Is(lastErr, context.DeadlineExceeded) || errors.Is(lastErr, context.Canceled) {
-			code = search.CodeTimeout
-			msg = "search timed out"
-		}
-		status := http.StatusBadGateway
-		switch code {
-		case search.CodeBadRequest, search.CodeEngine:
-			status = http.StatusBadRequest
-		case search.CodeTimeout:
-			status = http.StatusGatewayTimeout
-		case search.CodeCaptcha:
-			status = http.StatusForbidden
-		}
-		return liveSearchOut{errStatus: status, errMsg: msg, errCode: code, tried: tried}
+		return liveSearchOut{errStatus: liveErrStatus(code), errMsg: msg, errCode: code, errEngine: eng, tried: tried}
 	}
 
 	// Chrome slot already released. Filter/score (and optional HTTP fetch)
@@ -340,6 +344,7 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 			Engine:          wonEngine,
 			RequestedEngine: requested,
 			Tried:           tried,
+			Skipped:         plan.Skipped,
 			Results:         results,
 			Count:           len(results),
 		})
@@ -347,14 +352,50 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 
 	log.Printf("search query=%q engine=%s requested=%s tried=%v count=%d took_ms=%d content=%v error=", shortQuery(q), wonEngine, requested, tried, len(results), took, wantContent)
 	return liveSearchOut{body: successBody{
+		OK:              true,
 		Query:           q,
 		Engine:          wonEngine,
 		RequestedEngine: requested,
 		Tried:           tried,
+		Skipped:         plan.Skipped,
 		Results:         results,
 		Count:           len(results),
 		TookMs:          took,
 	}}
+}
+
+func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
+	tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+	defer cancel()
+
+	var results []search.Result
+	var err error
+	if s.runEngine != nil {
+		results, err = s.runEngine(tryCtx, eng, q, limit)
+	} else {
+		err = s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
+			page = page.Context(tryCtx)
+			var e error
+			results, e = search.Run(page, eng, q, limit)
+			if e != nil && search.Is(e, search.CodeCaptcha) {
+				_ = s.mgr.Screenshot(page, "captcha-"+eng)
+			}
+			return e
+		})
+	}
+	if errors.Is(err, browser.ErrNoGoogleInstance) {
+		err = search.NewError(search.CodeCaptcha, "all chrome instances quarantined from google")
+	}
+	if err == nil && len(results) == 0 {
+		err = search.NewError(search.CodeParse, "no organic results parsed from "+eng)
+	}
+	s.googleBreaker().Observe(eng, err)
+	if err != nil {
+		log.Printf("search attempt engine=%s failed code=%s err=%v", eng, search.CodeOf(err), err)
+		return nil, err
+	}
+	log.Printf("search attempt engine=%s ok count=%d", eng, len(results))
+	return results, nil
 }
 
 func cacheBypass(r *http.Request) bool {
@@ -391,8 +432,8 @@ func parseTruthy(v string) bool {
 	}
 }
 
-func writeErr(w http.ResponseWriter, status int, msg, code string, tried []string) {
-	writeJSON(w, status, errBody{Error: msg, Code: code, Tried: tried})
+func writeErr(w http.ResponseWriter, status int, msg, code string, tried []string, engine string) {
+	writeJSON(w, status, errBody{OK: false, Error: msg, Code: code, Engine: engine, Tried: tried})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
