@@ -372,16 +372,33 @@ func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]
 	var err error
 	if s.runEngine != nil {
 		results, err = s.runEngine(tryCtx, eng, q, limit)
+	} else if !search.NeedsChrome(eng) {
+		results, err = search.RunHTTP(tryCtx, eng, q, limit)
 	} else {
-		err = s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
-			page = page.Context(tryCtx)
-			var e error
-			results, e = search.Run(page, eng, q, limit)
-			if e != nil && search.Is(e, search.CodeCaptcha) {
-				_ = s.mgr.Screenshot(page, "captcha-"+eng)
+		if search.SupportsHTTP(eng) {
+			results, err = search.RunHTTP(tryCtx, eng, q, limit)
+			if err == nil && len(results) > 0 {
+				s.googleBreaker().Observe(eng, nil)
+				log.Printf("search attempt engine=%s ok count=%d via=http", eng, len(results))
+				return results, nil
 			}
-			return e
-		})
+			log.Printf("search attempt engine=%s http-miss code=%s; chrome fallback", eng, search.CodeOf(err))
+		}
+		if s.mgr == nil {
+			if err == nil {
+				err = search.NewError(search.CodeOffline, "chrome not configured")
+			}
+		} else {
+			err = s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
+				page = page.Context(tryCtx)
+				var e error
+				results, e = search.Run(page, eng, q, limit)
+				if e != nil && search.Is(e, search.CodeCaptcha) {
+					_ = s.mgr.Screenshot(page, "captcha-"+eng)
+				}
+				return e
+			})
+		}
 	}
 	if errors.Is(err, browser.ErrNoGoogleInstance) {
 		err = search.NewError(search.CodeCaptcha, "all chrome instances quarantined from google")

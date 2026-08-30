@@ -4,7 +4,7 @@ A search service for Agent.
 
 Local HTTP JSON API that searches the web by driving a real Chrome/Chromium window (go-rod + stealth). It does **not** call third-party search APIs.
 
-本地 HTTP JSON 接口：用真实 Chrome 打开搜索引擎首页，模拟输入并解析结果页。不调用 SerpAPI / CSE 等第三方搜索 API。默认 `engine=auto`：中文/中国相关走百度，其余走 Google，失败则按链 failover。
+本地 HTTP JSON 接口：用真实 Chrome 打开搜索引擎首页，模拟输入并解析结果页。不调用 SerpAPI / CSE 等第三方搜索 API。默认 `engine=auto`：中文/中国相关走百度→搜狗→360，其余走 DuckDuckGo HTML→Bing（Google 在熔断关闭时仍可试），失败则按链 failover。
 
 ## Run / 启动
 
@@ -35,7 +35,7 @@ Environment / 环境变量:
 
 `GET /health` → `{"ok":true}`
 
-`GET /search?q=<query>&engine=auto|google|bing|baidu|duckduckgo&n=10&content=1&fallback=1`
+`GET /search?q=<query>&engine=auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360&n=10&content=1&fallback=1`
 
 Optional routing hints: `region=cn`, `locale=zh`, `hl=zh-CN`.
 
@@ -155,13 +155,16 @@ Public proxy (Bearer token) also exposes `/download`; the relay streams the file
 
 ## Engines / 引擎
 
-| engine | homepage | aliases |
-|---|---|---|
-| `auto` (default when omitted) | (router) | |
-| `google` | https://www.google.com/ | |
-| `bing` | https://www.bing.com/ | |
-| `baidu` | https://www.baidu.com/ | `bd` |
-| `duckduckgo` | https://duckduckgo.com/ | `ddg`, `duck` |
+| engine | homepage / SERP | transport | aliases |
+|---|---|---|---|
+| `auto` (default when omitted) | (router) | | |
+| `google` | https://www.google.com/ | Chrome | |
+| `bing` | https://www.bing.com/ | Chrome | |
+| `baidu` | https://www.baidu.com/ | Chrome | `bd` |
+| `sogou` | https://www.sogou.com/web?query= | HTTP then Chrome | |
+| `360` | https://www.so.com/s?q= | HTTP then Chrome | `so360` |
+| `duckduckgo_html` | https://html.duckduckgo.com/html/ | HTTP only (no Chrome slot) | `ddg_html` |
+| `duckduckgo` | https://duckduckgo.com/ | Chrome (HTML is tried first) | `ddg`, `duck` |
 
 ### Auto routing / 自动调度
 
@@ -177,20 +180,20 @@ Failover chains (next engine on captcha, timeout, parse error, or empty results;
 
 | path | chain |
 |---|---|
-| China | `baidu` → `bing` → `duckduckgo` |
-| Global | `google` → `bing` → `duckduckgo` |
+| China | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` → `duckduckgo` |
+| Global | `duckduckgo_html` → `bing` → `google` → `duckduckgo` |
 
-Google is **not** on the China chain (captcha-prone here, wrong corpus).
+Google is **not** on the China chain (captcha-prone here, wrong corpus). Global tries DuckDuckGo HTML before Google so auto can succeed without waiting on a captcha. `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`) and does **not** take a Chrome SERP slot. If HTML returns 0 hits, Chrome DuckDuckGo remains later in the chain. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=duckduckgo_html` still work.
 
-**Google circuit breaker** (process-wide, in addition to per-instance quarantine): after a Google captcha or “no Google Chrome instance”, auto/fallback chains **skip Google for ~15 minutes** (global becomes `bing` → `duckduckgo`). A half-open probe allows one Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` is still attempted: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait), or skips to the next engine when `fallback=1`.
+**Google circuit breaker** (process-wide, in addition to per-instance quarantine): after a Google captcha or “no Google Chrome instance”, auto/fallback chains **skip Google for ~15 minutes** (global becomes `duckduckgo_html` → `bing` → `duckduckgo`). A half-open probe allows one Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` is still attempted: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait), or skips to the next engine when `fallback=1`.
 
-**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts on another Chrome instance in parallel (cap 2 in-flight engines per request). First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
+**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts in parallel (cap 2 in-flight engines per request). HTML engines (`duckduckgo_html`, and HTTP probes for sogou/360) do not take a Chrome instance slot. First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
 
-Explicit `engine=google|bing|baidu|duckduckgo` is predictable: no failover unless `fallback=1`. Auto defaults to failover on (`fallback=0` disables it).
+Explicit `engine=google|bing|baidu|sogou|360|duckduckgo_html` is predictable: no failover unless `fallback=1`. `engine=duckduckgo` still tries HTML then Chrome once. Auto defaults to failover on (`fallback=0` disables it).
 
 Per-try Chrome timeout ~40s; whole request ~3 min. Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
+Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。`duckduckgo_html` 与落地页抽取/下载一样不占 Chrome 槽。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/搜狗/360/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -284,8 +287,8 @@ Instances launch lazily (instance 0 on first search / Ensure; others when all bu
 
 ## Limitations / 限制
 
-- **CAPTCHA / unusual traffic**: Google in particular often flags datacenter IPs and automation. Auto mode failovers to Bing then DuckDuckGo. Explicit engine returns `code=captcha` (no loop unless `fallback=1`) and may save a PNG under `./debug/`. Baidu may show `wappass` / 安全验证 (same `code=captcha`). Bing is usually less aggressive.
-- Google 更容易出人机验证。`engine=auto` 会按链切到 Bing / DuckDuckGo。显式引擎默认不 failover。百度可能出现 `wappass` / 安全验证，同样返回 `code=captcha`。
+- **CAPTCHA / unusual traffic**: Google in particular often flags datacenter IPs and automation. Auto mode tries DuckDuckGo HTML and Bing before Google (China: Baidu → Sogou → 360 → Bing → DDG HTML). Explicit engine returns `code=captcha` (no loop unless `fallback=1`) and may save a PNG under `./debug/`. Baidu may show `wappass` / 安全验证 (same `code=captcha`). Bing is usually less aggressive.
+- Google 更容易出人机验证。`engine=auto` 全球链先走 DuckDuckGo HTML / Bing；中文链为百度 → 搜狗 → 360 → Bing → DDG HTML。显式引擎默认不 failover。百度可能出现 `wappass` / 安全验证，同样返回 `code=captcha`。
 - Organic results only; ads / “people also ask” are skipped as best-effort. Selectors change — parsers use fallbacks.
 - 只解析自然结果；广告和 PAA 尽量跳过。页面 DOM 会变，解析做了多选择器兜底。
 - Requires a working display (`DISPLAY`) and Chrome/Chromium. No GPU needed.

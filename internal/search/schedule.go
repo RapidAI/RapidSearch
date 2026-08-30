@@ -15,8 +15,8 @@ var cnIntentTokens = []string{
 // Failover chains. Google is omitted from the China chain: it is captcha-prone
 // here and not the right corpus for CN queries.
 var (
-	chinaChain  = []string{"baidu", "bing", "duckduckgo"}
-	globalChain = []string{"google", "bing", "duckduckgo"}
+	chinaChain  = []string{"baidu", "sogou", "360", "bing", "duckduckgo_html", "duckduckgo"}
+	globalChain = []string{"duckduckgo_html", "bing", "google", "duckduckgo"}
 )
 
 // RouteHints are optional API signals used with the query to pick a chain.
@@ -84,7 +84,11 @@ func ShouldFallback(requested string, fallbackSet, fallback bool) bool {
 }
 
 // Schedule returns the engine attempt list. requested is already normalized
-// (auto|google|bing|baidu|duckduckgo). The same engine is never listed twice.
+// (auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360). The same
+// engine is never listed twice.
+//
+// engine=duckduckgo is a transport split: HTML first (no Chrome slot), then
+// Chrome DDG even when fallback is off.
 func Schedule(requested string, fallback bool, h RouteHints) []string {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	china := IsChinaRoute(h)
@@ -100,11 +104,30 @@ func Schedule(requested string, fallback bool, h RouteHints) []string {
 		copy(out, chain)
 		return out
 	}
+	if requested == "duckduckgo" {
+		out := []string{"duckduckgo_html", "duckduckgo"}
+		if !fallback {
+			return out
+		}
+		base := globalChain
+		if china {
+			base = chinaChain
+		}
+		seen := map[string]bool{"duckduckgo_html": true, "duckduckgo": true}
+		for _, e := range base {
+			if seen[e] {
+				continue
+			}
+			seen[e] = true
+			out = append(out, e)
+		}
+		return out
+	}
 	if !fallback {
 		return []string{requested}
 	}
 	base := globalChain
-	if china || requested == "baidu" {
+	if china || requested == "baidu" || requested == "sogou" || requested == "360" {
 		base = chinaChain
 	}
 	out := []string{requested}

@@ -13,6 +13,8 @@ func enginePaceRange(engine string) (min, max time.Duration) {
 	switch strings.ToLower(strings.TrimSpace(engine)) {
 	case "google":
 		return 8 * time.Second, 15 * time.Second
+	case "duckduckgo_html":
+		return 200 * time.Millisecond, 800 * time.Millisecond
 	default:
 		return 1500 * time.Millisecond, 4 * time.Second
 	}

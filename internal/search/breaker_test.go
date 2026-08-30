@@ -13,14 +13,14 @@ func TestBreakerSkipsGoogleInAutoChain(t *testing.T) {
 	b.Trip()
 
 	chain := Schedule("auto", true, RouteHints{Query: "golang http server"})
-	if !reflect.DeepEqual(chain, []string{"google", "bing", "duckduckgo"}) {
+	if !reflect.DeepEqual(chain, []string{"duckduckgo_html", "bing", "google", "duckduckgo"}) {
 		t.Fatalf("global chain: %v", chain)
 	}
 	plan := b.Apply("auto", chain)
 	if containsEngine(plan.Engines, "google") {
 		t.Fatalf("auto chain still has google: %v", plan.Engines)
 	}
-	if !reflect.DeepEqual(plan.Engines, []string{"bing", "duckduckgo"}) {
+	if !reflect.DeepEqual(plan.Engines, []string{"duckduckgo_html", "bing", "duckduckgo"}) {
 		t.Fatalf("rewritten chain: %v", plan.Engines)
 	}
 	if !reflect.DeepEqual(plan.Skipped, []string{"google"}) {
@@ -51,7 +51,7 @@ func TestBreakerExplicitGoogleStillAttempted(t *testing.T) {
 	if containsEngine(fbPlan.Engines, "google") {
 		t.Fatalf("fallback should skip google: %v", fbPlan.Engines)
 	}
-	if fbPlan.Engines[0] != "bing" {
+	if fbPlan.Engines[0] != "duckduckgo_html" {
 		t.Fatalf("fallback first: %v", fbPlan.Engines)
 	}
 	if fbPlan.FailFast {

@@ -62,10 +62,12 @@ const (
 
 // Engine metadata.
 type Engine struct {
-	Name    string
-	HomeURL string
-	WaitSel string
-	Parse   func(*rod.Page, int) ([]Result, error)
+	Name     string
+	HomeURL  string
+	WaitSel  string
+	Parse    func(*rod.Page, int) ([]Result, error)
+	SERPURL  func(query string) string // if set, navigate directly to the SERP
+	HTTPOnly bool                      // HTML GET; must not take a Chrome SERP slot
 }
 
 var engines = map[string]Engine{
@@ -87,11 +89,30 @@ var engines = map[string]Engine{
 		WaitSel: `article[data-testid="result"], [data-testid="mainline"], [data-testid="web-vertical"], li[data-layout="organic"], #web_content_wrapper, .result, #links .result, ol.react-results--main`,
 		Parse:   parseDuckDuckGo,
 	},
+	"duckduckgo_html": {
+		Name:     "duckduckgo_html",
+		HomeURL:  "https://html.duckduckgo.com/html/",
+		HTTPOnly: true,
+	},
 	"baidu": {
 		Name:    "baidu",
 		HomeURL: "https://www.baidu.com/",
 		WaitSel: `#content_left .result, #content_left .c-container, h3.t a, #content_left, .result-op, #captcha, #wappass, iframe[src*="wappass"]`,
 		Parse:   parseBaidu,
+	},
+	"sogou": {
+		Name:    "sogou",
+		HomeURL: "https://www.sogou.com/",
+		WaitSel: `h3 a, .vrwrap, .rb a, #main, #captcha, .auth-box`,
+		Parse:   parseSogou,
+		SERPURL: func(q string) string { return engineSERPURL("sogou", q) },
+	},
+	"360": {
+		Name:    "360",
+		HomeURL: "https://www.so.com/",
+		WaitSel: `#main .res-list, #main h3 a, ul.result li, .res-list, #side, .e_idea`,
+		Parse:   parse360,
+		SERPURL: func(q string) string { return engineSERPURL("360", q) },
 	},
 }
 
@@ -102,14 +123,18 @@ func NormalizeEngine(s string) (string, error) {
 	if s == "" || s == "auto" {
 		return "auto", nil
 	}
-	if s == "ddg" || s == "duck" {
+	switch s {
+	case "ddg", "duck":
 		s = "duckduckgo"
-	}
-	if s == "bd" {
+	case "ddg_html", "duck_html", "duckduckgo-html":
+		s = "duckduckgo_html"
+	case "bd":
 		s = "baidu"
+	case "so360", "so.com", "so", "qihoo", "qihoo360":
+		s = "360"
 	}
 	if _, ok := engines[s]; !ok {
-		return "", NewError(CodeEngine, fmt.Sprintf("unsupported engine %q (use auto, google, bing, baidu, duckduckgo)", s))
+		return "", NewError(CodeEngine, fmt.Sprintf("unsupported engine %q (use auto, google, bing, baidu, duckduckgo, duckduckgo_html, sogou, 360)", s))
 	}
 	return s, nil
 }
@@ -148,9 +173,16 @@ func Run(page *rod.Page, engineName, query string, limit int) ([]Result, error) 
 	}
 	limit = ClampLimit(limit)
 	eng := engines[engName]
+	if eng.HTTPOnly || eng.Parse == nil {
+		return nil, NewError(CodeEngine, engName+" is HTTP-only; use RunHTTP")
+	}
 
 	PaceEngine(engName)
 	applyDocumentStealth(page)
+
+	if eng.SERPURL != nil {
+		return runDirectSERP(page, eng, query, limit)
+	}
 
 	if err := navigateHome(page, eng.HomeURL, eng.Name); err != nil {
 		if isTimeout(err) {
@@ -266,13 +298,68 @@ func onEngineHost(page *rod.Page, engine string) bool {
 		return strings.Contains(h, "google.")
 	case "bing":
 		return strings.Contains(h, "bing.com")
-	case "duckduckgo":
+	case "duckduckgo", "duckduckgo_html":
 		return strings.Contains(h, "duckduckgo.com")
 	case "baidu":
 		return strings.Contains(h, "baidu.com")
+	case "sogou":
+		return strings.Contains(h, "sogou.com")
+	case "360":
+		return h == "so.com" || strings.HasSuffix(h, ".so.com")
 	default:
 		return true
 	}
+}
+
+func runDirectSERP(page *rod.Page, eng Engine, query string, limit int) ([]Result, error) {
+	dest := eng.SERPURL(query)
+	if err := page.Timeout(20 * time.Second).Navigate(dest); err != nil {
+		if isTimeout(err) {
+			return nil, NewError(CodeTimeout, "timeout loading "+eng.Name+" results")
+		}
+		return nil, wrap(err)
+	}
+	_ = page.Timeout(8 * time.Second).WaitLoad()
+	applyDocumentStealth(page)
+	log.Printf("search step=serp engine=%s url=%s", eng.Name, pageURL(page))
+	waitIdleIsh(page)
+	dismissConsent(page)
+	if blocked, why := detectBlock(page); blocked {
+		return nil, NewError(CodeCaptcha, why)
+	}
+	if err := waitResults(page, eng.WaitSel); err != nil {
+		if blocked, why := detectBlock(page); blocked {
+			return nil, NewError(CodeCaptcha, why)
+		}
+		if isTimeout(err) {
+			return nil, NewError(CodeTimeout, "timeout waiting for "+eng.Name+" results")
+		}
+		return nil, wrap(err)
+	}
+	log.Printf("search step=results engine=%s url=%s", eng.Name, pageURL(page))
+	humanPause(200, 400)
+	humanScroll(page)
+	humanPause(250, 450)
+	if blocked, why := detectBlock(page); blocked {
+		return nil, NewError(CodeCaptcha, why)
+	}
+	results, err := eng.Parse(page, limit)
+	if err != nil {
+		return nil, wrap(err)
+	}
+	if len(results) == 0 {
+		if blocked, why := detectBlock(page); blocked {
+			return nil, NewError(CodeCaptcha, why)
+		}
+		return nil, NewError(CodeParse, "no organic results parsed from "+eng.Name)
+	}
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	for i := range results {
+		results[i].Rank = i + 1
+	}
+	return results, nil
 }
 
 func navigateHome(page *rod.Page, home, engine string) error {

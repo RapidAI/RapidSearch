@@ -278,6 +278,26 @@ func parseBaidu(page *rod.Page, limit int) ([]Result, error) {
 	return hits, nil
 }
 
+func parseSogou(page *rod.Page, limit int) ([]Result, error) {
+	return parsePageHTML(page, "sogou", limit, parseSogouHTML)
+}
+
+func parse360(page *rod.Page, limit int) ([]Result, error) {
+	return parsePageHTML(page, "360", limit, parse360HTML)
+}
+
+func parsePageHTML(page *rod.Page, engine string, limit int, fn func(string, int) []Result) ([]Result, error) {
+	html, err := page.HTML()
+	if err != nil {
+		return nil, NewError(CodeParse, engine+" html: "+err.Error())
+	}
+	hits := fn(html, limit)
+	if len(hits) == 0 {
+		return nil, NewError(CodeParse, "no organic results parsed from "+engine)
+	}
+	return hits, nil
+}
+
 func decodeHits(obj *proto.RuntimeRemoteObject, limit int, engine string) ([]Result, error) {
 	if obj == nil {
 		return nil, NewError(CodeParse, engine+": empty eval")
@@ -320,6 +340,9 @@ func decodeHits(obj *proto.RuntimeRemoteObject, limit int, engine string) ([]Res
 
 func cleanURL(raw, engine string) string {
 	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
 	if raw == "" || strings.HasPrefix(strings.ToLower(raw), "javascript:") {
 		return ""
 	}
@@ -396,6 +419,18 @@ func cleanURL(raw, engine string) string {
 			return u.String()
 		}
 		if u.Path == "/s" || u.Path == "/" || u.Path == "/baidu" || strings.HasPrefix(u.Path, "/s?") {
+			return ""
+		}
+	}
+
+	if strings.Contains(host, "sogou.com") {
+		if u.Path == "/web" || u.Path == "/" {
+			return ""
+		}
+	}
+
+	if host == "so.com" || strings.HasSuffix(host, ".so.com") {
+		if u.Path == "/s" || u.Path == "/" {
 			return ""
 		}
 	}

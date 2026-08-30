@@ -1,0 +1,50 @@
+package search
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestRunHTTPDuckDuckGoNoChrome(t *testing.T) {
+	body, err := os.ReadFile("testdata/duckduckgo_html.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := getSearchHTML
+	t.Cleanup(func() { getSearchHTML = orig })
+	var sawURL string
+	getSearchHTML = func(ctx context.Context, rawURL string) (string, int, error) {
+		sawURL = rawURL
+		if ctx.Err() != nil {
+			t.Fatal("ctx already done")
+		}
+		if !strings.Contains(rawURL, "duckduckgo.com/html") && !strings.Contains(rawURL, "html.duckduckgo.com") {
+			t.Fatalf("unexpected url %s", rawURL)
+		}
+		return string(body), 200, nil
+	}
+	hits, err := RunHTTP(context.Background(), "duckduckgo_html", "golang http server", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) < 2 {
+		t.Fatalf("hits=%+v", hits)
+	}
+	if sawURL == "" {
+		t.Fatal("HTTP getter was not called")
+	}
+	for _, h := range hits {
+		if strings.Contains(h.URL, "ads.example.com") {
+			t.Fatalf("ad in RunHTTP: %+v", h)
+		}
+	}
+}
+
+func TestRunHTTPUnsupportedEngine(t *testing.T) {
+	_, err := RunHTTP(context.Background(), "google", "golang", 5)
+	if err == nil {
+		t.Fatal("google should not have an HTTP SERP path")
+	}
+}

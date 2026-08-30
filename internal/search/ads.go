@@ -158,6 +158,16 @@ func serpSelfURL(host, path, rawQuery string) bool {
 			return true
 		}
 	}
+	if strings.Contains(host, "sogou.com") {
+		if path == "/web" || path == "/" {
+			return true
+		}
+	}
+	if host == "so.com" || strings.HasSuffix(host, ".so.com") {
+		if path == "/s" || path == "/" {
+			return true
+		}
+	}
 	return false
 }
 

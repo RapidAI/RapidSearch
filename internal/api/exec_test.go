@@ -100,3 +100,38 @@ func TestExecuteLiveSearchErrNoGoogleInstanceImmediateFailover(t *testing.T) {
 		t.Fatal("ErrNoGoogleInstance should trip google breaker")
 	}
 }
+
+func TestExecuteLiveSearchHTTPEngine(t *testing.T) {
+	var mu sync.Mutex
+	var saw []string
+	s := &Server{
+		breaker:    search.NewGoogleBreaker(),
+		hedgeAfter: time.Millisecond,
+		runEngine: func(ctx context.Context, engine, query string, limit int) ([]search.Result, error) {
+			mu.Lock()
+			saw = append(saw, engine)
+			mu.Unlock()
+			if engine != "duckduckgo_html" {
+				return nil, search.NewError(search.CodeParse, "chrome ddg skipped in test")
+			}
+			return []search.Result{{Title: "Go docs", URL: "https://go.dev/doc", Snippet: "golang http server docs"}}, nil
+		},
+	}
+	chain := search.Schedule("duckduckgo", false, search.RouteHints{Query: "golang http server"})
+	if len(chain) < 1 || chain[0] != "duckduckgo_html" {
+		t.Fatalf("chain=%v", chain)
+	}
+	out := s.executeLiveSearch("golang http server", "duckduckgo", 5, false, false, chain, cache.KeyInput{})
+	if out.errStatus != 0 {
+		t.Fatalf("err %d %s %s", out.errStatus, out.errCode, out.errMsg)
+	}
+	if out.body.Engine != "duckduckgo_html" {
+		t.Fatalf("engine=%s", out.body.Engine)
+	}
+	mu.Lock()
+	got := append([]string(nil), saw...)
+	mu.Unlock()
+	if len(got) == 0 || got[0] != "duckduckgo_html" {
+		t.Fatalf("saw=%v", got)
+	}
+}
