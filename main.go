@@ -12,6 +12,8 @@ import (
 
 	"search-service/internal/api"
 	"search-service/internal/browser"
+	"search-service/internal/cache"
+	"search-service/internal/download"
 )
 
 func main() {
@@ -56,7 +58,25 @@ func main() {
 		log.Printf("browser ready (display=%s profile=%s)", display, userData)
 	}()
 
-	handler := api.New(mgr, debugDir)
+	cacheDir := os.Getenv("CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = filepath.Join(base, "cache")
+	}
+	ttl := time.Hour
+	if v := os.Getenv("CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			ttl = d
+		}
+	}
+	cch, err := cache.Open(cache.Options{Dir: cacheDir, TTL: ttl})
+	if err != nil {
+		log.Fatalf("cache: %v", err)
+	}
+	defer cch.Close()
+
+	dl := download.New(mgr, cch)
+
+	handler := api.New(mgr, debugDir, cch, dl)
 
 	addr := "127.0.0.1:18765"
 	if v := os.Getenv("SEARCH_LISTEN"); v != "" {

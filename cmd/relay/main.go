@@ -174,8 +174,15 @@ func runOnce(ctx context.Context, addr, token, backend string, client *http.Clie
 			_ = write(tunnel.Frame{Type: "pong", ID: f.ID})
 		case "pong":
 			// keepalive
-		case "req":
+		case tunnel.TypeReq:
 			go func(f tunnel.Frame) {
+				if tunnel.PathIsDownload(f.Path) {
+					if err := streamBackend(ctx, client, backend, f, write); err != nil {
+						log.Printf("stream download id=%s: %v", f.ID, err)
+						_ = c.Close()
+					}
+					return
+				}
 				resp := doBackend(ctx, client, backend, f)
 				if err := write(resp); err != nil {
 					log.Printf("write resp id=%s: %v", f.ID, err)
@@ -235,4 +242,81 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 		Headers: hdrs,
 		Body:    base64.StdEncoding.EncodeToString(raw),
 	}
+}
+
+func streamBackend(ctx context.Context, client *http.Client, backend string, f tunnel.Frame, write func(tunnel.Frame) error) error {
+	path := f.Path
+	if path == "" {
+		path = "/"
+	}
+	rawURL := backend + path
+	var body io.Reader
+	if f.Body != "" {
+		b, err := base64.StdEncoding.DecodeString(f.Body)
+		if err != nil {
+			b = []byte(f.Body)
+		}
+		body = bytes.NewReader(b)
+	}
+	method := f.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	if err != nil {
+		return write(tunnel.Frame{Type: tunnel.TypeRespEnd, ID: f.ID, Status: 502, Error: err.Error()})
+	}
+	for k, v := range f.Headers {
+		lk := strings.ToLower(k)
+		if lk == "host" || lk == "authorization" || lk == "content-length" {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
+	log.Printf("backend stream %s %s", method, path)
+	res, err := client.Do(req)
+	if err != nil {
+		_ = write(tunnel.Frame{Type: tunnel.TypeRespHead, ID: f.ID, Status: 502, Headers: map[string]string{"Content-Type": "application/json; charset=utf-8"}})
+		_ = write(tunnel.Frame{Type: tunnel.TypeRespChunk, ID: f.ID, Body: base64.StdEncoding.EncodeToString([]byte(`{"error":"download failed","code":"fetch"}`))})
+		return write(tunnel.Frame{Type: tunnel.TypeRespEnd, ID: f.ID, Error: err.Error()})
+	}
+	defer res.Body.Close()
+
+	hdrs := map[string]string{}
+	for k, vs := range res.Header {
+		lk := strings.ToLower(k)
+		if lk == "transfer-encoding" || lk == "content-length" {
+			continue
+		}
+		if len(vs) > 0 {
+			hdrs[k] = vs[0]
+		}
+	}
+	// Keep content-length when known so clients can show progress.
+	if res.ContentLength > 0 {
+		hdrs["Content-Length"] = fmt.Sprintf("%d", res.ContentLength)
+	}
+	if err := write(tunnel.Frame{Type: tunnel.TypeRespHead, ID: f.ID, Status: res.StatusCode, Headers: hdrs}); err != nil {
+		return err
+	}
+	buf := make([]byte, tunnel.StreamChunk)
+	for {
+		n, err := res.Body.Read(buf)
+		if n > 0 {
+			if werr := write(tunnel.Frame{
+				Type: tunnel.TypeRespChunk,
+				ID:   f.ID,
+				Body: base64.StdEncoding.EncodeToString(buf[:n]),
+			}); werr != nil {
+				return werr
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return write(tunnel.Frame{Type: tunnel.TypeRespEnd, ID: f.ID, Error: err.Error()})
+		}
+	}
+	return write(tunnel.Frame{Type: tunnel.TypeRespEnd, ID: f.ID})
 }

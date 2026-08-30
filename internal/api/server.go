@@ -13,19 +13,25 @@ import (
 	"github.com/go-rod/rod"
 
 	"search-service/internal/browser"
+	"search-service/internal/cache"
+	"search-service/internal/download"
 	"search-service/internal/search"
 )
 
 type Server struct {
 	mgr      *browser.Manager
 	debugDir string
+	cache    *cache.Cache
+	dl       *download.Downloader
 	mux      *http.ServeMux
 }
 
-func New(mgr *browser.Manager, debugDir string) http.Handler {
-	s := &Server{mgr: mgr, debugDir: debugDir, mux: http.NewServeMux()}
+func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Downloader) http.Handler {
+	s := &Server{mgr: mgr, debugDir: debugDir, cache: c, dl: dl, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
+	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
+	s.mux.HandleFunc("/download", s.handleDownload)
 	return s
 }
 
@@ -35,6 +41,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleCacheStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil)
+		return
+	}
+	if s.cache == nil {
+		writeJSON(w, http.StatusOK, cache.Stats{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cache.Stats())
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodHead {
+		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil)
+		return
+	}
+	if s.dl == nil {
+		writeErr(w, http.StatusBadGateway, "download not configured", "fetch", nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.dl.Timeout())
+	defer cancel()
+	s.dl.Serve(ctx, w, r)
 }
 
 type postBody struct {
@@ -55,6 +87,8 @@ type successBody struct {
 	Results         []search.Result `json:"results"`
 	Count           int             `json:"count"`
 	TookMs          int64           `json:"took_ms"`
+	Cached          bool            `json:"cached,omitempty"`
+	CacheAgeMs      int64           `json:"cache_age_ms,omitempty"`
 }
 
 type errBody struct {
@@ -143,12 +177,49 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	keyIn := cache.KeyInput{
+		Query:    q,
+		Engine:   requested,
+		Limit:    limit,
+		Content:  wantContent,
+		Region:   region,
+		Locale:   locale,
+		HL:       hl,
+		Fallback: useFallback,
+	}
+	bypass := cacheBypass(r)
+
+	start := time.Now()
+	if s.cache != nil && !bypass {
+		if hit, stored, ok := s.cache.Get(keyIn); ok {
+			age := time.Since(stored).Milliseconds()
+			if age < 0 {
+				age = 0
+			}
+			log.Printf("search cache=hit query=%q engine=%s content=%v age_ms=%d", shortQuery(q), requested, wantContent, age)
+			writeJSON(w, http.StatusOK, successBody{
+				Query:           hit.Query,
+				Engine:          hit.Engine,
+				RequestedEngine: hit.RequestedEngine,
+				Tried:           hit.Tried,
+				Results:         hit.Results,
+				Count:           hit.Count,
+				TookMs:          time.Since(start).Milliseconds(),
+				Cached:          true,
+				CacheAgeMs:      age,
+			})
+			return
+		}
+		log.Printf("search cache=miss query=%q engine=%s content=%v", shortQuery(q), requested, wantContent)
+	} else if bypass {
+		log.Printf("search cache=bypass query=%q engine=%s", shortQuery(q), requested)
+	}
+
 	// Whole request ~3 min (WriteTimeout is 3 min). Each Chrome attempt is
 	// ~40s so a 3-engine chain plus preprocess still fits.
 	ctx, cancel := context.WithTimeout(r.Context(), handlerTimeout)
 	defer cancel()
 
-	start := time.Now()
 	var (
 		results   []search.Result
 		tried     []string
@@ -162,7 +233,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		tried = append(tried, eng)
-		log.Printf("search attempt engine=%s requested=%s query=%q fallback=%v chain=%v", eng, requested, q, useFallback, chain)
+		log.Printf("search attempt engine=%s requested=%s query=%q fallback=%v chain=%v", eng, requested, shortQuery(q), useFallback, chain)
 
 		err := s.mgr.Do(ctx, func(page *rod.Page) error {
 			searchCtx, cancelSearch := context.WithTimeout(ctx, perTryTimeout)
@@ -209,7 +280,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		case search.CodeCaptcha:
 			status = http.StatusForbidden
 		}
-		log.Printf("search query=%q requested=%s tried=%v count=0 took_ms=%d error=%s code=%s", q, requested, tried, took, msg, code)
+		log.Printf("search query=%q requested=%s tried=%v count=0 took_ms=%d error=%s code=%s", shortQuery(q), requested, tried, took, msg, code)
 		writeErr(w, status, msg, code, tried)
 		return
 	}
@@ -224,7 +295,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	})
 	took := time.Since(start).Milliseconds()
 
-	log.Printf("search query=%q engine=%s requested=%s tried=%v count=%d took_ms=%d content=%v error=", q, wonEngine, requested, tried, len(results), took, wantContent)
+	if len(results) > 0 && s.dl != nil {
+		urls := make([]string, 0, len(results))
+		for _, r := range results {
+			if r.URL != "" {
+				urls = append(urls, r.URL)
+			}
+		}
+		s.dl.RememberSearchURLs(urls)
+	}
+
+	// Persist after Chrome is released. Do not cache empty / error bodies.
+	if s.cache != nil && len(results) > 0 {
+		s.cache.Put(keyIn, cache.Payload{
+			Query:           q,
+			Engine:          wonEngine,
+			RequestedEngine: requested,
+			Tried:           tried,
+			Results:         results,
+			Count:           len(results),
+		})
+	}
+
+	log.Printf("search query=%q engine=%s requested=%s tried=%v count=%d took_ms=%d content=%v error=", shortQuery(q), wonEngine, requested, tried, len(results), took, wantContent)
 	writeJSON(w, http.StatusOK, successBody{
 		Query:           q,
 		Engine:          wonEngine,
@@ -234,6 +327,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Count:           len(results),
 		TookMs:          took,
 	})
+}
+
+func cacheBypass(r *http.Request) bool {
+	if v := r.URL.Query().Get("nocache"); v != "" && (v == "1" || parseTruthy(v)) {
+		return true
+	}
+	cc := strings.ToLower(r.Header.Get("Cache-Control"))
+	return strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store")
+}
+
+func shortQuery(q string) string {
+	const max = 80
+	if len(q) <= max {
+		return q
+	}
+	return q[:max] + "…"
 }
 
 func parseContentFlag(v string) bool {

@@ -54,6 +54,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", hub.serveHTTP)
 	mux.HandleFunc("/search", hub.serveHTTP)
+	mux.HandleFunc("/download", hub.serveHTTP)
 
 	hs := &http.Server{
 		Addr:              publicAddr,
@@ -223,6 +224,10 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
+	if tunnel.PathIsDownload(path) {
+		h.serveStream(ctx, w, s, fr)
+		return
+	}
 	resp, err := s.roundTrip(ctx, fr)
 	if err != nil {
 		if err == errReplaced || strings.Contains(err.Error(), "offline") {
@@ -256,6 +261,107 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(status)
 	_, _ = w.Write(raw)
+}
+
+func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session, fr tunnel.Frame) {
+	ch := make(chan tunnel.Frame, 32)
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "search backend offline", "code": "offline"})
+		return
+	}
+	s.pend[fr.ID] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.pend, fr.ID)
+		s.mu.Unlock()
+		go func() {
+			for range ch {
+			}
+		}()
+	}()
+	if err := s.write(fr); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "tunnel error", "code": "tunnel"})
+		return
+	}
+	wroteHead := false
+	for {
+		select {
+		case <-ctx.Done():
+			if !wroteHead {
+				writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "download timed out", "code": "timeout"})
+			}
+			return
+		case f, ok := <-ch:
+			if !ok {
+				return
+			}
+			switch f.Type {
+			case tunnel.TypeResp:
+				raw, err := base64.StdEncoding.DecodeString(f.Body)
+				if err != nil {
+					raw = []byte(f.Body)
+				}
+				for k, v := range f.Headers {
+					if hopHeaders[strings.ToLower(k)] {
+						continue
+					}
+					w.Header().Set(k, v)
+				}
+				status := f.Status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write(raw)
+				return
+			case tunnel.TypeRespHead:
+				for k, v := range f.Headers {
+					if hopHeaders[strings.ToLower(k)] {
+						continue
+					}
+					w.Header().Set(k, v)
+				}
+				status := f.Status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				if f.Error != "" && status >= 400 {
+					if w.Header().Get("Content-Type") == "" {
+						w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					}
+				}
+				w.WriteHeader(status)
+				wroteHead = true
+			case tunnel.TypeRespChunk:
+				if !wroteHead {
+					w.WriteHeader(http.StatusOK)
+					wroteHead = true
+				}
+				raw, err := base64.StdEncoding.DecodeString(f.Body)
+				if err != nil {
+					raw = []byte(f.Body)
+				}
+				if len(raw) > 0 {
+					_, _ = w.Write(raw)
+					if fl, ok := w.(http.Flusher); ok {
+						fl.Flush()
+					}
+				}
+			case tunnel.TypeRespEnd:
+				if !wroteHead {
+					if f.Error != "" {
+						writeJSON(w, http.StatusBadGateway, map[string]string{"error": "download failed", "code": "fetch"})
+					} else {
+						w.WriteHeader(http.StatusOK)
+					}
+				}
+				return
+			}
+		}
+	}
 }
 
 var hopHeaders = map[string]bool{
@@ -322,19 +428,22 @@ func (s *session) readLoop() {
 			return
 		}
 		switch f.Type {
-		case "pong", "ping":
-			if f.Type == "ping" {
-				_ = s.write(tunnel.Frame{Type: "pong", ID: f.ID})
+		case tunnel.TypePong, tunnel.TypePing:
+			if f.Type == tunnel.TypePing {
+				_ = s.write(tunnel.Frame{Type: tunnel.TypePong, ID: f.ID})
 			}
-		case "resp":
+		case tunnel.TypeResp, tunnel.TypeRespHead, tunnel.TypeRespChunk, tunnel.TypeRespEnd:
 			s.mu.Lock()
 			ch := s.pend[f.ID]
 			s.mu.Unlock()
-			if ch != nil {
-				select {
-				case ch <- f:
-				default:
-				}
+			if ch == nil {
+				continue
+			}
+			select {
+			case ch <- f:
+			case <-time.After(30 * time.Second):
+				log.Printf("tunnel drop frame type=%s id=%s (slow client)", f.Type, f.ID)
+				return
 			}
 		}
 	}

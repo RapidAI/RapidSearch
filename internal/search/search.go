@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/proto"
 )
 
 // Result is one organic hit.
@@ -146,21 +145,30 @@ func Run(page *rod.Page, engineName, query string, limit int) ([]Result, error) 
 	limit = ClampLimit(limit)
 	eng := engines[engName]
 
-	if err := navigateHome(page, eng.HomeURL); err != nil {
+	if engName == "google" {
+		paceGoogle()
+	}
+	applyDocumentStealth(page)
+
+	if err := navigateHome(page, eng.HomeURL, eng.Name); err != nil {
 		if isTimeout(err) {
 			return nil, NewError(CodeTimeout, "timeout loading "+eng.Name+" homepage")
 		}
 		return nil, wrap(err)
 	}
 	log.Printf("search step=home engine=%s url=%s", eng.Name, pageURL(page))
+	if engName == "google" {
+		warmGoogleHomepage(page)
+	}
 
-	humanPause(400, 800)
+	log.Printf("humanize step=pre-search-pause")
+	humanPause(800, 2500)
 	dismissConsent(page)
 	log.Printf("search step=consent engine=%s url=%s", eng.Name, pageURL(page))
 
 	if !onEngineHost(page, eng.Name) {
 		log.Printf("search step=off-host engine=%s url=%s; retrying homepage", eng.Name, pageURL(page))
-		if err := navigateHome(page, eng.HomeURL); err != nil {
+		if err := navigateHome(page, eng.HomeURL, eng.Name); err != nil {
 			return nil, wrap(err)
 		}
 		humanPause(300, 600)
@@ -180,7 +188,7 @@ func Run(page *rod.Page, engineName, query string, limit int) ([]Result, error) 
 		return nil, NewError(CodeParse, "could not find search input on "+eng.Name)
 	}
 
-	if err := inputEl.Click(proto.InputMouseButtonLeft, 1); err != nil {
+	if err := humanClick(page, inputEl); err != nil {
 		_ = inputEl.Focus()
 	}
 	humanPause(120, 280)
@@ -198,6 +206,7 @@ func Run(page *rod.Page, engineName, query string, limit int) ([]Result, error) 
 	}
 	log.Printf("search step=submitted engine=%s url=%s", eng.Name, pageURL(page))
 
+	waitIdleIsh(page)
 	if err := waitResults(page, eng.WaitSel); err != nil {
 		if blocked, why := detectBlock(page); blocked {
 			return nil, NewError(CodeCaptcha, why)
@@ -264,11 +273,20 @@ func onEngineHost(page *rod.Page, engine string) bool {
 	}
 }
 
-func navigateHome(page *rod.Page, home string) error {
+func navigateHome(page *rod.Page, home, engine string) error {
+	if onEngineHost(page, engine) {
+		if blocked, why := detectBlock(page); blocked {
+			log.Printf("humanize step=skip-reuse engine=%s reason=%s", engine, why)
+		} else if _, err := findSearchInput(page); err == nil {
+			log.Printf("humanize step=reuse-host engine=%s url=%s", engine, pageURL(page))
+			return nil
+		}
+	}
 	if err := page.Timeout(20 * time.Second).Navigate(home); err != nil {
 		return err
 	}
 	_ = page.Timeout(8 * time.Second).WaitLoad()
+	applyDocumentStealth(page)
 	humanPause(300, 600)
 	return nil
 }

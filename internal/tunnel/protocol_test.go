@@ -29,3 +29,35 @@ func TestParseAuthLine(t *testing.T) {
 		t.Fatal("expected fail")
 	}
 }
+
+func TestPathIsDownload(t *testing.T) {
+	if !PathIsDownload("/download") || !PathIsDownload("/download?url=https://x") {
+		t.Fatal("download path")
+	}
+	if PathIsDownload("/search") || PathIsDownload("/download/other") {
+		t.Fatal("not download")
+	}
+}
+
+func TestStreamFrames(t *testing.T) {
+	var buf bytes.Buffer
+	frames := []Frame{
+		{Type: TypeRespHead, ID: "1", Status: 200, Headers: map[string]string{"Content-Type": "text/plain"}},
+		{Type: TypeRespChunk, ID: "1", Body: "aGVsbG8="},
+		{Type: TypeRespEnd, ID: "1"},
+	}
+	for _, f := range frames {
+		if err := WriteFrame(&buf, f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, want := range frames {
+		var out Frame
+		if err := ReadFrame(&buf, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Type != want.Type || out.ID != want.ID {
+			t.Fatalf("%d %+v", i, out)
+		}
+	}
+}

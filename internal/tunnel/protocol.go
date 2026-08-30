@@ -8,7 +8,20 @@ import (
 	"strings"
 )
 
-const MaxFrame = 4 << 20 // 4 MiB
+const (
+	MaxFrame    = 4 << 20  // 4 MiB JSON frame
+	StreamChunk = 256 << 10 // raw bytes per resp-chunk
+)
+
+const (
+	TypeReq       = "req"
+	TypeResp      = "resp"
+	TypeRespHead  = "resp-head"
+	TypeRespChunk = "resp-chunk"
+	TypeRespEnd   = "resp-end"
+	TypePing      = "ping"
+	TypePong      = "pong"
+)
 
 var (
 	ErrTooLarge = errors.New("tunnel frame too large")
@@ -61,6 +74,14 @@ func ReadFrame(r io.Reader, f *Frame) error {
 		return err
 	}
 	return json.Unmarshal(buf, f)
+}
+
+// PathIsDownload reports whether the tunneled request is /download.
+func PathIsDownload(p string) bool {
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	return p == "/download"
 }
 
 func ParseAuthLine(line string) (token string, ok bool) {

@@ -12,3 +12,6 @@ search-service
 search-proxy
 search-relay
 *.exe
+
+# Search / download cache (data dir at repo root, not internal/cache)
+/cache/

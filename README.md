@@ -26,6 +26,8 @@ Environment / 环境变量:
 - `DISPLAY` (default `:1`)
 - `CHROME_BIN` (optional chrome path)
 - `SEARCH_LISTEN` (optional, default `127.0.0.1:18765`)
+- `CACHE_DIR` (optional, default `./cache`)
+- `CACHE_TTL` (optional Go duration, default `1h`)
 
 ## API
 
@@ -88,6 +90,50 @@ Success:
 `engine` is the engine that actually produced results (never `"auto"`). `requested_engine` is what the caller asked for. `tried` lists every engine attempted.
 
 Errors: HTTP 4xx/5xx with `{"error":"...","code":"captcha"|"timeout"|"parse"|"bad_request"|"engine"}`.
+
+
+## Result cache / 结果缓存
+
+Successful search JSON (after preprocess) is stored under `./cache` on disk. Errors, captcha, timeouts, and empty results are **not** cached.
+
+成功的搜索 JSON（预处理后）写入 `./cache`。错误、验证码、超时、空结果不缓存。
+
+- Key = SHA-256 of normalized query + engine + limit + content flag + region/locale/hl + fallback. `content=0` and `content=1` are different keys.
+- 缓存键 = 规范化查询 + 引擎 + limit + content + region/locale/hl + fallback 的 SHA-256。`content=0` 与 `content=1` 是不同的键。
+- Eviction is LFU then LRU. TTL default **1 hour** (`CACHE_TTL`, e.g. `1h`).
+- 淘汰：先 LFU 再 LRU。TTL 默认 1 小时（`CACHE_TTL`）。
+- **Disk budget**: `syscall.Statfs` on the cache dir. Budget = clamp(5% of filesystem size, 64MB min, 2GB max) **and** never more than 25% of currently free space. Recomputed on start, every 5 minutes, and before write.
+- **磁盘预算**：对缓存目录 `Statfs`。预算 = clamp(文件系统 5%，64MB～2GB)，且不超过当前空闲空间的 25%。启动时、每 5 分钟、写入前重算。
+- Landing-page `content` is omitted from the **first** disk write when that payload is >4KiB, so one-off queries do not eat disk. A later live store (TTL refresh / `nocache`) for a key with hits ≥ 2 writes the full body.
+- 首次写入若落地页 `content` 合计超过 4KiB 会省略正文，避免一次性查询占盘。同一键命中 ≥ 2 后再活抓会写入完整正文。
+- Cache hit adds `"cached": true` and `cache_age_ms`. `took_ms` is the cache-serve time.
+- `GET /search?...&nocache=1` or `Cache-Control: no-cache` skips the read (still may write).
+- `GET /cache/stats` → `{bytes, entries, budget_bytes, hits, misses, fs_size, fs_free}` (no query text).
+
+```bash
+curl -sS 'http://127.0.0.1:18765/cache/stats'
+```
+
+## Download / 下载
+
+`GET /download?url=<https-url>` and `POST /download` JSON `{"url":"https://..."}`.
+
+Only `http`/`https`. `file://`, `javascript:`, `data:` are rejected.
+
+仅允许 http/https。拒绝 `file://`、`javascript:`、`data:`。
+
+The handler streams the upstream bytes with Content-Type and a safe Content-Disposition filename. It retries (3× backoff) on 5xx / timeout / connection reset, follows up to 10 redirects, sends a desktop Chrome UA, and passes through `Range`. If the URL’s host was recently seen in a search, Chrome cookies are reused when practical. net/http runs first; 403 / challenge / empty falls back to the existing Chrome (same mutex as search, ~3 min). Size cap is min(512MB, 25% of free disk); larger → 413. Successful bodies under 2MB may be stored as blobs under the same cache budget (not the search JSON store).
+
+先用 net/http 拉取（重试、重定向、Range、桌面 UA）；若该站刚在搜索结果里出现过，会尽量复用 Chrome cookie。403/挑战/空响应再走同一把 Chrome 锁的页面 fetch。单文件不超过 512MB 且不超过空闲盘 25%，否则 413。小于 2MB 的成功下载可进独立 blob 目录，计入同一磁盘预算。
+
+```bash
+curl -sS -o /tmp/t.bin 'http://127.0.0.1:18765/download?url=https://example.com/'
+curl -sS -X POST http://127.0.0.1:18765/download -H 'Content-Type: application/json' -d '{"url":"https://example.com/"}'
+```
+
+Public proxy (Bearer token) also exposes `/download`; the relay streams the file in tunnel chunks so it is not loaded as one JSON frame.
+
+公网反代同样提供 `/download`；隧道按块传输，避免整文件塞进一帧。
 
 ## Engines / 引擎
 

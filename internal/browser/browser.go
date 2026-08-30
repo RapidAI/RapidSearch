@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,10 @@ type Manager struct {
 	sem     chan struct{}
 	browser *rod.Browser
 	launch  *launcher.Launcher
+	page    *rod.Page
+	width   int
+	height  int
+	ua      string
 }
 
 func New(opts Options) *Manager {
@@ -44,9 +49,13 @@ func New(opts Options) *Manager {
 	if opts.Bin == "" {
 		opts.Bin = findChrome()
 	}
+	w := 1280 + rand.Intn(41) - 20 // 1260–1320
+	h := 800 + rand.Intn(31) - 15  // 785–815
 	return &Manager{
-		opts: opts,
-		sem:  make(chan struct{}, 1),
+		opts:   opts,
+		sem:    make(chan struct{}, 1),
+		width:  w,
+		height: h,
 	}
 }
 
@@ -107,6 +116,13 @@ func (m *Manager) ensureLocked(ctx context.Context) error {
 	}
 
 	ua := chromeUA()
+	m.ua = ua
+	if m.width <= 0 {
+		m.width = 1280
+	}
+	if m.height <= 0 {
+		m.height = 800
+	}
 	l := launcher.New().
 		Bin(m.opts.Bin).
 		UserDataDir(m.opts.UserDataDir).
@@ -125,12 +141,16 @@ func (m *Manager) ensureLocked(ctx context.Context) error {
 		Set("disable-background-timer-throttling").
 		Set("disable-backgrounding-occluded-windows").
 		Set("disable-renderer-backgrounding").
-		Set("window-size", "1440,900").
+		Set("window-size", fmt.Sprintf("%d,%d", m.width, m.height)).
 		Set("user-agent", ua).
-		Set("lang", "en-US,en").
+		Set("lang", "zh-CN").
+		Set("accept-lang", "zh-CN,zh;q=0.9,en;q=0.8").
 		Env(append(os.Environ(),
 			"DISPLAY="+m.opts.Display,
 			"HOME="+os.Getenv("HOME"),
+			"LANG=zh_CN.UTF-8",
+			"LANGUAGE=zh_CN:zh:en",
+			"TZ=Asia/Shanghai",
 		)...)
 
 	// Hide the "Chrome is being controlled by automated test software" banner.
@@ -192,39 +212,89 @@ func (m *Manager) Do(ctx context.Context, fn func(*rod.Page) error) error {
 	b := m.browser
 	m.mu.Unlock()
 
-	// Keep at least one tab alive. Chrome may tear down the browser
-	// process (and our CDP connection) if the last tab is closed.
-	m.keepSpare(b)
+	page, err := m.acquirePage(ctx, b)
+	if err != nil {
+		return err
+	}
+	page = page.Context(ctx)
+	m.humanizePage(page)
+	return fn(page)
+}
 
+func (m *Manager) acquirePage(ctx context.Context, b *rod.Browser) (*rod.Page, error) {
+	m.mu.Lock()
+	if m.page != nil {
+		if _, err := m.page.Eval(`() => true`); err == nil {
+			p := m.page
+			m.mu.Unlock()
+			return p, nil
+		}
+		_ = m.page.Close()
+		m.page = nil
+	}
+	m.mu.Unlock()
+
+	m.keepSpare(b)
 	page, err := stealth.Page(b)
 	if err != nil {
 		m.mu.Lock()
 		m.closeLocked()
 		if err2 := m.ensureLocked(ctx); err2 != nil {
 			m.mu.Unlock()
-			return err2
+			return nil, err2
 		}
 		b = m.browser
 		m.mu.Unlock()
 		m.keepSpare(b)
 		page, err = stealth.Page(b)
 		if err != nil {
-			return fmt.Errorf("open page: %w", err)
+			return nil, fmt.Errorf("open page: %w", err)
 		}
 	}
-	defer func() {
-		_ = page.Close()
-		m.keepSpare(b)
-	}()
+	_, _ = page.EvalOnNewDocument(stealthJS)
+	m.mu.Lock()
+	m.page = page
+	m.mu.Unlock()
+	return page, nil
+}
 
-	page = page.Context(ctx)
+const stealthJS = `(() => {
+  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'}); } catch (e) {}
+})();`
+
+func (m *Manager) humanizePage(page *rod.Page) {
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 1280
+	}
+	if h <= 0 {
+		h = 800
+	}
 	_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-		Width:             1440,
-		Height:            900,
+		Width:             w,
+		Height:            h,
 		DeviceScaleFactor: 1,
 		Mobile:            false,
 	})
-	return fn(page)
+	_ = proto.EmulationSetTimezoneOverride{TimezoneID: "Asia/Shanghai"}.Call(page)
+	_ = proto.EmulationSetLocaleOverride{Locale: "zh-CN"}.Call(page)
+	ua := m.ua
+	if ua == "" {
+		ua = chromeUA()
+	}
+	_ = proto.NetworkSetUserAgentOverride{
+		UserAgent:      ua,
+		AcceptLanguage: "zh-CN,zh;q=0.9,en;q=0.8",
+		Platform:       "Linux x86_64",
+	}.Call(page)
+	_, _ = page.Eval(`() => {
+  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']}); } catch (e) {}
+  try { Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'}); } catch (e) {}
+}`)
+	log.Printf("humanize step=stealth viewport=%dx%d tz=Asia/Shanghai lang=zh-CN", w, h)
 }
 
 // Screenshot writes a PNG under DebugDir. Best-effort.
@@ -267,6 +337,7 @@ func (m *Manager) Close() error {
 
 func (m *Manager) closeLocked() error {
 	var err error
+	m.page = nil
 	if m.browser != nil {
 		err = m.browser.Close()
 		m.browser = nil
