@@ -1,5 +1,7 @@
 # Secrets
 proxy.token
+*.token
+proxy.env
 
 # Chrome user data
 chrome-profile/

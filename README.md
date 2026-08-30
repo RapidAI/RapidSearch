@@ -242,6 +242,12 @@ If no relay is connected, the proxy returns `503 {"error":"search backend offlin
 
 Binaries: `go build -o search-proxy ./cmd/proxy` and `go build -o search-relay ./cmd/relay`. Copy them to the VPS; they are static-ish Go binaries (same module).
 
+### One-password VPS deploy / 一键部署（只输入一次 root 密码）
+
+Windows 11: run `deploy-proxy.cmd` from the repo root (or double-click it). Linux/mac: `./deploy-proxy.sh`. Type the **root** password when `ssh` asks (once). Builds linux/amd64, installs `/opt/search-proxy` on `root@hub.maclaw.top`, and restarts `search-proxy.service`. Override host with env `SEARCH_PROXY_HOST`.
+
+Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy-proxy.sh`。`ssh` 提示时输入一次 root 密码即可。
+
 ## Limitations / 限制
 
 - **CAPTCHA / unusual traffic**: Google in particular often flags datacenter IPs and automation. Auto mode failovers to Bing then DuckDuckGo. Explicit engine returns `code=captcha` (no loop unless `fallback=1`) and may save a PNG under `./debug/`. Baidu may show `wappass` / 安全验证 (same `code=captcha`). Bing is usually less aggressive.
