@@ -40,7 +40,7 @@ func bool01(b bool) string {
 // Canonical is the stable preimage hashed into a key. Exported for tests.
 func Canonical(in KeyInput) string {
 	var b strings.Builder
-	b.WriteString("v1|")
+	b.WriteString("v2|")
 	b.WriteString(NormalizeQuery(in.Query))
 	b.WriteByte('|')
 	b.WriteString(normField(in.Engine))

@@ -27,10 +27,10 @@ func parseGoogle(page *rod.Page, limit int) ([]Result, error) {
   const isSkippable = (el) => {
     while (el) {
       const id = (el.id || '').toLowerCase();
-      if (id === 'tads' || id === 'tadsb' || id === 'tadsbl' || id === 'cu-container' || id === 'bottomads') return 'ad';
+      if (id === 'tads' || id === 'tadsb' || id === 'tadsbl' || id === 'cu-container' || id === 'bottomads' || id === 'tvcap' || id === 'taw') return 'ad';
       if (el.getAttribute && (el.hasAttribute('data-text-ad') || el.getAttribute('data-ad-slot'))) return 'ad';
       const cls = (el.className && el.className.toString && el.className.toString()) || '';
-      if (/uEierd|commercial-unit|pla-unit|cu-container/.test(cls)) return 'ad';
+      if (/uEierd|commercial-unit|pla-unit|cu-container|commercial-unit-desktop-top/.test(cls)) return 'ad';
       if (/related-question-pair|wQiwMc/.test(cls)) return 'paa';
       if (el.getAttribute && el.getAttribute('jsname') === 'Cpkphb') return 'paa';
       el = el.parentElement;
@@ -89,9 +89,30 @@ func parseBing(page *rod.Page, limit int) ([]Result, error) {
 	obj, err := page.Eval(`(limit) => {
   const out = [];
   const seen = new Set();
+  const isAdNode = (el) => {
+    while (el) {
+      const id = (el.id || '').toLowerCase();
+      if (id === 'b_ads' || id === 'b_pole' || id === 'b_ad' || id === 'b_topw') return true;
+      const cls = ((el.className && el.className.toString && el.className.toString()) || '').toLowerCase();
+      if (/\bb_ad\b|\bb_adlastchild\b|\bb_adslug\b/.test(cls)) return true;
+      if (el.matches && (el.matches('li.b_ad') || el.matches('.b_ad') || el.matches('#b_ads') || el.matches('#b_pole'))) return true;
+      el = el.parentElement;
+    }
+    return false;
+  };
+  const hasAdLabel = (root) => {
+    if (!root) return false;
+    const nodes = root.querySelectorAll('span, a, em, div, p, cite, strong');
+    for (const s of nodes) {
+      const t = (s.innerText || '').replace(/\s+/g, ' ').trim();
+      if (t === 'Ad' || t === 'Ads' || t === 'Sponsored' || t === '赞助' || t === '广告') return true;
+    }
+    return false;
+  };
   const items = document.querySelectorAll('li.b_algo');
   items.forEach((li) => {
     if (out.length >= limit * 2) return;
+    if (isAdNode(li) || hasAdLabel(li)) return;
     const a = li.querySelector('h2 a, h2 > a, a[h]');
     if (!a) return;
     const title = (a.innerText || a.getAttribute('title') || '').trim();
@@ -112,6 +133,8 @@ func parseBing(page *rod.Page, limit int) ([]Result, error) {
   });
   if (out.length === 0) {
     document.querySelectorAll('#b_results h2 a').forEach((a) => {
+      const li = a.closest('li, .b_algo, .b_ad') || a.parentElement;
+      if (isAdNode(li) || hasAdLabel(li) || isAdNode(a)) return;
       const title = (a.innerText || '').trim();
       const href = (a.href || '').trim();
       if (title && href) out.push({title, url: href, snippet: ''});
@@ -129,11 +152,24 @@ func parseDuckDuckGo(page *rod.Page, limit int) ([]Result, error) {
 	obj, err := page.Eval(`(limit) => {
   const out = [];
   const seen = new Set();
-  const push = (title, href, snippet) => {
+  const isAd = (el) => {
+    while (el) {
+      const id = (el.id || '').toLowerCase();
+      if (id === 'ads') return true;
+      if (el.getAttribute && el.getAttribute('data-testid') === 'ad') return true;
+      const cls = ((el.className && el.className.toString && el.className.toString()) || '');
+      if (/\bresult--ad\b|\bad-result\b/.test(cls)) return true;
+      if (el.matches && (el.matches('[data-testid="ad"]') || el.matches('.result--ad') || el.matches('#ads'))) return true;
+      el = el.parentElement;
+    }
+    return false;
+  };
+  const push = (title, href, snippet, el) => {
     title = (title || '').trim();
     href = (href || '').trim();
     snippet = (snippet || '').replace(/\s+/g, ' ').trim();
     if (!title || !href) return;
+    if (isAd(el)) return;
     if (seen.has(href)) return;
     seen.add(href);
     out.push({title, url: href, snippet});
@@ -142,13 +178,13 @@ func parseDuckDuckGo(page *rod.Page, limit int) ([]Result, error) {
     const a = art.querySelector('a[data-testid="result-title-a"], h2 a, a[href]');
     const titleEl = art.querySelector('h2, a[data-testid="result-title-a"]');
     const sn = art.querySelector('[data-result="snippet"], article span');
-    if (a) push(titleEl ? titleEl.innerText : a.innerText, a.href, sn ? sn.innerText : '');
+    if (a) push(titleEl ? titleEl.innerText : a.innerText, a.href, sn ? sn.innerText : '', art);
   });
   document.querySelectorAll('li[data-layout="organic"], .result.results_links, .nrn-react-div article, #links .result').forEach((el) => {
     const a = el.querySelector('a.result__a, h2 a, a[data-testid="result-title-a"]') || el.querySelector('a[href]');
     if (!a) return;
     const sn = el.querySelector('.result__snippet, .result__body, [data-result="snippet"]');
-    push(a.innerText, a.href, sn ? sn.innerText : '');
+    push(a.innerText, a.href, sn ? sn.innerText : '', el);
   });
   return out;
 }`, limit)
@@ -158,13 +194,13 @@ func parseDuckDuckGo(page *rod.Page, limit int) ([]Result, error) {
 	return decodeHits(obj, limit, "duckduckgo")
 }
 
-
 func parseBaidu(page *rod.Page, limit int) ([]Result, error) {
 	obj, err := page.Eval(`(limit) => {
   const out = [];
   const seen = new Set();
   const looksAd = (card) => {
     if (!card) return false;
+    if (card.hasAttribute && card.hasAttribute('cmatchid')) return true;
     const cls = ((card.className && card.className.toString && card.className.toString()) || '').toLowerCase();
     if (/\bec[-_]|ec_tuiguang|c-container-ad|ad-block/.test(cls)) return true;
     const tpl = (card.getAttribute('tpl') || card.getAttribute('data-tpl') || '').toLowerCase();
@@ -174,6 +210,10 @@ func parseBaidu(page *rod.Page, limit int) ([]Result, error) {
     for (const s of labels) {
       const t = (s.innerText || '').replace(/\s+/g, '').trim();
       if (t === '广告' || t === '推广') return true;
+    }
+    if (card.hasAttribute && card.hasAttribute('data-click')) {
+      const raw = (card.innerText || '').replace(/\s+/g, ' ').trim();
+      if (/^广告(\s|·|｜|\||$)/.test(raw)) return true;
     }
     return false;
   };
@@ -291,6 +331,14 @@ func cleanURL(raw, engine string) string {
 		return ""
 	}
 	host := strings.ToLower(u.Hostname())
+	path := strings.ToLower(u.Path)
+
+	if isAdOrJunkURL(u.String()) {
+		return ""
+	}
+	if strings.Contains(path, "/pagead/") || strings.Contains(path, "/aclk") {
+		return ""
+	}
 
 	if strings.Contains(host, "google.") {
 		if u.Path == "/url" || u.Path == "/imgres" {
@@ -486,11 +534,17 @@ func skipGoogleHost(host, path string) bool {
 	if strings.Contains(host, "webcache.googleusercontent.com") || strings.Contains(host, "policies.google.") {
 		return true
 	}
+	if strings.Contains(host, "translate.google") {
+		return true
+	}
 	switch path {
 	case "/search", "/sorry/index", "/", "/webhp":
 		return true
 	}
-	if strings.HasPrefix(path, "/aclk") || strings.HasPrefix(path, "/intl/") || strings.HasPrefix(path, "/sorry") {
+	if strings.HasPrefix(path, "/aclk") || strings.Contains(path, "/aclk") || strings.Contains(path, "/pagead/") {
+		return true
+	}
+	if strings.HasPrefix(path, "/intl/") || strings.HasPrefix(path, "/sorry") {
 		return true
 	}
 	return false

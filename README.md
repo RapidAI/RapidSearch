@@ -178,9 +178,11 @@ After organic SERP parse, Chrome is released, then results are:
 
 1. **Clean / 清洗**: unwrap tracker URLs, trim, drop empty title/url, `javascript:`, and engine-internal links.
    解开跟踪链接，去掉空标题/URL、`javascript:` 和搜索引擎站内链接。
-2. **Relevance filter / 相关性过滤**: tokenize English (non-alnum split) and CJK (runs + 2-grams). Score title + snippet + URL path vs the query. Drop off-topic / empty-snippet junk unless the title is a strong match. Re-rank by score (`relevance` is 0..1) and reassign `rank` 1..n. If every hit would be dropped, the cleaned original list is returned instead of an error.
-   英文按非字母数字切词，中日韩按连续字串（可选二元组）切词。用标题+摘要+URL 路径对查询打分。丢掉跑题或空摘要垃圾（标题强匹配除外）。按分数重排，`relevance` 为 0..1。若过滤后一条不剩，则回退到清洗后的原始列表，不报错。
-3. **Extract / 抽取正文** (default): `net/http` (not Chrome), desktop User-Agent, 8s timeout, max 3 concurrent, first `min(limit, 8)` hits. Strip script/style/nav/footer; keep sentences overlapping query tokens (+ one neighbor), cap ~1200 runes. Failures, PDFs, binary, 4xx/5xx → omit `content`. `took_ms` includes this step.
+2. **Ads / junk filter / 广告过滤**: drop sponsored/affiliate/PLA hits (ad hosts and `/aclk`/`pagead` paths, badge labels like `广告`/`Sponsored`/`Ad ·` at the start of title or snippet). Organic pages that merely talk about advertising (or domains like adobe.com) are kept. This step is not optional.
+   丢掉赞助/联盟/购物广告（广告域名、`/aclk` 等，以及标题/摘要开头的 `广告`/`Sponsored`/`Ad ·` 角标）。讨论广告的正常文章和 adobe.com 等域名保留。此步不可跳过。
+3. **Relevance filter / 相关性过滤**: tokenize English (non-alnum split) and CJK (runs + 2-grams). Score title + snippet + URL path vs the query. Drop off-topic / empty-snippet junk unless the title is a strong match; a hit that only overlaps a generic leftover token (e.g. only `http`) is dropped when title+snippet coverage is tiny. Re-rank by score (`relevance` is 0..1) and reassign `rank` 1..n. If every remaining hit would be dropped, the **ads-stripped** cleaned list is returned instead of an error.
+   英文按非字母数字切词，中日韩按连续字串（可选二元组）切词。用标题+摘要+URL 路径对查询打分。丢掉跑题或空摘要垃圾（标题强匹配除外）。仅命中泛化残留词（如只有 `http`）且覆盖极低的结果也会丢掉。按分数重排，`relevance` 为 0..1。若相关性过滤后一条不剩，则回退到**已去广告**的清洗列表，不报错。
+4. **Extract / 抽取正文** (default): `net/http` (not Chrome), desktop User-Agent, 8s timeout, max 3 concurrent, first `min(limit, 8)` hits. Strip script/style/nav/footer; keep sentences overlapping query tokens (+ one neighbor), cap ~1200 runes. Failures, PDFs, binary, 4xx/5xx → omit `content`. `took_ms` includes this step.
    默认用 `net/http` 抓取落地页（不用 Chrome），桌面 UA，8 秒超时，最多 3 并发，只处理前 `min(limit, 8)` 条。去掉 script/style/nav/footer，保留与查询词重叠的句子（含前后各一句），约 1200 字。失败/PDF/二进制/4xx/5xx 则省略 `content`。`took_ms` 包含预处理时间。
 
 

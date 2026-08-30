@@ -50,14 +50,16 @@ const (
 	weightURL     = 1.0
 )
 
-// Preprocess cleans organic hits, drops off-topic junk, re-ranks by
-// relevance, and optionally fetches topic-relevant landing-page text.
-// Chrome is not used. If filtering would drop every hit, the cleaned
-// original list is returned instead of an error.
+// Preprocess cleans organic hits, strips ads/SERP junk, drops off-topic
+// results, re-ranks by relevance, and optionally fetches topic-relevant
+// landing-page text. Chrome is not used. Ads filtering is mandatory; if
+// relevance filtering would drop every remaining hit, the ads-stripped
+// cleaned list is returned instead of an error.
 func Preprocess(ctx context.Context, in []Result, opt PreprocessOpts) []Result {
 	opt.Limit = ClampLimit(opt.Limit)
 	unwrapBaiduHits(in)
 	cleaned := cleanResults(in, opt.Engine)
+	cleaned = filterAds(cleaned)
 	if len(cleaned) == 0 {
 		return cleaned
 	}
@@ -190,6 +192,12 @@ func filterRelevant(in []Result, qTokens []string) []Result {
 	if needTitle < 1 {
 		needTitle = 1
 	}
+	strongN := 0
+	for _, t := range qTokens {
+		if !weakQueryToken(t) {
+			strongN++
+		}
+	}
 	for _, r := range in {
 		sr := scoreOne(r, qTokens)
 		if sr.covered == 0 {
@@ -198,10 +206,54 @@ func filterRelevant(in []Result, qTokens []string) []Result {
 		if strings.TrimSpace(r.Snippet) == "" && sr.titleHits < needTitle {
 			continue
 		}
+		if strongN > 0 && onlyWeakCoverage(r, qTokens) && sr.titleHits+sr.snippetHits <= 1 {
+			continue
+		}
 		r.Relevance = sr.Relevance
 		out = append(out, r)
 	}
 	return out
+}
+
+func onlyWeakCoverage(r Result, qTokens []string) bool {
+	titleSet := tokenSet(Tokenize(r.Title))
+	snipSet := tokenSet(Tokenize(r.Snippet))
+	urlSet := tokenSet(Tokenize(urlPathText(r.URL)))
+	for _, t := range qTokens {
+		if weakQueryToken(t) {
+			continue
+		}
+		if tokenIn(t, titleSet) || tokenIn(t, snipSet) || tokenIn(t, urlSet) {
+			return false
+		}
+	}
+	return true
+}
+
+// weakQueryToken is a leftover that should not, by itself, keep a hit
+// when title+snippet coverage is tiny (e.g. only "http", or a CJK
+// 2-gram of a stop-ish word).
+func weakQueryToken(t string) bool {
+	if t == "" || stopwords[t] || weakTokens[t] {
+		return true
+	}
+	if runeLen(t) == 2 && isCJK([]rune(t)[0]) && isCJK([]rune(t)[1]) && cjkWeakBigram[t] {
+		return true
+	}
+	return false
+}
+
+var weakTokens = map[string]bool{
+	"http": true, "https": true, "www": true, "html": true, "htm": true,
+	"page": true, "home": true, "web": true, "site": true, "online": true,
+	"click": true, "info": true, "news": true, "blog": true, "index": true,
+}
+
+var cjkWeakBigram = map[string]bool{
+	"什么": true, "怎么": true, "如何": true, "一个": true, "这个": true,
+	"那个": true, "可以": true, "没有": true, "不是": true, "自己": true,
+	"我们": true, "他们": true, "以及": true, "或者": true, "因为": true,
+	"所以": true, "如果": true, "但是": true, "还是": true, "一下": true,
 }
 
 func urlPathText(raw string) string {

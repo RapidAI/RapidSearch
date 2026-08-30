@@ -29,7 +29,7 @@ func TestKeyContentFlagAndNormalize(t *testing.T) {
 	if f1 == f2 {
 		t.Fatal("fallback must be part of the key")
 	}
-	if !strings.HasPrefix(Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}), "v1|q|bing|3|1|") {
+	if !strings.HasPrefix(Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}), "v2|q|bing|3|1|") {
 		t.Fatalf("canonical: %s", Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}))
 	}
 }

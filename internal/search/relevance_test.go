@@ -80,6 +80,8 @@ func TestPreprocessFallbackKeepsCleaned(t *testing.T) {
 	in := []Result{
 		{Rank: 1, Title: "Unrelated weather", URL: "https://weather.example/today", Snippet: "Rain in shanghai tonight."},
 		{Rank: 2, Title: "Sports scores", URL: "https://sports.example/nba", Snippet: "Lakers win in overtime."},
+		{Rank: 3, Title: "广告 · 某商品", URL: "https://www.googleadservices.com/pagead/aclk?ad=1", Snippet: "golang http server shoes"},
+		{Rank: 4, Title: "Sponsored sneakers", URL: "https://shop.example/shoes", Snippet: "Sponsored · Buy now"},
 	}
 	out := Preprocess(context.Background(), in, PreprocessOpts{
 		Query:        "golang http server",
@@ -88,7 +90,15 @@ func TestPreprocessFallbackKeepsCleaned(t *testing.T) {
 		FetchContent: false,
 	})
 	if len(out) != 2 {
-		t.Fatalf("fallback should keep cleaned originals, got %d: %+v", len(out), out)
+		t.Fatalf("fallback should keep cleaned originals without ads, got %d: %+v", len(out), out)
+	}
+	for _, r := range out {
+		if strings.Contains(r.Title, "广告") || strings.Contains(strings.ToLower(r.Snippet), "sponsored") {
+			t.Fatalf("fallback returned ad: %+v", r)
+		}
+		if strings.Contains(strings.ToLower(r.URL), "googleadservices") {
+			t.Fatalf("fallback returned ad url: %+v", r)
+		}
 	}
 }
 
