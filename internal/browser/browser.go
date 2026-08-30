@@ -184,18 +184,6 @@ func (m *Manager) ensureLocked(ctx context.Context) error {
 	return nil
 }
 
-func chromeUA() string {
-	// Match installed Chrome major when possible; keep a realistic desktop UA.
-	major := "151"
-	if out, err := exec.Command("google-chrome-stable", "--version").Output(); err == nil {
-		var maj, min, build, patch int
-		if _, err := fmt.Sscanf(string(out), "Google Chrome %d.%d.%d.%d", &maj, &min, &build, &patch); err == nil && maj > 0 {
-			major = fmt.Sprintf("%d", maj)
-		}
-	}
-	return fmt.Sprintf("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36", major)
-}
-
 // Do runs fn on a fresh stealth page, capped by SEARCH_BROWSER_SLOTS.
 // The page is closed afterwards and is never reused across users.
 func (m *Manager) Do(ctx context.Context, fn func(*rod.Page) error) error {
@@ -273,15 +261,9 @@ func (m *Manager) stealthPage(b *rod.Browser) (*rod.Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, _ = page.EvalOnNewDocument(stealthJS)
+	_, _ = page.EvalOnNewDocument("(" + StealthJS + ")()")
 	return page, nil
 }
-
-const stealthJS = `(() => {
-  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
-  try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']}); } catch (e) {}
-  try { Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'}); } catch (e) {}
-})();`
 
 func (m *Manager) humanizePage(page *rod.Page) {
 	w, h := m.width, m.height
@@ -312,15 +294,12 @@ func (m *Manager) humanizePage(page *rod.Page) {
 		ua = chromeUA()
 	}
 	_ = proto.NetworkSetUserAgentOverride{
-		UserAgent:      ua,
-		AcceptLanguage: "zh-CN,zh;q=0.9,en;q=0.8",
-		Platform:       "Linux x86_64",
+		UserAgent:         ua,
+		AcceptLanguage:    "zh-CN,zh;q=0.9,en;q=0.8",
+		Platform:          "Linux x86_64",
+		UserAgentMetadata: chromeClientHints(chromeMajor()),
 	}.Call(page)
-	_, _ = page.Eval(`() => {
-  try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch (e) {}
-  try { Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']}); } catch (e) {}
-  try { Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'}); } catch (e) {}
-}`)
+	_, _ = page.Eval(StealthJS)
 	log.Printf("humanize step=stealth viewport=%dx%d tz=Asia/Shanghai lang=zh-CN", w, h)
 }
 

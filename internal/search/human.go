@@ -11,6 +11,8 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
+
+	"search-service/internal/browser"
 )
 
 func humanPause(minMs, maxMs int) {
@@ -39,6 +41,10 @@ func findSearchInput(page *rod.Page) (*rod.Element, error) {
 		`input[type="search"]`,
 		`#sb_form_q`,
 		`#searchbox_input`,
+		`input#searchbox_input`,
+		`[data-testid="searchbox"] input`,
+		`input[data-testid="searchbox-input"]`,
+		`#search_form_input_homepage`,
 		`input[id="search_form_input"]`,
 		`textarea[aria-label*="Search" i]`,
 		`input[aria-label*="Search" i]`,
@@ -125,16 +131,12 @@ func typeQuery(page *rod.Page, el *rod.Element, query string) error {
 	if got != query {
 		// Last-resort correction only — never the primary path.
 		log.Printf("humanize step=type-correct")
-		_ = el.SelectAllText()
-		_ = page.Keyboard.Press(input.Backspace)
-		for _, r := range query {
-			if err := page.InsertText(string(r)); err != nil {
-				if err2 := el.Input(query); err2 != nil {
-					return err
-				}
-				return nil
-			}
+		if err := el.SelectAllText(); err == nil {
+			_ = page.Keyboard.Press(input.Backspace)
 			humanPause(40, 90)
+		}
+		if err := el.Input(query); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -259,29 +261,6 @@ func warmGoogleHomepage(page *rod.Page) {
 	}
 }
 
-// stealthEval spoofs webdriver / languages on the current document.
-const stealthEval = `() => {
-  try {
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-  } catch (e) {}
-  try {
-    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en-US', 'en']});
-  } catch (e) {}
-  try {
-    Object.defineProperty(navigator, 'language', {get: () => 'zh-CN'});
-  } catch (e) {}
-  try {
-    const orig = navigator.permissions && navigator.permissions.query;
-    if (orig) {
-      navigator.permissions.query = (p) => (
-        p && p.name === 'notifications'
-          ? Promise.resolve({state: Notification.permission})
-          : orig(p)
-      );
-    }
-  } catch (e) {}
-}`
-
 func applyDocumentStealth(page *rod.Page) {
-	_, _ = page.Eval(stealthEval)
+	_, _ = page.Eval(browser.StealthJS)
 }

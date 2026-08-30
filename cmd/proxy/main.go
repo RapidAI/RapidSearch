@@ -439,8 +439,9 @@ func (s *session) readLoop() {
 			select {
 			case ch <- f:
 			case <-time.After(30 * time.Second):
+				// Drop this frame only. Closing the session would stall
+				// every in-flight roundTrip sharing the tunnel.
 				log.Printf("tunnel drop frame type=%s id=%s (slow client)", f.Type, f.ID)
-				return
 			}
 		}
 	}

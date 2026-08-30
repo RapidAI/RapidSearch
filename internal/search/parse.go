@@ -174,13 +174,13 @@ func parseDuckDuckGo(page *rod.Page, limit int) ([]Result, error) {
     seen.add(href);
     out.push({title, url: href, snippet});
   };
-  document.querySelectorAll('article[data-testid="result"]').forEach((art) => {
-    const a = art.querySelector('a[data-testid="result-title-a"], h2 a, a[href]');
+  document.querySelectorAll('article[data-testid="result"], [data-testid="mainline"] article, [data-testid="web-vertical"] article').forEach((art) => {
+    const a = art.querySelector('a[data-testid="result-title-a"], h2 a, a[data-testid="result-extras-url-link"], a[href]');
     const titleEl = art.querySelector('h2, a[data-testid="result-title-a"]');
-    const sn = art.querySelector('[data-result="snippet"], article span');
+    const sn = art.querySelector('[data-result="snippet"], [data-testid="result-snippet"], article span');
     if (a) push(titleEl ? titleEl.innerText : a.innerText, a.href, sn ? sn.innerText : '', art);
   });
-  document.querySelectorAll('li[data-layout="organic"], .result.results_links, .nrn-react-div article, #links .result').forEach((el) => {
+  document.querySelectorAll('li[data-layout="organic"], .result.results_links, .nrn-react-div article, #links .result, ol.react-results--main li, [data-testid="mainline"] li').forEach((el) => {
     const a = el.querySelector('a.result__a, h2 a, a[data-testid="result-title-a"]') || el.querySelector('a[href]');
     if (!a) return;
     const sn = el.querySelector('.result__snippet, .result__body, [data-result="snippet"]');
@@ -237,7 +237,7 @@ func parseBaidu(page *rod.Page, limit int) ([]Result, error) {
     seen.add(key);
     out.push({title, url: href, snippet});
   };
-  const cards = document.querySelectorAll('#content_left .result, #content_left .c-container, #content_left div[srcid], .result.c-container, div.result-op.c-container');
+  const cards = document.querySelectorAll('#content_left .result, #content_left .c-container, #content_left div[srcid], .result.c-container, div.result-op.c-container, #content_left [mu], .c-result');
   cards.forEach((card) => {
     if (out.length >= limit * 2) return;
     if (looksAd(card)) return;

@@ -68,7 +68,7 @@ var engines = map[string]Engine{
 	"google": {
 		Name:    "google",
 		HomeURL: "https://www.google.com/",
-		WaitSel: `#search h3, #rso h3, div#center_col h3, #captcha-form, form#captcha-form, #recaptcha`,
+		WaitSel: `#search h3, #rso h3, div#center_col h3, #captcha-form, form#captcha-form, #recaptcha, iframe[src*="recaptcha"]`,
 		Parse:   parseGoogle,
 	},
 	"bing": {
@@ -80,7 +80,7 @@ var engines = map[string]Engine{
 	"duckduckgo": {
 		Name:    "duckduckgo",
 		HomeURL: "https://duckduckgo.com/",
-		WaitSel: `article[data-testid="result"], li[data-layout="organic"], #web_content_wrapper, .result, #links .result`,
+		WaitSel: `article[data-testid="result"], [data-testid="mainline"], [data-testid="web-vertical"], li[data-layout="organic"], #web_content_wrapper, .result, #links .result, ol.react-results--main`,
 		Parse:   parseDuckDuckGo,
 	},
 	"baidu": {
