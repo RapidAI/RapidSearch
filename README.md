@@ -198,7 +198,18 @@ public clients
                 → http://127.0.0.1:18765
 ```
 
-Shared secret is `SEARCH_TOKEN` (file `./proxy.token`, chmod 600). `run-proxy.sh` generates one if missing. Copy the same file to the other host. The token is never logged.
+Public HTTP `/health`, `/search`, and `/download` accept **either**:
+
+1. `SEARCH_TOKEN` as `Authorization: Bearer …` or `?token=` (ops / internal)
+2. a valid MaClaw Hub viewer, session, or machine token (the signed-in Hub credential). The proxy checks it with `GET {HUB_AUTH_BASE}/api/llm/v1/models` and `Authorization: Bearer <token>`. HTTP 2xx means valid. Timeout is about 5s. Positive results are cached about 5 minutes, keyed by SHA-256 of the token.
+
+Hub login is enough; users never configure a RapidSearch API key. Tokens are never logged.
+
+`HUB_AUTH_BASES` is a comma-separated list of Hub origins. Default: `https://hub.mypapers.top,https://hub.maclaw.top`.
+
+The tunnel `AUTH` line remains `SEARCH_TOKEN` only. Do not put Hub tokens in the tunnel handshake.
+
+Shared secret `SEARCH_TOKEN` (file `./proxy.token`, chmod 600) is still required for the relay tunnel. `run-proxy.sh` generates one if missing. Copy the same file to the other host.
 
 1. On the public VPS:
 
@@ -206,6 +217,7 @@ Shared secret is `SEARCH_TOKEN` (file `./proxy.token`, chmod 600). `run-proxy.sh
 export SEARCH_TOKEN="$(cat proxy.token)"   # or let run-proxy.sh read ./proxy.token
 ./run-proxy.sh
 # PROXY_LISTEN=0.0.0.0:18780  TUNNEL_LISTEN=0.0.0.0:18781
+# HUB_AUTH_BASES defaults to https://hub.mypapers.top,https://hub.maclaw.top
 ```
 
 2. On this box (search-service already running):
@@ -226,7 +238,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
 # equivalently ?token= on the query string
 ```
 
-If no relay is connected, the proxy returns `503 {"error":"search backend offline","code":"offline"}`. Tunnel protocol: TCP, `AUTH <token>` then length-prefixed JSON request/response frames (bodies base64). Latest tunnel connection wins.
+If no relay is connected, the proxy returns `503 {"error":"search backend offline","code":"offline"}`. Tunnel protocol: TCP, `AUTH <SEARCH_TOKEN>` then length-prefixed JSON request/response frames (bodies base64). Latest tunnel connection wins. Hub tokens are not used in that handshake.
 
 Binaries: `go build -o search-proxy ./cmd/proxy` and `go build -o search-relay ./cmd/relay`. Copy them to the VPS; they are static-ish Go binaries (same module).
 

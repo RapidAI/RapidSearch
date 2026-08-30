@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"search-service/internal/proxyauth"
 	"search-service/internal/tunnel"
 )
 
@@ -33,7 +34,10 @@ func main() {
 	publicAddr := getenv("PROXY_LISTEN", "0.0.0.0:18780")
 	tunnelAddr := getenv("TUNNEL_LISTEN", "0.0.0.0:18781")
 
-	hub := newHub(token)
+	bases := proxyauth.ParseBases(os.Getenv("HUB_AUTH_BASES"))
+	auth := proxyauth.New(token, bases)
+	hub := newHub(token, auth)
+	log.Printf("hub token auth bases: %s", strings.Join(bases, ","))
 
 	tunLn, err := net.Listen("tcp", tunnelAddr)
 	if err != nil {
@@ -90,12 +94,15 @@ func getenv(k, def string) string {
 
 type hub struct {
 	token string
+	auth  *proxyauth.Checker
 	mu    sync.Mutex
 	sess  *session
 	seq   atomic.Uint64
 }
 
-func newHub(token string) *hub { return &hub{token: token} }
+func newHub(token string, auth *proxyauth.Checker) *hub {
+	return &hub{token: token, auth: auth}
+}
 
 func (h *hub) close() {
 	h.mu.Lock()
@@ -161,17 +168,7 @@ func (h *hub) current() *session {
 }
 
 func (h *hub) authorized(r *http.Request) bool {
-	var got string
-	if a := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(a), "bearer ") {
-		got = strings.TrimSpace(a[7:])
-	}
-	if got == "" {
-		got = strings.TrimSpace(r.URL.Query().Get("token"))
-	}
-	if got == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(got), []byte(h.token)) == 1
+	return h.auth.Authorized(proxyauth.BearerToken(r))
 }
 
 func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
