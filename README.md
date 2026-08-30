@@ -13,9 +13,9 @@ cd /workspace/search-service
 ./run.sh
 ```
 
-Listens on `127.0.0.1:18765`. Chrome profile (cookies) persists in `./chrome-profile`.
+Listens on `127.0.0.1:18765`. Each Chrome instance keeps cookies in `./chrome-profile/i0`, `i1`, …
 
-监听 `127.0.0.1:18765`。Cookie 保存在 `./chrome-profile`。
+监听 `127.0.0.1:18765`。每个 Chrome 实例的 Cookie 在 `./chrome-profile/i0`、`i1` 等目录。
 
 Stop: `Ctrl+C`, or `pkill -f '/workspace/search-service/search-service'`.
 
@@ -26,7 +26,8 @@ Environment / 环境变量:
 - `DISPLAY` (default `:1`)
 - `CHROME_BIN` (optional chrome path)
 - `SEARCH_LISTEN` (optional, default `127.0.0.1:18765`)
-- `SEARCH_BROWSER_SLOTS` (optional, default `2`, clamp 1–4): max concurrent Chrome SERP loads
+- `SEARCH_BROWSER_INSTANCES` (optional, default `3`, clamp 1–4): independent headed Chrome processes. Each runs **one SERP at a time**. Profiles: `chrome-profile/i0`, `i1`, `i2`. Lazy-launched (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone.
+- `SEARCH_BROWSER_SLOTS` (optional): legacy alias/cap. When set, total in-flight SERPs = `min(instances, slots)`. Per-process is always 1.
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
 
@@ -123,9 +124,9 @@ Only `http`/`https`. `file://`, `javascript:`, `data:` are rejected.
 
 仅允许 http/https。拒绝 `file://`、`javascript:`、`data:`。
 
-The handler streams the upstream bytes with Content-Type and a safe Content-Disposition filename. It retries (3× backoff) on 5xx / timeout / connection reset, follows up to 10 redirects, sends a desktop Chrome UA, and passes through `Range`. If the URL’s host was recently seen in a search, Chrome cookies are reused when practical. net/http runs first; 403 / challenge / empty falls back to Chrome (`WithPage`, does not take a search slot, ~3 min). Size cap is min(512MB, 25% of free disk); larger → 413. Successful bodies under 2MB may be stored as blobs under the same cache budget (not the search JSON store).
+The handler streams the upstream bytes with Content-Type and a safe Content-Disposition filename. It retries (3× backoff) on 5xx / timeout / connection reset, follows up to 10 redirects, sends a desktop Chrome UA, and passes through `Range`. If the URL’s host was recently seen in a search, Chrome cookies are reused when practical. net/http runs first; 403 / challenge / empty falls back to Chrome (`WithPage` on any idle instance, does not take a SERP slot, ~3 min). Size cap is min(512MB, 25% of free disk); larger → 413. Successful bodies under 2MB may be stored as blobs under the same cache budget (not the search JSON store).
 
-先用 net/http 拉取（重试、重定向、Range、桌面 UA）；若该站刚在搜索结果里出现过，会尽量复用 Chrome cookie。403/挑战/空响应再走同一把 Chrome 锁的页面 fetch。单文件不超过 512MB 且不超过空闲盘 25%，否则 413。小于 2MB 的成功下载可进独立 blob 目录，计入同一磁盘预算。
+先用 net/http 拉取（重试、重定向、Range、桌面 UA）；若该站刚在搜索结果里出现过，会尽量复用 Chrome cookie。403/挑战/空响应再走空闲 Chrome 实例的页面 fetch（不占 SERP 槽）。单文件不超过 512MB 且不超过空闲盘 25%，否则 413。小于 2MB 的成功下载可进独立 blob 目录，计入同一磁盘预算。
 
 ```bash
 curl -sS -o /tmp/t.bin 'http://127.0.0.1:18765/download?url=https://example.com/'
@@ -167,9 +168,9 @@ Google is **not** on the China chain (captcha-prone here, wrong corpus).
 
 Explicit `engine=google|bing|baidu|duckduckgo` is predictable: no failover unless `fallback=1`. Auto defaults to failover on (`fallback=0` disables it).
 
-Per-try Chrome timeout ~40s; whole request ~3 min. One engine per `mgr.Do` (search slot released between attempts). Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
+Per-try Chrome timeout ~40s; whole request ~3 min. One engine per `mgr.Do` (that instance’s SERP slot released between attempts). Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-Chrome SERP 工作最多 `SEARCH_BROWSER_SLOTS` 路并发（默认 2）；缓存命中、预处理和正文抽取不受此限制。
+Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/DDG）。缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -253,9 +254,13 @@ Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy
 
 ## Concurrency / 并发
 
-Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. One Chrome process; each SERP uses a **fresh stealth page** (closed afterwards), capped at 2 in-flight loads by default (`SEARCH_BROWSER_SLOTS`, 1–4). Per-engine pacing prevents two slots bursting the same engine (Google 8–15s, Bing/Baidu/DDG 1.5–4s), plus 200–800ms jitter before a SERP starts. Downloads do not take a search slot.
+Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight SERPs = instance count. `SEARCH_BROWSER_SLOTS` if set caps that total (`min(instances, slots)`); per-process is always 1.
 
-相同缓存键的进行中查询合并为一次 Chrome 抓取。缓存命中不走浏览器。单 Chrome 进程，每次搜索用新的 stealth 页（用完关闭），默认最多 2 路 SERP。同一引擎两次打开之间有间隔，避免双槽位连发。下载不占用搜索槽位。
+Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). The next Google uses a non-quarantined instance, or the engine schedule failovers (already baidu/bing/ddg).
+
+Instances launch lazily (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone; the pool is not killed. Downloads (`WithPage`) use any idle instance and do not take a SERP slot.
+
+相同缓存键的进行中查询合并为一次 Chrome 抓取。缓存命中不走浏览器。默认 3 个独立 headed Chrome 进程，每进程同时只跑 1 路 SERP。Google 全池串行并保持 8–15 秒间隔；某实例 Google 验证码后约 10 分钟不再用它打 Google（仍可用于其他引擎）。下载不占用搜索槽位。
 
 ## Limitations / 限制
 

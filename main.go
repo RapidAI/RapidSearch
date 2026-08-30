@@ -55,7 +55,7 @@ func main() {
 			log.Printf("browser warmup failed (will retry on first search): %v", err)
 			return
 		}
-		log.Printf("browser ready (display=%s profile=%s)", display, userData)
+		log.Printf("browser ready (display=%s profile=%s instances=%d)", display, userData, mgr.InstanceCount())
 	}()
 
 	cacheDir := os.Getenv("CACHE_DIR")

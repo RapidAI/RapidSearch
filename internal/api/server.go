@@ -264,7 +264,7 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 		tried = append(tried, eng)
 		log.Printf("search attempt engine=%s requested=%s query=%q fallback=%v chain=%v", eng, requested, shortQuery(q), useFallback, chain)
 
-		err := s.mgr.Do(ctx, func(page *rod.Page) error {
+		err := s.mgr.Do(ctx, eng, func(page *rod.Page) error {
 			searchCtx, cancelSearch := context.WithTimeout(ctx, perTryTimeout)
 			defer cancelSearch()
 			page = page.Context(searchCtx)
@@ -281,6 +281,9 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 			break
 		}
 		lastErr = err
+		if errors.Is(err, browser.ErrNoGoogleInstance) {
+			lastErr = search.NewError(search.CodeCaptcha, "all chrome instances quarantined from google")
+		}
 		if err == nil && len(results) == 0 {
 			lastErr = search.NewError(search.CodeParse, "no organic results parsed from "+eng)
 		}

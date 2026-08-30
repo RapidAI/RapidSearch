@@ -29,6 +29,8 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Msg }
 
+func (e *Error) IsCaptcha() bool { return e != nil && e.Code == CodeCaptcha }
+
 func NewError(code, msg string) *Error { return &Error{Code: code, Msg: msg} }
 
 func Is(err error, code string) bool {

@@ -77,3 +77,33 @@ func TestSlotLimiterCancel(t *testing.T) {
 	}
 	lim.Release()
 }
+
+func TestParseBrowserInstances(t *testing.T) {
+	if ParseBrowserInstances("", "") != 3 {
+		t.Fatalf("default: %d", ParseBrowserInstances("", ""))
+	}
+	if ParseBrowserInstances("nope", "") != 3 {
+		t.Fatal("invalid instances keeps default 3")
+	}
+	if ParseBrowserInstances("0", "") != 1 {
+		t.Fatal("clamp low")
+	}
+	if ParseBrowserInstances("9", "") != 4 {
+		t.Fatal("clamp high")
+	}
+	if ParseBrowserInstances("3", "") != 3 {
+		t.Fatal("pass through")
+	}
+	if ParseBrowserInstances("4", "2") != 2 {
+		t.Fatal("slots cap")
+	}
+	if ParseBrowserInstances("1", "4") != 1 {
+		t.Fatal("instances below slots")
+	}
+	if ParseBrowserInstances("", "2") != 2 {
+		t.Fatal("slots alias when instances unset")
+	}
+	if ParseBrowserInstances("", "0") != 1 {
+		t.Fatal("slots=0 clamps then caps default")
+	}
+}

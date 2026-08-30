@@ -8,13 +8,16 @@ import (
 )
 
 const (
-	defaultBrowserSlots = 2
-	minBrowserSlots     = 1
-	maxBrowserSlots     = 4
+	defaultBrowserSlots     = 2
+	minBrowserSlots         = 1
+	maxBrowserSlots         = 4
+	defaultBrowserInstances = 3
+	minBrowserInstances     = 1
+	maxBrowserInstances     = 4
 )
 
-// SlotLimiter caps overlapping Chrome SERP work. Cache hits and HTTP
-// preprocess/extract do not acquire a slot.
+// SlotLimiter caps overlapping work. Kept for tests and as a legacy helper;
+// SERP concurrency is enforced by the instance scheduler (one SERP per Chrome).
 type SlotLimiter struct {
 	sem chan struct{}
 	n   int
@@ -26,6 +29,16 @@ func ClampSlots(n int) int {
 	}
 	if n > maxBrowserSlots {
 		return maxBrowserSlots
+	}
+	return n
+}
+
+func ClampInstances(n int) int {
+	if n < minBrowserInstances {
+		return minBrowserInstances
+	}
+	if n > maxBrowserInstances {
+		return maxBrowserInstances
 	}
 	return n
 }
@@ -45,6 +58,31 @@ func ParseBrowserSlots(v string) int {
 
 func slotsFromEnv() int {
 	return ParseBrowserSlots(os.Getenv("SEARCH_BROWSER_SLOTS"))
+}
+
+// ParseBrowserInstances resolves the Chrome process pool size.
+// SEARCH_BROWSER_INSTANCES empty/invalid → 3, then clamp 1–4.
+// If SEARCH_BROWSER_SLOTS is set, it is a legacy alias/cap:
+// total in-flight SERPs = min(instances, slots). Each process still runs one SERP.
+func ParseBrowserInstances(instancesEnv, slotsEnv string) int {
+	n := defaultBrowserInstances
+	if v := strings.TrimSpace(instancesEnv); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
+	n = ClampInstances(n)
+	if v := strings.TrimSpace(slotsEnv); v != "" {
+		slots := ParseBrowserSlots(v)
+		if slots < n {
+			n = slots
+		}
+	}
+	return n
+}
+
+func instancesFromEnv() int {
+	return ParseBrowserInstances(os.Getenv("SEARCH_BROWSER_INSTANCES"), os.Getenv("SEARCH_BROWSER_SLOTS"))
 }
 
 func NewSlotLimiter(n int) *SlotLimiter {
