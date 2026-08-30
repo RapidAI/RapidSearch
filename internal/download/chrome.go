@@ -24,7 +24,7 @@ func exportCookies(ctx context.Context, mgr *browser.Manager, raw string) []*htt
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	var out []*http.Cookie
-	err := mgr.Do(ctx, func(page *rod.Page) error {
+	err := mgr.WithPage(ctx, func(page *rod.Page) error {
 		u, err := url.Parse(raw)
 		if err != nil {
 			return err
@@ -65,7 +65,7 @@ func chromeFetch(ctx context.Context, mgr *browser.Manager, raw, rangeHdr string
 		maxBytes = chromeMaxBytes
 	}
 	var cr chromeResult
-	err := mgr.Do(ctx, func(page *rod.Page) error {
+	err := mgr.WithPage(ctx, func(page *rod.Page) error {
 		page = page.Context(ctx)
 		if u, err := url.Parse(raw); err == nil && u.Host != "" {
 			origin := u.Scheme + "://" + u.Host + "/"

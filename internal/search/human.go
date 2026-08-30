@@ -245,23 +245,8 @@ func waitIdleIsh(page *rod.Page) {
 
 var (
 	googleMu    sync.Mutex
-	lastGoogle  time.Time
 	googleFirst = true
 )
-
-func paceGoogle() {
-	googleMu.Lock()
-	defer googleMu.Unlock()
-	if !lastGoogle.IsZero() {
-		// 8–15s between Google attempts so we do not burst from this IP.
-		waitFor := time.Duration(8+rand.Intn(8)) * time.Second
-		if d := waitFor - time.Since(lastGoogle); d > 0 {
-			log.Printf("humanize step=pace engine=google wait_ms=%d", d.Milliseconds())
-			time.Sleep(d)
-		}
-	}
-	lastGoogle = time.Now()
-}
 
 func warmGoogleHomepage(page *rod.Page) {
 	googleMu.Lock()

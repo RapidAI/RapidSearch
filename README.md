@@ -26,6 +26,7 @@ Environment / 环境变量:
 - `DISPLAY` (default `:1`)
 - `CHROME_BIN` (optional chrome path)
 - `SEARCH_LISTEN` (optional, default `127.0.0.1:18765`)
+- `SEARCH_BROWSER_SLOTS` (optional, default `2`, clamp 1–4): max concurrent Chrome SERP loads
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
 
@@ -122,7 +123,7 @@ Only `http`/`https`. `file://`, `javascript:`, `data:` are rejected.
 
 仅允许 http/https。拒绝 `file://`、`javascript:`、`data:`。
 
-The handler streams the upstream bytes with Content-Type and a safe Content-Disposition filename. It retries (3× backoff) on 5xx / timeout / connection reset, follows up to 10 redirects, sends a desktop Chrome UA, and passes through `Range`. If the URL’s host was recently seen in a search, Chrome cookies are reused when practical. net/http runs first; 403 / challenge / empty falls back to the existing Chrome (same mutex as search, ~3 min). Size cap is min(512MB, 25% of free disk); larger → 413. Successful bodies under 2MB may be stored as blobs under the same cache budget (not the search JSON store).
+The handler streams the upstream bytes with Content-Type and a safe Content-Disposition filename. It retries (3× backoff) on 5xx / timeout / connection reset, follows up to 10 redirects, sends a desktop Chrome UA, and passes through `Range`. If the URL’s host was recently seen in a search, Chrome cookies are reused when practical. net/http runs first; 403 / challenge / empty falls back to Chrome (`WithPage`, does not take a search slot, ~3 min). Size cap is min(512MB, 25% of free disk); larger → 413. Successful bodies under 2MB may be stored as blobs under the same cache budget (not the search JSON store).
 
 先用 net/http 拉取（重试、重定向、Range、桌面 UA）；若该站刚在搜索结果里出现过，会尽量复用 Chrome cookie。403/挑战/空响应再走同一把 Chrome 锁的页面 fetch。单文件不超过 512MB 且不超过空闲盘 25%，否则 413。小于 2MB 的成功下载可进独立 blob 目录，计入同一磁盘预算。
 
@@ -166,9 +167,9 @@ Google is **not** on the China chain (captcha-prone here, wrong corpus).
 
 Explicit `engine=google|bing|baidu|duckduckgo` is predictable: no failover unless `fallback=1`. Auto defaults to failover on (`fallback=0` disables it).
 
-Per-try Chrome timeout ~40s; whole request ~3 min. One engine per `mgr.Do` (browser mutex released between attempts). Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
+Per-try Chrome timeout ~40s; whole request ~3 min. One engine per `mgr.Do` (search slot released between attempts). Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-搜索串行执行（同一时间只有一个 Chrome 任务）。并发请求会排队。单引擎尝试约 40 秒，整请求约 3 分钟。
+Chrome SERP 工作最多 `SEARCH_BROWSER_SLOTS` 路并发（默认 2）；缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -249,6 +250,12 @@ Binaries: `go build -o search-proxy ./cmd/proxy` and `go build -o search-relay .
 Windows 11: run `deploy-proxy.cmd` from the repo root (or double-click it). Linux/mac: `./deploy-proxy.sh`. Type the **root** password when `ssh` asks (once). Builds linux/amd64, installs `/opt/search-proxy` on `root@hub.maclaw.top`, and restarts `search-proxy.service`. Override host with env `SEARCH_PROXY_HOST`.
 
 Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy-proxy.sh`。`ssh` 提示时输入一次 root 密码即可。
+
+## Concurrency / 并发
+
+Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. One Chrome process; each SERP uses a **fresh stealth page** (closed afterwards), capped at 2 in-flight loads by default (`SEARCH_BROWSER_SLOTS`, 1–4). Per-engine pacing prevents two slots bursting the same engine (Google 8–15s, Bing/Baidu/DDG 1.5–4s), plus 200–800ms jitter before a SERP starts. Downloads do not take a search slot.
+
+相同缓存键的进行中查询合并为一次 Chrome 抓取。缓存命中不走浏览器。单 Chrome 进程，每次搜索用新的 stealth 页（用完关闭），默认最多 2 路 SERP。同一引擎两次打开之间有间隔，避免双槽位连发。下载不占用搜索槽位。
 
 ## Limitations / 限制
 

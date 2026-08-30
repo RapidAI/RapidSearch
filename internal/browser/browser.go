@@ -25,15 +25,15 @@ type Options struct {
 	Bin         string
 }
 
-// Manager owns one Chrome process and serializes page work so the
-// browser is never raced by concurrent API requests.
+// Manager owns one Chrome process. SERP work is capped by a small slot
+// limiter (default 2); each slot uses a fresh stealth page that is closed
+// after the search. Downloads use WithPage and do not take a search slot.
 type Manager struct {
 	opts    Options
 	mu      sync.Mutex
-	sem     chan struct{}
+	slots   *SlotLimiter
 	browser *rod.Browser
 	launch  *launcher.Launcher
-	page    *rod.Page
 	width   int
 	height  int
 	ua      string
@@ -51,9 +51,11 @@ func New(opts Options) *Manager {
 	}
 	w := 1280 + rand.Intn(41) - 20 // 1260–1320
 	h := 800 + rand.Intn(31) - 15  // 785–815
+	n := slotsFromEnv()
+	log.Printf("browser slots=%d", n)
 	return &Manager{
 		opts:   opts,
-		sem:    make(chan struct{}, 1),
+		slots:  NewSlotLimiter(n),
 		width:  w,
 		height: h,
 	}
@@ -194,16 +196,38 @@ func chromeUA() string {
 	return fmt.Sprintf("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36", major)
 }
 
-// Do serializes work on a fresh stealth page. Concurrent callers queue
-// on a semaphore (one in-flight Chrome search at a time).
+// Do runs fn on a fresh stealth page, capped by SEARCH_BROWSER_SLOTS.
+// The page is closed afterwards and is never reused across users.
 func (m *Manager) Do(ctx context.Context, fn func(*rod.Page) error) error {
+	if err := m.slots.Acquire(ctx); err != nil {
+		return err
+	}
+	defer m.slots.Release()
+	if err := startJitter(ctx); err != nil {
+		return err
+	}
+	return m.withPage(ctx, fn)
+}
+
+// WithPage opens a fresh stealth page without taking a search slot
+// (used by download fallback so downloads are not serialized behind SERP work).
+func (m *Manager) WithPage(ctx context.Context, fn func(*rod.Page) error) error {
+	return m.withPage(ctx, fn)
+}
+
+func startJitter(ctx context.Context) error {
+	d := time.Duration(200+rand.Intn(601)) * time.Millisecond
+	t := time.NewTimer(d)
+	defer t.Stop()
 	select {
-	case m.sem <- struct{}{}:
-		defer func() { <-m.sem }()
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
+}
 
+func (m *Manager) withPage(ctx context.Context, fn func(*rod.Page) error) error {
 	m.mu.Lock()
 	if err := m.ensureLocked(ctx); err != nil {
 		m.mu.Unlock()
@@ -212,30 +236,18 @@ func (m *Manager) Do(ctx context.Context, fn func(*rod.Page) error) error {
 	b := m.browser
 	m.mu.Unlock()
 
-	page, err := m.acquirePage(ctx, b)
+	page, err := m.openFreshPage(ctx, b)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = page.Close() }()
 	page = page.Context(ctx)
 	m.humanizePage(page)
 	return fn(page)
 }
 
-func (m *Manager) acquirePage(ctx context.Context, b *rod.Browser) (*rod.Page, error) {
-	m.mu.Lock()
-	if m.page != nil {
-		if _, err := m.page.Eval(`() => true`); err == nil {
-			p := m.page
-			m.mu.Unlock()
-			return p, nil
-		}
-		_ = m.page.Close()
-		m.page = nil
-	}
-	m.mu.Unlock()
-
-	m.keepSpare(b)
-	page, err := stealth.Page(b)
+func (m *Manager) openFreshPage(ctx context.Context, b *rod.Browser) (*rod.Page, error) {
+	page, err := m.stealthPage(b)
 	if err != nil {
 		m.mu.Lock()
 		m.closeLocked()
@@ -245,16 +257,23 @@ func (m *Manager) acquirePage(ctx context.Context, b *rod.Browser) (*rod.Page, e
 		}
 		b = m.browser
 		m.mu.Unlock()
-		m.keepSpare(b)
-		page, err = stealth.Page(b)
+		page, err = m.stealthPage(b)
 		if err != nil {
 			return nil, fmt.Errorf("open page: %w", err)
 		}
 	}
-	_, _ = page.EvalOnNewDocument(stealthJS)
+	return page, nil
+}
+
+func (m *Manager) stealthPage(b *rod.Browser) (*rod.Page, error) {
 	m.mu.Lock()
-	m.page = page
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	m.keepSpare(b)
+	page, err := stealth.Page(b)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = page.EvalOnNewDocument(stealthJS)
 	return page, nil
 }
 
@@ -271,6 +290,14 @@ func (m *Manager) humanizePage(page *rod.Page) {
 	}
 	if h <= 0 {
 		h = 800
+	}
+	w += rand.Intn(17) - 8
+	h += rand.Intn(13) - 6
+	if w < 1100 {
+		w = 1100
+	}
+	if h < 700 {
+		h = 700
 	}
 	_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
 		Width:             w,
@@ -337,7 +364,6 @@ func (m *Manager) Close() error {
 
 func (m *Manager) closeLocked() error {
 	var err error
-	m.page = nil
 	if m.browser != nil {
 		err = m.browser.Close()
 		m.browser = nil

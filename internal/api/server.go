@@ -24,6 +24,7 @@ type Server struct {
 	cache    *cache.Cache
 	dl       *download.Downloader
 	mux      *http.ServeMux
+	flight   flightGroup
 }
 
 func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Downloader) http.Handler {
@@ -215,10 +216,38 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("search cache=bypass query=%q engine=%s", shortQuery(q), requested)
 	}
 
-	// Whole request ~3 min (WriteTimeout is 3 min). Each Chrome attempt is
-	// ~40s so a 3-engine chain plus preprocess still fits.
-	ctx, cancel := context.WithTimeout(r.Context(), handlerTimeout)
+	// Identical in-flight searches share one Chrome trip. Cache hits above
+	// stay fully concurrent. Inner work uses a detached timeout so one
+	// cancelled client does not abort waiters.
+	v, _, shared := s.flight.Do(cache.Key(keyIn), func() (interface{}, error) {
+		return s.executeLiveSearch(q, requested, limit, wantContent, useFallback, chain, keyIn), nil
+	})
+	if shared {
+		log.Printf("search singleflight=shared query=%q engine=%s", shortQuery(q), requested)
+	}
+	out := v.(liveSearchOut)
+	if out.errStatus != 0 {
+		log.Printf("search query=%q requested=%s tried=%v count=0 took_ms=%d error=%s code=%s", shortQuery(q), requested, out.tried, time.Since(start).Milliseconds(), out.errMsg, out.errCode)
+		writeErr(w, out.errStatus, out.errMsg, out.errCode, out.tried)
+		return
+	}
+	body := out.body
+	body.TookMs = time.Since(start).Milliseconds()
+	writeJSON(w, http.StatusOK, body)
+}
+
+type liveSearchOut struct {
+	body      successBody
+	errStatus int
+	errMsg    string
+	errCode   string
+	tried     []string
+}
+
+func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, useFallback bool, chain []string, keyIn cache.KeyInput) liveSearchOut {
+	ctx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
 	defer cancel()
+	start := time.Now()
 
 	var (
 		results   []search.Result
@@ -261,7 +290,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if wonEngine == "" {
-		took := time.Since(start).Milliseconds()
 		if lastErr == nil {
 			lastErr = search.NewError(search.CodeParse, "all engines failed")
 		}
@@ -280,12 +308,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		case search.CodeCaptcha:
 			status = http.StatusForbidden
 		}
-		log.Printf("search query=%q requested=%s tried=%v count=0 took_ms=%d error=%s code=%s", shortQuery(q), requested, tried, took, msg, code)
-		writeErr(w, status, msg, code, tried)
-		return
+		return liveSearchOut{errStatus: status, errMsg: msg, errCode: code, tried: tried}
 	}
 
-	// Chrome mutex already released. Filter/score (and optional HTTP fetch)
+	// Chrome slot already released. Filter/score (and optional HTTP fetch)
 	// run here so landing-page extraction cannot block other searches.
 	results = search.Preprocess(ctx, results, search.PreprocessOpts{
 		Query:        q,
@@ -305,7 +331,6 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		s.dl.RememberSearchURLs(urls)
 	}
 
-	// Persist after Chrome is released. Do not cache empty / error bodies.
 	if s.cache != nil && len(results) > 0 {
 		s.cache.Put(keyIn, cache.Payload{
 			Query:           q,
@@ -318,7 +343,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("search query=%q engine=%s requested=%s tried=%v count=%d took_ms=%d content=%v error=", shortQuery(q), wonEngine, requested, tried, len(results), took, wantContent)
-	writeJSON(w, http.StatusOK, successBody{
+	return liveSearchOut{body: successBody{
 		Query:           q,
 		Engine:          wonEngine,
 		RequestedEngine: requested,
@@ -326,7 +351,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Results:         results,
 		Count:           len(results),
 		TookMs:          took,
-	})
+	}}
 }
 
 func cacheBypass(r *http.Request) bool {

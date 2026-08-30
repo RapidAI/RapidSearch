@@ -145,9 +145,7 @@ func Run(page *rod.Page, engineName, query string, limit int) ([]Result, error) 
 	limit = ClampLimit(limit)
 	eng := engines[engName]
 
-	if engName == "google" {
-		paceGoogle()
-	}
+	PaceEngine(engName)
 	applyDocumentStealth(page)
 
 	if err := navigateHome(page, eng.HomeURL, eng.Name); err != nil {
