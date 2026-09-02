@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RapidSearch settings</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --ink: #e8eef6;
+      --muted: #8b9bb0;
+      --line: #2a3a4f;
+      --accent: #4ea1ff;
+      --ok: #3dcc8a;
+      --warn: #f0b429;
+      --bad: #f07178;
+      --btn: #243044;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 6px; }
+    p.lead { color: var(--muted); margin: 0 0 22px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 18px 14px;
+      margin-bottom: 16px;
+    }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
+    label.field { display: block; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+    input[type="password"], input[type="text"] {
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      color: var(--ink);
+      font: inherit;
+    }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px; }
+    .badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #243044;
+      color: var(--muted);
+    }
+    .badge.ok { color: var(--ok); }
+    .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+    .engine {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 6px;
+      border-bottom: 1px solid var(--line);
+    }
+    .engine:last-child { border-bottom: 0; }
+    .engine.dragging { opacity: 0.45; }
+    .name { font-weight: 600; }
+    .meta { color: var(--muted); font-size: 12px; }
+    .moves { display: flex; gap: 4px; }
+    button {
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    #status { min-height: 1.3em; color: var(--muted); font-size: 13px; }
+    #status.err { color: var(--bad); }
+    #status.ok { color: var(--ok); }
+    .check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
+    code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>RapidSearch settings</h1>
+  <p class="lead">Optional Serper and Brave API keys, plus the auto-search priority of every engine. Same Hub / <code>SEARCH_TOKEN</code> auth as <code>/search</code>.</p>
+
+  <section>
+    <h2>API keys</h2>
+    <p class="hint">Leave a field empty to keep the stored key. Check “Clear” to wipe it. Keys are stored in <code id="cfgpath">search-config.json</code> (mode 0600) and never returned in full.</p>
+    <label class="field">Serper API key
+      <input id="serper" type="password" autocomplete="off" spellcheck="false" placeholder="Paste key to replace">
+    </label>
+    <div class="row">
+      <span id="serper-state" class="badge">not configured</span>
+      <label class="check"><input type="checkbox" id="clear-serper"> Clear saved Serper key</label>
+    </div>
+    <label class="field">Brave Search API key
+      <input id="brave" type="password" autocomplete="off" spellcheck="false" placeholder="Paste key to replace">
+    </label>
+    <div class="row">
+      <span id="brave-state" class="badge">not configured</span>
+      <label class="check"><input type="checkbox" id="clear-brave"> Clear saved Brave key</label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Engine priority</h2>
+    <p class="hint">Auto uses this enabled order. Disabled engines and keyed APIs without a key are skipped. Drag a row or use the arrows. Google stays off auto unless you enable it (captcha breaker still applies).</p>
+    <div id="engines"></div>
+  </section>
+
+  <div class="actions">
+    <button class="primary" id="save" type="button">Save</button>
+    <span id="status"></span>
+  </div>
+</main>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  const token = params.get("token") || "";
+  let engines = [];
+
+  function configURL() {
+    let p = location.pathname || "/settings";
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    if (p.endsWith("/settings")) return p + "/config";
+    return "/settings/config";
+  }
+
+  function headers(json) {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
+    if (token) h["Authorization"] = "Bearer " + token;
+    return h;
+  }
+
+  function status(msg, cls) {
+    const el = document.getElementById("status");
+    el.textContent = msg || "";
+    el.className = cls || "";
+  }
+
+  function keyBadge(el, info) {
+    if (info && info.configured) {
+      el.textContent = info.last4 ? ("configured · last4 " + info.last4) : "configured";
+      el.className = "badge ok";
+    } else {
+      el.textContent = "not configured";
+      el.className = "badge";
+    }
+  }
+
+  function render() {
+    const box = document.getElementById("engines");
+    box.innerHTML = "";
+    engines.forEach(function (e, i) {
+      const row = document.createElement("div");
+      row.className = "engine";
+      row.draggable = true;
+      row.dataset.idx = String(i);
+
+      const left = document.createElement("label");
+      left.className = "check";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!e.enabled;
+      cb.addEventListener("change", function () { e.enabled = cb.checked; });
+      left.appendChild(cb);
+
+      const mid = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = e.label || e.id;
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      let extra = e.kind || "";
+      if (e.kind === "keyed") extra += e.available ? " · key set" : " · no key (skipped on auto)";
+      if (e.hint) extra += (extra ? " · " : "") + e.hint;
+      meta.textContent = extra;
+      mid.appendChild(name);
+      mid.appendChild(meta);
+
+      const moves = document.createElement("div");
+      moves.className = "moves";
+      const up = document.createElement("button");
+      up.type = "button";
+      up.textContent = "↑";
+      up.disabled = i === 0;
+      up.addEventListener("click", function () { move(i, i - 1); });
+      const down = document.createElement("button");
+      down.type = "button";
+      down.textContent = "↓";
+      down.disabled = i === engines.length - 1;
+      down.addEventListener("click", function () { move(i, i + 1); });
+      moves.appendChild(up);
+      moves.appendChild(down);
+
+      row.appendChild(left);
+      row.appendChild(mid);
+      row.appendChild(moves);
+
+      row.addEventListener("dragstart", function (ev) {
+        row.classList.add("dragging");
+        ev.dataTransfer.setData("text/plain", String(i));
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      row.addEventListener("dragend", function () { row.classList.remove("dragging"); });
+      row.addEventListener("dragover", function (ev) { ev.preventDefault(); });
+      row.addEventListener("drop", function (ev) {
+        ev.preventDefault();
+        const from = parseInt(ev.dataTransfer.getData("text/plain"), 10);
+        if (!isNaN(from)) move(from, i);
+      });
+      box.appendChild(row);
+    });
+  }
+
+  function move(from, to) {
+    if (to < 0 || to >= engines.length || from === to) return;
+    const [item] = engines.splice(from, 1);
+    engines.splice(to, 0, item);
+    render();
+  }
+
+  async function load() {
+    status("Loading…");
+    const res = await fetch(configURL(), { headers: headers(false), credentials: "same-origin" });
+    if (res.status === 401) {
+      status("Unauthorized. Open with a Hub token or SEARCH_TOKEN (?token= or Authorization: Bearer).", "err");
+      return;
+    }
+    if (!res.ok) {
+      status("Failed to load settings (" + res.status + ").", "err");
+      return;
+    }
+    const data = await res.json();
+    document.getElementById("cfgpath").textContent = data.config_path || "search-config.json";
+    keyBadge(document.getElementById("serper-state"), data.serper);
+    keyBadge(document.getElementById("brave-state"), data.brave);
+    engines = Array.isArray(data.priority) ? data.priority : [];
+    render();
+    status("");
+  }
+
+  document.getElementById("save").addEventListener("click", async function () {
+    status("Saving…");
+    const body = {
+      serper_api_key: document.getElementById("serper").value,
+      brave_api_key: document.getElementById("brave").value,
+      clear_serper: document.getElementById("clear-serper").checked,
+      clear_brave: document.getElementById("clear-brave").checked,
+      priority: engines.map(function (e) { return { id: e.id, enabled: !!e.enabled }; })
+    };
+    const res = await fetch(configURL(), {
+      method: "PUT",
+      headers: headers(true),
+      credentials: "same-origin",
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) {
+      status("Unauthorized — not saved.", "err");
+      return;
+    }
+    if (!res.ok) {
+      let msg = "Save failed (" + res.status + ").";
+      try {
+        const err = await res.json();
+        if (err && err.error) msg = err.error;
+      } catch (e) {}
+      status(msg, "err");
+      return;
+    }
+    document.getElementById("serper").value = "";
+    document.getElementById("brave").value = "";
+    document.getElementById("clear-serper").checked = false;
+    document.getElementById("clear-brave").checked = false;
+    status("Saved.", "ok");
+    await load();
+    status("Saved.", "ok");
+  });
+
+  load().catch(function (e) { status(String(e), "err"); });
+})();
+</script>
+</body>
+</html>

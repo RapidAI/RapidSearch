@@ -29,8 +29,18 @@ func TestKeyContentFlagAndNormalize(t *testing.T) {
 	if f1 == f2 {
 		t.Fatal("fallback must be part of the key")
 	}
-	if !strings.HasPrefix(Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}), "v3|q|bing|3|1|") {
+	if !strings.HasPrefix(Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}), "v4|q|bing|3|1|") {
 		t.Fatalf("canonical: %s", Canonical(KeyInput{Query: "Q", Engine: "BING", Limit: 3, Content: true}))
+	}
+	serper := Key(KeyInput{Query: "q", Engine: "serper", Limit: 10})
+	bing := Key(KeyInput{Query: "q", Engine: "bing", Limit: 10})
+	if serper == bing {
+		t.Fatal("serper vs bing must not collide")
+	}
+	autoSerper := Key(KeyInput{Query: "q", Engine: "auto", Limit: 10, ConfigSig: "serper=1,brave=0"})
+	autoBing := Key(KeyInput{Query: "q", Engine: "auto", Limit: 10, ConfigSig: "serper=0,brave=0"})
+	if autoSerper == autoBing {
+		t.Fatal("auto cache must include keyed-engine identity")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"search-service/internal/browser"
 	"search-service/internal/cache"
 	"search-service/internal/download"
+	"search-service/internal/proxyauth"
 	"search-service/internal/search"
 )
 
@@ -32,6 +34,8 @@ type Server struct {
 	hedgeAfter time.Duration
 	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
 	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
+	cfg       *search.Store
+	auth      *proxyauth.Checker
 }
 
 type engineTransport int
@@ -70,11 +74,38 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 		admit:     newChromeAdmit(n),
 		httpAdmit: newHTTPAdmit(),
 	}
+	s.cfg = openSearchConfig()
+	s.auth = newSettingsAuth()
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
+	s.mux.HandleFunc("/settings", s.handleSettingsPage)
+	s.mux.HandleFunc("/settings/config", s.handleSettingsConfig)
 	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
 	s.mux.HandleFunc("/download", s.handleDownload)
 	return s
+}
+
+func openSearchConfig() *search.Store {
+	st, err := search.OpenConfig(search.ConfigPath())
+	if err != nil {
+		log.Printf("search-config: %v (continuing with empty config)", err)
+		st, err = search.OpenConfig("")
+		if err != nil {
+			return nil
+		}
+	}
+	search.ActivateStore(st)
+	return st
+}
+
+func newSettingsAuth() *proxyauth.Checker {
+	token := strings.TrimSpace(os.Getenv("SEARCH_TOKEN"))
+	if token == "" {
+		if b, err := os.ReadFile("proxy.token"); err == nil {
+			token = strings.TrimSpace(string(b))
+		}
+	}
+	return proxyauth.New(token, proxyauth.ParseBases(os.Getenv("HUB_AUTH_BASES")))
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -217,21 +248,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	hints := search.RouteHints{Query: q, Region: region, Locale: locale, HL: hl}
 	useFallback := search.ShouldFallback(requested, fallbackSet, fallback)
-	chain := search.Schedule(requested, useFallback, hints)
+	snap := s.configSnap()
+	chain := search.ScheduleWith(requested, useFallback, hints, snap)
 	if len(chain) == 0 {
 		writeErr(w, http.StatusBadRequest, "no engines scheduled", search.CodeEngine, nil, "")
 		return
 	}
 
 	keyIn := cache.KeyInput{
-		Query:    q,
-		Engine:   requested,
-		Limit:    limit,
-		Content:  wantContent,
-		Region:   region,
-		Locale:   locale,
-		HL:       hl,
-		Fallback: useFallback,
+		Query:     q,
+		Engine:    requested,
+		Limit:     limit,
+		Content:   wantContent,
+		Region:    region,
+		Locale:    locale,
+		HL:        hl,
+		Fallback:  useFallback,
+		ConfigSig: snap.CacheSig(),
 	}
 	bypass := cacheBypass(r)
 
@@ -290,6 +323,13 @@ type liveSearchOut struct {
 	errCode   string
 	errEngine string
 	tried     []string
+}
+
+func (s *Server) configSnap() search.ConfigSnapshot {
+	if s != nil && s.cfg != nil {
+		return s.cfg.Snapshot()
+	}
+	return search.ConfigSnapshot{}
 }
 
 func (s *Server) googleBreaker() *search.GoogleBreaker {

@@ -39,6 +39,15 @@ func TestPathIsDownload(t *testing.T) {
 	}
 }
 
+func TestPathIsSettings(t *testing.T) {
+	if !PathIsSettings("/settings") || !PathIsSettings("/settings/config") || !PathIsSettings("/settings/config?x=1") {
+		t.Fatal("settings path")
+	}
+	if PathIsSettings("/search") || PathIsSettings("/settingsx") {
+		t.Fatal("not settings")
+	}
+}
+
 func TestStreamFrames(t *testing.T) {
 	var buf bytes.Buffer
 	frames := []Frame{

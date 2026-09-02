@@ -76,7 +76,7 @@ func SupportsHTTP(engine string) bool {
 		return false
 	}
 	switch name {
-	case "duckduckgo_html", "sogou", "360", "baidu", "bing":
+	case "duckduckgo_html", "sogou", "360", "baidu", "bing", "serper", "brave":
 		return true
 	default:
 		return false
@@ -169,6 +169,9 @@ func RunHTTP(ctx context.Context, engineName, query string, limit int) ([]Result
 		return nil, err
 	}
 	limit = ClampLimit(limit)
+	if isKeyedEngine(engName) {
+		return runKeyedHTTP(ctx, engName, query, limit)
+	}
 	urls := httpSERPURLs(engName, query)
 	if len(urls) == 0 {
 		return nil, NewError(CodeEngine, engName+" does not support HTTP search")

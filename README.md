@@ -2,9 +2,9 @@
 
 A search service for Agent.
 
-Local HTTP JSON API that searches the web by driving a real Chrome/Chromium window (go-rod + stealth). It does **not** call third-party search APIs.
+Local HTTP JSON API that searches the web with HTTP scrapes, optional keyed APIs (Serper / Brave), and Chrome fallbacks (go-rod + stealth). Third-party search APIs are **off** until you paste a key in the settings page.
 
-本地 HTTP JSON 接口：用真实 Chrome 打开搜索引擎首页，模拟输入并解析结果页。不调用 SerpAPI / CSE 等第三方搜索 API。默认 `engine=auto`：先穷尽 HTTP 引擎（中文：百度→搜狗→360→Bing→DuckDuckGo HTML；英文：DuckDuckGo HTML→Bing→搜狗→360→百度），全部失败且剩余时间足够才走 Chrome。Auto 不打 Google Chrome。
+本地 HTTP JSON 接口：默认仍是 HTTP 抓取 + Chrome 兜底，不调用第三方搜索 API。若在设置页粘贴 Serper / Brave key，`engine=auto`（以及显式 `engine=serper` / `engine=brave`）才会走这些 API。默认 `engine=auto`：先穷尽 HTTP 引擎（中文：百度→搜狗→360→Bing→DuckDuckGo HTML；英文：DuckDuckGo HTML→Bing→搜狗→360→百度），有 key 时 Serper→Brave 会排在最前；全部失败且剩余时间足够才走 Chrome。Auto 默认不打 Google Chrome。
 
 ## Run / 启动
 
@@ -34,12 +34,40 @@ Environment / 环境变量:
 - `SEARCH_HTTP_TRY_TIMEOUT` (optional, default `5s`, clamp 1–15s): per-engine HTTP GET budget so failover to the next HTTP engine is fast.
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
+- `SEARCH_CONFIG_PATH` (optional, default `./search-config.json`): API keys + engine priority. Created with mode `0600`, gitignored. Never commit this file.
+- `SEARCH_TOKEN` (optional on the search process): same secret as the public proxy. Required to open `/settings` locally unless you send a Hub viewer/session/machine token. If unset, `./proxy.token` is read when present.
+- `HUB_AUTH_BASES` (optional): comma-separated Hub origins used to validate Hub tokens on `/settings`. Default `https://hub.mypapers.top,https://hub.maclaw.top`.
 
 ## API
 
 `GET /health` → `{"ok":true}`
 
-`GET /search?q=<query>&engine=auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360&n=10&content=1&fallback=1`
+### Settings / 设置页
+
+Authenticated HTML + JSON on the search process (same Hub viewer/session/machine token **or** `SEARCH_TOKEN` as public `/search`):
+
+- `GET /settings` — HTML form (password fields for Serper / Brave, enable + drag or ↑↓ priority)
+- `GET /settings/config` — masked JSON (`configured` yes/no, optional `last4`). Never returns raw keys. Unauthenticated → **401**.
+- `PUT /settings/config` — update keys and/or priority. An empty key string **does not wipe** a stored key; send `"clear_serper": true` / `"clear_brave": true` to delete.
+
+Listen locally at `http://127.0.0.1:18765/settings` (Bearer or `?token=`). search-proxy also exposes `/settings` and `/settings/config`, so Hub can open `https://hub.maclaw.top/searchproxy/settings` if nginx already prefixes `/searchproxy/` to the proxy. Do not bind the search process to `0.0.0.0`.
+
+本地打开 `http://127.0.0.1:18765/settings`。公网路径在反代已转发 `/searchproxy/` 时为 `https://hub.maclaw.top/searchproxy/settings`。未认证一律 401，不会泄露 key。
+
+Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
+
+**Default auto priority** (no saved file):
+
+| keys | China | Global |
+|---|---|---|
+| none | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` → `duckduckgo` | `duckduckgo_html` → `bing` → `sogou` → `360` → `baidu` → `duckduckgo` |
+| Serper and/or Brave set | `serper` then `brave` (only if that key exists) **prepended**, then the same HTTP-first chain | same prepend |
+
+Google is **omitted** on auto unless you enable it in a saved priority list. If enabled, the captcha breaker still skips / fail-fasts when open. After you save a custom order, auto uses that enabled list (disabled engines and keyed engines without a key are skipped).
+
+**Auth:** `/settings` and `/settings/config` require `Authorization: Bearer …` or `?token=` — `SEARCH_TOKEN` (or `./proxy.token`) or a Hub token accepted by `GET {HUB}/api/llm/v1/models`. Local `/search` on `127.0.0.1` stays open; the public proxy still authenticates `/search`.
+
+`GET /search?q=<query>&engine=auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360|serper|brave&n=10&content=1&fallback=1`
 
 Optional routing hints: `region=cn`, `locale=zh`, `hl=zh-CN`.
 
@@ -120,8 +148,8 @@ Successful search JSON (after preprocess) is stored under `./cache` on disk. Err
 
 成功的搜索 JSON（预处理后）写入 `./cache`。错误、验证码、超时、空结果不缓存。
 
-- Key = SHA-256 of `v3|` + normalized query + engine + limit + content flag + region/locale/hl + fallback. `content=0` and `content=1` are different keys. Version bump avoids serving pre-`ok` bodies as `ok: false`.
-- 缓存键 = `v3|` + 规范化查询 + 引擎 + limit + content + region/locale/hl + fallback 的 SHA-256。`content=0` 与 `content=1` 是不同的键。
+- Key = SHA-256 of `v4|` + normalized query + engine + limit + content flag + region/locale/hl + fallback + config signature (which keyed engines have keys / enabled order). `engine=serper` and `engine=bing` never share a cache entry. `content=0` and `content=1` are different keys.
+- 缓存键 = `v4|` + 规范化查询 + 引擎 + limit + content + region/locale/hl + fallback + 配置指纹（哪些付费引擎有 key / 启用顺序）的 SHA-256。`engine=serper` 与 `engine=bing` 不会撞键。
 - Eviction is LFU then LRU. TTL default **1 hour** (`CACHE_TTL`, e.g. `1h`).
 - 淘汰：先 LFU 再 LRU。TTL 默认 1 小时（`CACHE_TTL`）。
 - **Disk budget**: `syscall.Statfs` on the cache dir. Budget = clamp(5% of filesystem size, 64MB min, 2GB max) **and** never more than 25% of currently free space. Recomputed on start, every 5 minutes, and before write.
@@ -169,6 +197,8 @@ Public proxy (Bearer token) also exposes `/download`; the relay streams the file
 | `360` | https://www.so.com/s?q= | HTTP then Chrome | `so360` |
 | `duckduckgo_html` | https://html.duckduckgo.com/html/ | HTTP only (no Chrome slot) | `ddg_html` |
 | `duckduckgo` | https://duckduckgo.com/ | Chrome (HTML is tried first) | `ddg`, `duck` |
+| `serper` | https://google.serper.dev/search | Keyed HTTP API (no Chrome slot); skipped on auto without a key | |
+| `brave` | https://api.search.brave.com/res/v1/web/search | Keyed HTTP API (no Chrome slot); skipped on auto without a key | |
 
 ### Auto routing / 自动调度
 
@@ -184,16 +214,17 @@ Failover chains (next engine on captcha, timeout, parse error, or empty results;
 
 | path | HTTP first (no Chrome slot) | Chrome only if HTTP exhausted and remaining time exceeds `SEARCH_CHROME_MIN_REMAIN` |
 |---|---|---|
-| China | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` | `duckduckgo` |
-| Global | `duckduckgo_html` → `bing` → `sogou` → `360` → `baidu` | `duckduckgo` |
+| China | (`serper` → `brave` if keys exist) `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` | `duckduckgo` |
+| Global | (`serper` → `brave` if keys exist) `duckduckgo_html` → `bing` → `sogou` → `360` → `baidu` | `duckduckgo` |
+| Saved settings priority | enabled engines in that order (keyed APIs without a key skipped) | Chrome-only leftovers (`duckduckgo`, and `google` only if enabled) |
 
-Google is **not** on either auto chain. A datacenter IP will not spend the ~170s handler budget on Google Chrome during auto (the process-wide breaker starts closed, so “skip only when tripped” was not enough). `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`). Dual engines (`baidu` / `sogou` / `360` / `bing`) are attempted as HTTP on auto; their Chrome fallback is **not** started until every HTTP engine has failed, and only when that engine was explicitly requested. If bing HTTP fails, auto tries `duckduckgo_html` (and sogou/360/baidu) **before** any Chrome. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=baidu` / `engine=bing` / `engine=duckduckgo_html` try HTTP first (Chrome only if the GET/parse fails). `engine=google` is still Chrome-only.
+Google is **not** on either built-in auto chain. Enable it in Settings if you want it on auto (breaker still applies). Keyed APIs share the HTTP admission cap (`SEARCH_HTTP_MAX`); they never take a Chrome slot. Explicit `engine=serper` / `engine=brave` without a key returns `ok:false` with `code=unauthorized` (HTTP 401), never HTTP 200 empty. A datacenter IP will not spend the ~170s handler budget on Google Chrome during auto unless you enabled google. `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`). Dual engines (`baidu` / `sogou` / `360` / `bing`) are attempted as HTTP on auto; their Chrome fallback is **not** started until every HTTP engine has failed, and only when that engine was explicitly requested. If bing HTTP fails, auto tries `duckduckgo_html` (and sogou/360/baidu) **before** any Chrome. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=baidu` / `engine=bing` / `engine=duckduckgo_html` / `engine=serper` / `engine=brave` try HTTP first. `engine=google` is still Chrome-only.
 
-**Google circuit breaker** (process-wide, in addition to per-instance quarantine): auto always omits Google. After a Google captcha or “no Google Chrome instance”, explicit `engine=google` with `fallback=1` **skips Google for ~15 minutes**. A half-open probe allows one explicit Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` with no fallback: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait).
+**Google circuit breaker** (process-wide, in addition to per-instance quarantine): built-in auto omits Google. If you enable google in Settings, an open breaker still **skips** it on auto (or **fails fast** for explicit `engine=google` with no fallback). After a Google captcha or “no Google Chrome instance”, explicit `engine=google` with `fallback=1` **skips Google for ~15 minutes**. A half-open probe allows one Google attempt after 15 minutes; success closes the breaker.
 
 **HTTP then Chrome** (auto/fallback): HTTP engines run sequentially with a short per-try timeout (`SEARCH_HTTP_TRY_TIMEOUT`, default 5s) and a separate admission cap (`SEARCH_HTTP_MAX`, default 10). One request holds one HTTP slot across its HTTP chain so failover does not re-queue. Hedge (3s, max 2 in-flight) applies only to the Chrome phase after HTTP is exhausted — it cannot steal a Chrome slot while HTTP engines remain. Chrome waits on `SEARCH_BROWSER_INSTANCES` (clamp 1–4). First HTTP success wins. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
 
-Explicit `engine=google|bing|baidu|sogou|360|duckduckgo_html` is predictable: no failover unless `fallback=1`. `engine=duckduckgo` still tries HTML then Chrome once. Auto defaults to failover on (`fallback=0` disables it).
+Explicit `engine=google|bing|baidu|sogou|360|duckduckgo_html|serper|brave` is predictable: no failover unless `fallback=1`. `engine=duckduckgo` still tries HTML then Chrome once. Auto defaults to failover on (`fallback=0` disables it).
 
 Per-try Chrome timeout ~40s; whole request ~3 min. Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
@@ -229,7 +260,7 @@ public clients
                 → http://127.0.0.1:18765
 ```
 
-Public HTTP `/health`, `/search`, and `/download` accept **either**:
+Public HTTP `/health`, `/search`, `/download`, `/settings`, and `/settings/config` accept **either**:
 
 1. `SEARCH_TOKEN` as `Authorization: Bearer …` or `?token=` (ops / internal)
 2. a valid MaClaw Hub viewer, session, or machine token (the signed-in Hub credential). The proxy checks it with `GET {HUB_AUTH_BASE}/api/llm/v1/models` and `Authorization: Bearer <token>`. HTTP 2xx means valid. Timeout is about 5s. Positive results are cached about 5 minutes, keyed by SHA-256 of the token.
@@ -266,6 +297,8 @@ TOKEN="$(cat proxy.token)"
 curl -sS -H "Authorization: Bearer $TOKEN" http://PUBLIC_IP:18780/health
 curl -sS -H "Authorization: Bearer $TOKEN" \
   'http://PUBLIC_IP:18780/search?q=北京天气&n=3&content=0'
+# settings UI (also https://hub.maclaw.top/searchproxy/settings when nginx prefixes /searchproxy/)
+curl -sS -H "Authorization: Bearer $TOKEN" http://PUBLIC_IP:18780/settings/config
 # equivalently ?token= on the query string
 ```
 

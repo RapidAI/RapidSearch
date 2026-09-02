@@ -248,6 +248,75 @@ func TestIsChromeOnly(t *testing.T) {
 	if IsChromeOnly("bing") || IsChromeOnly("baidu") || IsChromeOnly("duckduckgo_html") || IsChromeOnly("auto") {
 		t.Fatal("dual/http/auto are not chrome-only")
 	}
+	if IsChromeOnly("serper") || IsChromeOnly("brave") {
+		t.Fatal("keyed APIs are HTTP-only")
+	}
+}
+
+func TestScheduleAutoSkipsSerperWithoutKey(t *testing.T) {
+	for _, q := range []string{"golang http server", "北京天气"} {
+		chain := ScheduleWith("auto", true, RouteHints{Query: q}, ConfigSnapshot{})
+		if containsEngine(chain, "serper") || containsEngine(chain, "brave") {
+			t.Fatalf("no-key auto must skip keyed engines: %v", chain)
+		}
+	}
+	// Built-in chains stay unchanged when no keys.
+	gl := ScheduleWith("auto", true, RouteHints{Query: "golang http server"}, ConfigSnapshot{})
+	if !reflect.DeepEqual(gl, []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
+		t.Fatalf("global: %v", gl)
+	}
+}
+
+func TestSchedulePrependsKeyedWhenKeysExist(t *testing.T) {
+	cfg := ConfigSnapshot{SerperKey: "s", BraveKey: "b"}
+	gl := ScheduleWith("auto", true, RouteHints{Query: "golang http server"}, cfg)
+	if !reflect.DeepEqual(gl, []string{"serper", "brave", "duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
+		t.Fatalf("prepend global: %v", gl)
+	}
+	cn := ScheduleWith("auto", true, RouteHints{Query: "北京天气"}, cfg)
+	if !reflect.DeepEqual(cn, []string{"serper", "brave", "baidu", "sogou", "360", "bing", "duckduckgo_html", "duckduckgo"}) {
+		t.Fatalf("prepend china: %v", cn)
+	}
+}
+
+func TestScheduleCustomPriorityOrder(t *testing.T) {
+	cfg := ConfigSnapshot{
+		SerperKey: "s",
+		BraveKey:  "b",
+		Custom:    true,
+		Priority: []EnginePref{
+			{ID: "brave", Enabled: true},
+			{ID: "bing", Enabled: true},
+			{ID: "serper", Enabled: true},
+			{ID: "duckduckgo_html", Enabled: false},
+			{ID: "google", Enabled: true},
+		},
+	}
+	chain := ScheduleWith("auto", true, RouteHints{Query: "golang"}, cfg)
+	if !reflect.DeepEqual(chain, []string{"brave", "bing", "serper", "google"}) {
+		t.Fatalf("custom: %v", chain)
+	}
+	http, chrome := PartitionHTTPChrome(chain, "auto", true)
+	if !reflect.DeepEqual(http, []string{"brave", "bing", "serper"}) {
+		t.Fatalf("http=%v", http)
+	}
+	if !reflect.DeepEqual(chrome, []string{"google"}) {
+		t.Fatalf("chrome=%v", chrome)
+	}
+
+	noBrave := ConfigSnapshot{
+		SerperKey: "s",
+		Custom:    true,
+		Priority: []EnginePref{
+			{ID: "brave", Enabled: true},
+			{ID: "serper", Enabled: true},
+			{ID: "bing", Enabled: true},
+		},
+	}
+	chain = ScheduleWith("auto", true, RouteHints{Query: "golang"}, noBrave)
+	if !reflect.DeepEqual(chain, []string{"serper", "bing"}) {
+		t.Fatalf("missing brave key should skip brave: %v", chain)
+	}
 }
 
 func indexOf(chain []string, name string) int {

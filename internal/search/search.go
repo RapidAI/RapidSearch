@@ -117,6 +117,16 @@ var engines = map[string]Engine{
 		Parse:   parse360,
 		SERPURL: func(q string) string { return engineSERPURL("360", q) },
 	},
+	"serper": {
+		Name:     "serper",
+		HomeURL:  "https://google.serper.dev/",
+		HTTPOnly: true,
+	},
+	"brave": {
+		Name:     "brave",
+		HomeURL:  "https://api.search.brave.com/",
+		HTTPOnly: true,
+	},
 }
 
 // NormalizeEngine maps user input to auto or a concrete engine name.
@@ -137,7 +147,7 @@ func NormalizeEngine(s string) (string, error) {
 		s = "360"
 	}
 	if _, ok := engines[s]; !ok {
-		return "", NewError(CodeEngine, fmt.Sprintf("unsupported engine %q (use auto, google, bing, baidu, duckduckgo, duckduckgo_html, sogou, 360)", s))
+		return "", NewError(CodeEngine, fmt.Sprintf("unsupported engine %q (use auto, google, bing, baidu, duckduckgo, duckduckgo_html, sogou, 360, serper, brave)", s))
 	}
 	return s, nil
 }
