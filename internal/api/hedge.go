@@ -18,6 +18,35 @@ const (
 
 type engineRun func(ctx context.Context, engine string) ([]search.Result, error)
 
+func runSequentialChain(ctx context.Context, chain []string, run engineRun) (won string, results []search.Result, tried []string, lastErr error) {
+	if len(chain) == 0 {
+		return "", nil, nil, search.NewError(search.CodeEngine, "no engines scheduled")
+	}
+	for _, eng := range chain {
+		if err := ctx.Err(); err != nil {
+			if lastErr == nil {
+				lastErr = search.NewError(search.CodeTimeout, "search timed out")
+			}
+			return "", nil, tried, lastErr
+		}
+		tried = append(tried, eng)
+		res, err := run(ctx, eng)
+		if err == nil && len(res) > 0 {
+			log.Printf("search sequential=win engine=%s tried=%v", eng, tried)
+			return eng, res, tried, nil
+		}
+		lastErr = err
+		if lastErr == nil {
+			lastErr = search.NewError(search.CodeParse, "no organic results parsed from "+eng)
+		}
+		log.Printf("search sequential=next after engine=%s code=%s", eng, search.CodeOf(lastErr))
+	}
+	if lastErr == nil {
+		lastErr = search.NewError(search.CodeParse, "all engines failed")
+	}
+	return "", nil, tried, lastErr
+}
+
 func runHedgedChain(ctx context.Context, chain []string, delay time.Duration, run engineRun) (won string, results []search.Result, tried []string, lastErr error) {
 	if delay <= 0 {
 		delay = defaultHedgeDelay

@@ -12,11 +12,13 @@ var cnIntentTokens = []string{
 	"xiaohongshu", "bytedance",
 }
 
-// Failover chains. Google is omitted from the China chain: it is captcha-prone
-// here and not the right corpus for CN queries.
+// Failover chains. HTTP-capable engines come first so auto can finish without
+// a Chrome slot. Google is omitted from both auto chains: a datacenter IP
+// burns the handler budget on Google Chrome before any captcha can trip the
+// breaker.
 var (
 	chinaChain  = []string{"baidu", "sogou", "360", "bing", "duckduckgo_html", "duckduckgo"}
-	globalChain = []string{"duckduckgo_html", "bing", "google", "duckduckgo"}
+	globalChain = []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}
 )
 
 // RouteHints are optional API signals used with the query to pick a chain.
@@ -140,4 +142,60 @@ func Schedule(requested string, fallback bool, h RouteHints) []string {
 		out = append(out, e)
 	}
 	return out
+}
+
+// IsChromeOnly is true for engines that have no HTTP SERP path (google, duckduckgo).
+func IsChromeOnly(engine string) bool {
+	name, err := NormalizeEngine(engine)
+	if err != nil || name == "auto" {
+		return false
+	}
+	return NeedsChrome(name) && !SupportsHTTP(name)
+}
+
+// PartitionHTTPChrome splits a scheduled chain so every HTTP-capable engine
+// is attempted as HTTP before any Chrome slot is acquired.
+//
+// Dual engines (baidu/sogou/360/bing) are HTTP-only on auto. Their Chrome
+// fallback is only queued when that engine was explicitly requested.
+// Auto never includes Google Chrome. Chrome-only leftovers (duckduckgo,
+// and google when explicitly requested) run after HTTP is exhausted.
+func PartitionHTTPChrome(chain []string, requested string, fallback bool) (httpChain, chromeChain []string) {
+	_ = fallback
+	requested, _ = NormalizeEngine(requested)
+	auto := requested == "auto"
+
+	seenH := make(map[string]bool, len(chain))
+	seenC := make(map[string]bool, len(chain))
+	for _, e := range chain {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" || e == "auto" {
+			continue
+		}
+		if SupportsHTTP(e) && !seenH[e] {
+			httpChain = append(httpChain, e)
+			seenH[e] = true
+		}
+	}
+	for _, e := range chain {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" || e == "auto" || seenC[e] || !NeedsChrome(e) {
+			continue
+		}
+		if IsChromeOnly(e) {
+			if auto && e == "google" {
+				continue
+			}
+			chromeChain = append(chromeChain, e)
+			seenC[e] = true
+			continue
+		}
+		// Dual-engine Chrome only for an explicit request (single-engine or
+		// after the HTTP chain has already been tried).
+		if !auto && e == requested {
+			chromeChain = append(chromeChain, e)
+			seenC[e] = true
+		}
+	}
+	return httpChain, chromeChain
 }

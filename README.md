@@ -4,7 +4,7 @@ A search service for Agent.
 
 Local HTTP JSON API that searches the web by driving a real Chrome/Chromium window (go-rod + stealth). It does **not** call third-party search APIs.
 
-本地 HTTP JSON 接口：用真实 Chrome 打开搜索引擎首页，模拟输入并解析结果页。不调用 SerpAPI / CSE 等第三方搜索 API。默认 `engine=auto`：中文/中国相关走百度→搜狗→360，其余走 DuckDuckGo HTML→Bing（Google 在熔断关闭时仍可试），失败则按链 failover。
+本地 HTTP JSON 接口：用真实 Chrome 打开搜索引擎首页，模拟输入并解析结果页。不调用 SerpAPI / CSE 等第三方搜索 API。默认 `engine=auto`：先穷尽 HTTP 引擎（中文：百度→搜狗→360→Bing→DuckDuckGo HTML；英文：DuckDuckGo HTML→Bing→搜狗→360→百度），全部失败且剩余时间足够才走 Chrome。Auto 不打 Google Chrome。
 
 ## Run / 启动
 
@@ -28,8 +28,10 @@ Environment / 环境变量:
 - `SEARCH_LISTEN` (optional, default `127.0.0.1:18765`)
 - `SEARCH_BROWSER_INSTANCES` (optional, default `3`, clamp 1–4): independent headed Chrome processes. Each runs **one SERP at a time**. This is also the Chrome **admission** cap (in-flight Chrome jobs). Profiles: `chrome-profile/i0`, `i1`, `i2`. Lazy-launched (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone.
 - `SEARCH_BROWSER_SLOTS` (optional): legacy alias/cap. When set, total in-flight SERPs = `min(instances, slots)`. Per-process is always 1.
-- `SEARCH_QUEUE_MAX` (optional, default `0` = unlimited waiters): max Chrome jobs waiting for a slot. Overflow returns `{"ok":false,"code":"busy"}` (HTTP 503) instead of sitting until 504. HTTP-only work never queues.
-- `SEARCH_CHROME_MIN_REMAIN` (optional, default `15s`): do not start a Chrome SERP if remaining handler time is below this (Go duration or integer seconds). Those requests fail with `code=timeout` so a doomed 40s try is not started.
+- `SEARCH_QUEUE_MAX` (optional, default `0` = unlimited waiters): max Chrome **or** HTTP jobs waiting for a slot. Overflow returns `{"ok":false,"code":"busy"}` (HTTP 503) instead of sitting until 504.
+- `SEARCH_CHROME_MIN_REMAIN` (optional, default `15s`): do not start a Chrome SERP if remaining handler time is below this (Go duration or integer seconds). Those requests fail with `code=timeout` so a doomed 40s try is not started. Chrome is only considered after the HTTP chain is exhausted.
+- `SEARCH_HTTP_MAX` (optional, default `10`, clamp 1–32; `0` = unlimited): max in-flight HTTP SERP fetches. Extra clients wait on the ~170s handler deadline instead of stampeding baidu/bing. Overflow that cannot start in time returns `code=timeout` / `busy` — never HTTP 200 with empty results. HTTP waiters do **not** take a Chrome slot.
+- `SEARCH_HTTP_TRY_TIMEOUT` (optional, default `5s`, clamp 1–15s): per-engine HTTP GET budget so failover to the next HTTP engine is fast.
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
 
@@ -93,7 +95,7 @@ Success (HTTP 200):
 }
 ```
 
-`ok` is always `true` on HTTP 200. `engine` is the engine that actually produced results (never `"auto"`). `requested_engine` is what the caller asked for. `tried` lists every engine attempted. `skipped` is present when the Google circuit breaker dropped Google from an auto/fallback chain (so Bing winning is expected, not a silent engine swap).
+`ok` is always `true` on HTTP 200. `engine` is the engine that actually produced results (never `"auto"`). `requested_engine` is what the caller asked for. `tried` lists every engine attempted. `skipped` is present when Google was dropped from an auto chain (auto never spends the handler budget on Google Chrome).
 
 **Non-200 is a failure.** Do not treat HTTP 4xx/5xx as “no hits”. The discriminator is `code`, not an empty `results` array. Engine failure (captcha, timeout, parse, offline) is **never** HTTP 200 with `results: []`. A genuine zero-hit success would be HTTP 200 + `ok: true` + empty `results`; this service currently returns an error instead of 200-empty when the engine fails to parse organic hits.
 
@@ -109,7 +111,7 @@ Errors: HTTP 4xx/5xx with:
 }
 ```
 
-`code` is one of `captcha` | `timeout` | `busy` | `parse` | `offline` | `unauthorized` | `engine` | `bad_request`. `error` is short English. `engine` is the last engine tried when known. Error responses are not cached. `busy` (HTTP 503) means the Chrome admission queue was full (`SEARCH_QUEUE_MAX`). `timeout` (HTTP 504) includes “could not start Chrome before the handler deadline”.
+`code` is one of `captcha` | `timeout` | `busy` | `parse` | `offline` | `unauthorized` | `engine` | `bad_request`. `error` is short English. `engine` is the last engine tried when known. Error responses are not cached. `busy` (HTTP 503) means the Chrome or HTTP admission queue was full (`SEARCH_QUEUE_MAX`). `timeout` (HTTP 504) includes “could not start HTTP or Chrome before the handler deadline”.
 
 
 ## Result cache / 结果缓存
@@ -180,22 +182,22 @@ Public proxy (Bearer token) also exposes `/download`; the relay streams the file
 
 Failover chains (next engine on captcha, timeout, parse error, or empty results; never retry the same engine):
 
-| path | chain |
-|---|---|
-| China | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` → `duckduckgo` |
-| Global | `duckduckgo_html` → `bing` → `google` → `duckduckgo` |
+| path | HTTP first (no Chrome slot) | Chrome only if HTTP exhausted and remaining time exceeds `SEARCH_CHROME_MIN_REMAIN` |
+|---|---|---|
+| China | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` | `duckduckgo` |
+| Global | `duckduckgo_html` → `bing` → `sogou` → `360` → `baidu` | `duckduckgo` |
 
-Google is **not** on the China chain (captcha-prone here, wrong corpus). Global tries DuckDuckGo HTML before Google so auto can succeed without waiting on a captcha. `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`) and does **not** take a Chrome SERP slot. If HTML returns 0 hits, Chrome DuckDuckGo remains later in the chain. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=baidu` / `engine=bing` / `engine=duckduckgo_html` try HTTP first (Chrome only if the GET/parse fails). `engine=google` is still Chrome-only.
+Google is **not** on either auto chain. A datacenter IP will not spend the ~170s handler budget on Google Chrome during auto (the process-wide breaker starts closed, so “skip only when tripped” was not enough). `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`). Dual engines (`baidu` / `sogou` / `360` / `bing`) are attempted as HTTP on auto; their Chrome fallback is **not** started until every HTTP engine has failed, and only when that engine was explicitly requested. If bing HTTP fails, auto tries `duckduckgo_html` (and sogou/360/baidu) **before** any Chrome. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=baidu` / `engine=bing` / `engine=duckduckgo_html` try HTTP first (Chrome only if the GET/parse fails). `engine=google` is still Chrome-only.
 
-**Google circuit breaker** (process-wide, in addition to per-instance quarantine): after a Google captcha or “no Google Chrome instance”, auto/fallback chains **skip Google for ~15 minutes** (global becomes `duckduckgo_html` → `bing` → `duckduckgo`). A half-open probe allows one Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` is still attempted: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait), or skips to the next engine when `fallback=1`.
+**Google circuit breaker** (process-wide, in addition to per-instance quarantine): auto always omits Google. After a Google captcha or “no Google Chrome instance”, explicit `engine=google` with `fallback=1` **skips Google for ~15 minutes**. A half-open probe allows one explicit Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` with no fallback: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait).
 
-**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts in parallel (cap 2 in-flight engines per request). HTML / HTTP-first engines (`duckduckgo_html`, and HTTP probes for sogou/360/baidu/bing) do not take a Chrome instance slot. Chrome fallback waits on the admission queue (bounded to `SEARCH_BROWSER_INSTANCES`) instead of starting a Chrome job per client. First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
+**HTTP then Chrome** (auto/fallback): HTTP engines run sequentially with a short per-try timeout (`SEARCH_HTTP_TRY_TIMEOUT`, default 5s) and a separate admission cap (`SEARCH_HTTP_MAX`, default 10). One request holds one HTTP slot across its HTTP chain so failover does not re-queue. Hedge (3s, max 2 in-flight) applies only to the Chrome phase after HTTP is exhausted — it cannot steal a Chrome slot while HTTP engines remain. Chrome waits on `SEARCH_BROWSER_INSTANCES` (clamp 1–4). First HTTP success wins. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
 
 Explicit `engine=google|bing|baidu|sogou|360|duckduckgo_html` is predictable: no failover unless `fallback=1`. `engine=duckduckgo` still tries HTML then Chrome once. Auto defaults to failover on (`fallback=0` disables it).
 
 Per-try Chrome timeout ~40s; whole request ~3 min. Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。额外请求在准入队列里等槽，而不是每人开一路 Chrome 等到 504。`duckduckgo_html` 以及百度/Bing/搜狗/360 的 HTTP 探测与落地页抽取/下载一样不占 Chrome 槽。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/搜狗/360/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
+Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。额外 Chrome 请求在准入队列里等槽。HTTP SERP 另有 `SEARCH_HTTP_MAX`（默认 10）路并发，不占 Chrome 槽；100 路 stampede 在 HTTP 队列上等，而不是同时打爆百度/Bing 后再卡在 3 个 Chrome 上。Auto 先穷尽 HTTP 再考虑 Chrome。Google 全池串行并保持 8–15s 间隔；auto 不打 Google。缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -279,9 +281,9 @@ Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy
 
 ## Concurrency / 并发
 
-Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight Chrome SERPs = instance count. Extra Chrome work **waits in an admission queue** (handler timeout ~170s) instead of overlapping until 504. If a request cannot start Chrome before the deadline it returns `ok:false` with `code=timeout` (or `busy` when `SEARCH_QUEUE_MAX` is set and the waiter list is full) — never HTTP 200 with empty results. `SEARCH_BROWSER_SLOTS` if set caps that total (`min(instances, slots)`); per-process is always 1.
+Identical in-flight searches (same cache key) share one live trip via singleflight. Cache hits never touch Chrome or HTTP SERP. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight Chrome SERPs = instance count. Extra Chrome work **waits in an admission queue** (handler timeout ~170s). HTTP SERP fetches are capped separately by `SEARCH_HTTP_MAX` (default 10) so a 100-way stampede queues instead of opening 100 baidu/bing GETs. If a request cannot start HTTP or Chrome before the deadline it returns `ok:false` with `code=timeout` (or `busy` when `SEARCH_QUEUE_MAX` is set and the waiter list is full) — never HTTP 200 with empty results. `SEARCH_BROWSER_SLOTS` if set caps Chrome (`min(instances, slots)`); per-process is always 1.
 
-Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). A **process-wide Google breaker** then skips Google on auto/fallback for ~15 minutes so later requests do not queue behind captcha. Hedged failover may start the next engine after ~3s (max 2 in-flight engines per request); HTTP probes do not take a slot, and Chrome fallbacks share the same admission cap.
+Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations. Auto never launches Google Chrome. If an instance hits `code=captcha` on explicit Google, it is quarantined from Google for ~10 minutes (still used for other engines). Hedged failover may start the next **Chrome** engine after ~3s (max 2 in-flight) only after the HTTP chain is exhausted.
 
 Instances launch lazily (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone; the pool is not killed. Downloads (`WithPage`) use any idle instance and do not take a SERP slot.
 
@@ -289,8 +291,8 @@ Instances launch lazily (instance 0 on first search / Ensure; others when all bu
 
 ## Limitations / 限制
 
-- **CAPTCHA / unusual traffic**: Google in particular often flags datacenter IPs and automation. Auto mode tries DuckDuckGo HTML and Bing before Google (China: Baidu → Sogou → 360 → Bing → DDG HTML). Explicit engine returns `code=captcha` (no loop unless `fallback=1`) and may save a PNG under `./debug/`. Baidu may show `wappass` / 安全验证 (same `code=captcha`). Bing is usually less aggressive.
-- Google 更容易出人机验证。`engine=auto` 全球链先走 DuckDuckGo HTML / Bing；中文链为百度 → 搜狗 → 360 → Bing → DDG HTML。显式引擎默认不 failover。百度可能出现 `wappass` / 安全验证，同样返回 `code=captcha`。
+- **CAPTCHA / unusual traffic**: Google in particular often flags datacenter IPs and automation. Auto mode exhausts HTTP engines (DDG HTML / Bing / Sogou / 360 / Baidu) and never launches Google Chrome. Explicit engine returns `code=captcha` (no loop unless `fallback=1`) and may save a PNG under `./debug/`. Baidu may show `wappass` / 安全验证 (same `code=captcha`). Bing is usually less aggressive.
+- Google 更容易出人机验证。`engine=auto` 先走全部 HTTP 引擎，不打 Google Chrome。显式引擎默认不 failover。百度可能出现 `wappass` / 安全验证，同样返回 `code=captcha`。
 - Organic results only; ads / “people also ask” are skipped as best-effort. Selectors change — parsers use fallbacks.
 - 只解析自然结果；广告和 PAA 尽量跳过。页面 DOM 会变，解析做了多选择器兜底。
 - Requires a working display (`DISPLAY`) and Chrome/Chromium. No GPU needed.

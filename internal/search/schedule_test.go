@@ -52,20 +52,25 @@ func TestScheduleAuto(t *testing.T) {
 		t.Fatalf("china chain missing sogou/360: %v", cn)
 	}
 	gl := Schedule("", true, RouteHints{Query: "golang http server"})
-	if !reflect.DeepEqual(gl, []string{"duckduckgo_html", "bing", "google", "duckduckgo"}) {
+	if !reflect.DeepEqual(gl, []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
 		t.Fatalf("global chain: %v", gl)
 	}
-	idxHTML, idxG := -1, -1
+	for _, e := range gl {
+		if e == "google" {
+			t.Fatalf("auto global must omit google: %v", gl)
+		}
+	}
+	idxHTML, idxChrome := -1, -1
 	for i, e := range gl {
 		if e == "duckduckgo_html" {
 			idxHTML = i
 		}
-		if e == "google" {
-			idxG = i
+		if e == "duckduckgo" {
+			idxChrome = i
 		}
 	}
-	if idxHTML < 0 || idxG < 0 || idxHTML > idxG {
-		t.Fatalf("global should prefer ddg html before google: %v", gl)
+	if idxHTML < 0 || idxChrome < 0 || idxHTML > idxChrome {
+		t.Fatalf("global should prefer ddg html before chrome ddg: %v", gl)
 	}
 	if ContainsHan("golang") || !ContainsHan("语言") {
 		t.Fatalf("ContainsHan")
@@ -78,7 +83,7 @@ func TestScheduleExplicit(t *testing.T) {
 		t.Fatalf("explicit no fallback: %v", one)
 	}
 	fb := Schedule("google", true, RouteHints{Query: "golang"})
-	if !reflect.DeepEqual(fb, []string{"google", "duckduckgo_html", "bing", "duckduckgo"}) {
+	if !reflect.DeepEqual(fb, []string{"google", "duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
 		t.Fatalf("explicit google fallback global: %v", fb)
 	}
 	fbCN := Schedule("bing", true, RouteHints{Query: "北京"})
@@ -159,4 +164,97 @@ func TestNormalizeEngineNewEngines(t *testing.T) {
 			t.Errorf("%s -> %q err=%v want %q", tc.in, got, err, tc.want)
 		}
 	}
+}
+
+func TestPartitionHTTPChromeAutoExhaustsHTTPFirst(t *testing.T) {
+	cn := Schedule("auto", true, RouteHints{Query: "北京天气"})
+	http, chrome := PartitionHTTPChrome(cn, "auto", true)
+	if !reflect.DeepEqual(http, []string{"baidu", "sogou", "360", "bing", "duckduckgo_html"}) {
+		t.Fatalf("china http: %v", http)
+	}
+	if !reflect.DeepEqual(chrome, []string{"duckduckgo"}) {
+		t.Fatalf("china chrome: %v", chrome)
+	}
+	for _, e := range http {
+		if IsChromeOnly(e) {
+			t.Fatalf("http chain contains chrome-only %s", e)
+		}
+		if !SupportsHTTP(e) {
+			t.Fatalf("http chain missing HTTP support: %s", e)
+		}
+	}
+	if containsEngine(chrome, "baidu") || containsEngine(chrome, "bing") {
+		t.Fatalf("auto must not chrome-fallback dual engines: %v", chrome)
+	}
+	if containsEngine(append(http, chrome...), "google") {
+		t.Fatal("auto china must not include google")
+	}
+
+	gl := Schedule("auto", true, RouteHints{Query: "golang http server"})
+	http, chrome = PartitionHTTPChrome(gl, "auto", true)
+	if !reflect.DeepEqual(http, []string{"duckduckgo_html", "bing", "sogou", "360", "baidu"}) {
+		t.Fatalf("global http: %v", http)
+	}
+	if !reflect.DeepEqual(chrome, []string{"duckduckgo"}) {
+		t.Fatalf("global chrome: %v", chrome)
+	}
+	if containsEngine(http, "google") || containsEngine(chrome, "google") {
+		t.Fatalf("auto global must omit google http=%v chrome=%v", http, chrome)
+	}
+	if idx := indexOf(http, "bing"); idx < 0 || indexOf(http, "duckduckgo_html") < 0 {
+		t.Fatalf("bing http and ddg_html must both run before chrome: %v", http)
+	}
+	if indexOf(http, "bing") > indexOf(append(http, chrome...), "duckduckgo") && !containsEngine(http, "duckduckgo_html") {
+		t.Fatal("ddg_html should be attempted before bing chrome")
+	}
+}
+
+func TestPartitionHTTPChromeBingHTTPBeforeDuckDuckGoHTML(t *testing.T) {
+	// After bing HTTP miss, later HTTP engines (ddg_html / 360 / sogou) must
+	// run before any bing Chrome.
+	chain := []string{"baidu", "sogou", "360", "bing", "duckduckgo_html", "duckduckgo"}
+	http, chrome := PartitionHTTPChrome(chain, "auto", true)
+	bing := indexOf(http, "bing")
+	ddg := indexOf(http, "duckduckgo_html")
+	sogou := indexOf(http, "sogou")
+	so := indexOf(http, "360")
+	if bing < 0 || ddg < 0 || sogou < 0 || so < 0 {
+		t.Fatalf("http=%v", http)
+	}
+	if containsEngine(chrome, "bing") {
+		t.Fatalf("bing chrome queued before HTTP exhausted: chrome=%v", chrome)
+	}
+}
+
+func TestPartitionHTTPChromeExplicitDualKeepsChromeFallback(t *testing.T) {
+	http, chrome := PartitionHTTPChrome([]string{"bing"}, "bing", false)
+	if !reflect.DeepEqual(http, []string{"bing"}) || !reflect.DeepEqual(chrome, []string{"bing"}) {
+		t.Fatalf("explicit bing: http=%v chrome=%v", http, chrome)
+	}
+	http, chrome = PartitionHTTPChrome([]string{"google"}, "google", false)
+	if len(http) != 0 || !reflect.DeepEqual(chrome, []string{"google"}) {
+		t.Fatalf("explicit google: http=%v chrome=%v", http, chrome)
+	}
+	http, chrome = PartitionHTTPChrome([]string{"duckduckgo_html", "duckduckgo"}, "duckduckgo", false)
+	if !reflect.DeepEqual(http, []string{"duckduckgo_html"}) || !reflect.DeepEqual(chrome, []string{"duckduckgo"}) {
+		t.Fatalf("ddg split: http=%v chrome=%v", http, chrome)
+	}
+}
+
+func TestIsChromeOnly(t *testing.T) {
+	if !IsChromeOnly("google") || !IsChromeOnly("duckduckgo") {
+		t.Fatal("google/ddg are chrome-only")
+	}
+	if IsChromeOnly("bing") || IsChromeOnly("baidu") || IsChromeOnly("duckduckgo_html") || IsChromeOnly("auto") {
+		t.Fatal("dual/http/auto are not chrome-only")
+	}
+}
+
+func indexOf(chain []string, name string) int {
+	for i, e := range chain {
+		if e == name {
+			return i
+		}
+	}
+	return -1
 }

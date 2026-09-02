@@ -121,11 +121,19 @@ func (b *GoogleBreaker) Apply(requested string, chain []string) ChainPlan {
 		return ChainPlan{Engines: append([]string(nil), chain...)}
 	}
 	requested = strings.ToLower(strings.TrimSpace(requested))
+	auto := requested == "" || requested == "auto"
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if !containsEngine(chain, "google") {
 		return ChainPlan{Engines: append([]string(nil), chain...)}
+	}
+
+	// Auto never spends the ~170s handler budget on Google Chrome. The
+	// breaker starts closed; the last 100-way public test still launched
+	// Google and then timed out on a later Chrome engine.
+	if auto {
+		return ChainPlan{Engines: dropEngine(chain, "google"), Skipped: []string{"google"}}
 	}
 
 	now := b.clock()

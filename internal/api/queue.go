@@ -14,8 +14,11 @@ import (
 
 const (
 	defaultChromeMinRemain = 15 * time.Second
+	defaultHTTPMax         = 10
+	maxHTTPMax             = 32
 	envQueueMax            = "SEARCH_QUEUE_MAX"
 	envChromeMinRemain     = "SEARCH_CHROME_MIN_REMAIN"
+	envHTTPMax             = "SEARCH_HTTP_MAX"
 )
 
 // chromeAdmit bounds in-flight Chrome / SERP-slot work to the instance pool.
@@ -33,22 +36,53 @@ type chromeAdmit struct {
 
 func newChromeAdmit(n int) *chromeAdmit {
 	n = browser.ClampInstances(n)
-	return &chromeAdmit{
-		slots:     make(chan struct{}, n),
-		n:         n,
-		minRemain: parseChromeMinRemain(os.Getenv(envChromeMinRemain)),
-		maxWait:   parseQueueMax(os.Getenv(envQueueMax)),
-	}
+	return newAdmit(n, parseQueueMax(os.Getenv(envQueueMax)), parseChromeMinRemain(os.Getenv(envChromeMinRemain)))
 }
 
-func newTestAdmit(n, maxWait int, minRemain time.Duration) *chromeAdmit {
-	n = browser.ClampInstances(n)
+func newHTTPAdmit() *chromeAdmit {
+	n := parseHTTPMax(os.Getenv(envHTTPMax))
+	if n <= 0 {
+		return nil
+	}
+	minRemain := search.HTTPTryTimeout()
+	if minRemain > 2*time.Second {
+		minRemain = 2 * time.Second
+	}
+	return newAdmit(n, parseQueueMax(os.Getenv(envQueueMax)), minRemain)
+}
+
+func newAdmit(n, maxWait int, minRemain time.Duration) *chromeAdmit {
+	if n <= 0 {
+		return nil
+	}
 	return &chromeAdmit{
 		slots:     make(chan struct{}, n),
 		n:         n,
 		minRemain: minRemain,
 		maxWait:   maxWait,
 	}
+}
+
+func parseHTTPMax(v string) int {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return defaultHTTPMax
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultHTTPMax
+	}
+	if n <= 0 {
+		return 0
+	}
+	if n > maxHTTPMax {
+		return maxHTTPMax
+	}
+	return n
+}
+
+func newTestAdmit(n, maxWait int, minRemain time.Duration) *chromeAdmit {
+	return newAdmit(n, maxWait, minRemain)
 }
 
 func parseQueueMax(v string) int {
