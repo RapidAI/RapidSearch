@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RapidSearch sign in</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --ink: #e8eef6;
+      --muted: #8b9bb0;
+      --line: #2a3a4f;
+      --accent: #4ea1ff;
+      --ok: #3dcc8a;
+      --bad: #f07178;
+      --btn: #243044;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    main { max-width: 480px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { font-size: 1.4rem; margin: 0 0 6px; }
+    p.lead { color: var(--muted); margin: 0 0 22px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px 18px 14px;
+      margin-bottom: 16px;
+    }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
+    label.field { display: block; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+    input[type="password"], input[type="text"], input[type="email"] {
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      color: var(--ink);
+      font: inherit;
+    }
+    .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+    button {
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    .actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+    #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin-top: 10px; }
+    #status.err { color: var(--bad); }
+    #status.ok { color: var(--ok); }
+    a { color: var(--accent); }
+    code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>RapidSearch settings</h1>
+  <p class="lead">Sign in with your Hub account or paste a Hub viewer / access token. This page never asks for the operator proxy token.</p>
+
+  <section>
+    <h2>Hub account</h2>
+    <p class="hint">Hub viewer sign-in on <a href="https://hub.maclaw.top/app" rel="noopener">hub.maclaw.top/app</a> (or <a href="https://hub.mypapers.top/app" rel="noopener">hub.mypapers.top/app</a>) is an email link, not a password. If you have a Hub username/password that issues a viewer token, enter it here. Otherwise paste the token below after you sign in to Hub.</p>
+    <form id="login" method="post" action="" autocomplete="on">
+      <label class="field">Username or email
+        <input id="username" name="username" type="text" autocomplete="username" spellcheck="false">
+      </label>
+      <label class="field">Password
+        <input id="password" name="password" type="password" autocomplete="current-password">
+      </label>
+      <label class="field">Hub access / viewer token
+        <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste token from Hub">
+      </label>
+      <div class="actions">
+        <button class="primary" type="submit">Sign in</button>
+      </div>
+      <p id="status"></p>
+    </form>
+  </section>
+</main>
+<script>
+(function () {
+  const form = document.getElementById("login");
+  const status = document.getElementById("status");
+
+  function loginURL() {
+    let p = location.pathname || "/settings";
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    if (p.endsWith("/settings")) return p + "/login";
+    return "/settings/login";
+  }
+
+  form.addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    status.textContent = "Signing in…";
+    status.className = "";
+    const body = {
+      username: document.getElementById("username").value,
+      password: document.getElementById("password").value,
+      token: document.getElementById("token").value
+    };
+    try {
+      const res = await fetch(loginURL(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        let msg = "Sign-in failed.";
+        try {
+          const err = await res.json();
+          if (err && err.error) msg = err.error;
+        } catch (e) {}
+        status.textContent = msg;
+        status.className = "err";
+        return;
+      }
+      status.textContent = "Signed in.";
+      status.className = "ok";
+      location.reload();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    }
+  });
+})();
+</script>
+</body>
+</html>

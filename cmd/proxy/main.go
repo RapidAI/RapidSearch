@@ -180,7 +180,10 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", "bad_request")
 		return
 	}
-	if !h.authorized(r) {
+	// Settings login/page/config are enforced on the search process so an
+	// unauthenticated browser can receive the HTML login page. /search still
+	// requires Bearer or ?token= here (cookie is not enough).
+	if !tunnel.PathIsSettings(r.URL.Path) && !h.authorized(r) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
 		return
 	}
@@ -212,11 +215,15 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			hdrs[k] = vs[0]
 		}
 	}
-	// Settings re-checks Hub / SEARCH_TOKEN on the search process. Forward
-	// the bearer so keys are never served on an unauthenticated backend.
+	// Settings re-checks Hub / SEARCH_TOKEN / session cookie on the search
+	// process. Forward bearer and Cookie so login and /settings/config work
+	// through the tunnel. Authorization is a hop header and must be restored.
 	if tunnel.PathIsSettings(path) {
 		if a := r.Header.Get("Authorization"); a != "" {
 			hdrs["Authorization"] = a
+		}
+		if c := r.Header.Get("Cookie"); c != "" {
+			hdrs["Cookie"] = c
 		}
 	}
 

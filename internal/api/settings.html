@@ -91,7 +91,7 @@
 <body>
 <main>
   <h1>RapidSearch settings</h1>
-  <p class="lead">Optional Serper and Brave API keys, plus the auto-search priority of every engine. Same Hub / <code>SEARCH_TOKEN</code> auth as <code>/search</code>.</p>
+  <p class="lead">Optional Serper and Brave API keys, plus the auto-search priority of every engine. Signed in with a Hub session cookie, Hub token, or operator bearer.</p>
 
   <section>
     <h2>API keys</h2>
@@ -120,6 +120,7 @@
 
   <div class="actions">
     <button class="primary" id="save" type="button">Save</button>
+    <button id="logout" type="button">Log out</button>
     <span id="status"></span>
   </div>
 </main>
@@ -129,11 +130,15 @@
   const token = params.get("token") || "";
   let engines = [];
 
-  function configURL() {
+  function settingsBase() {
     let p = location.pathname || "/settings";
     if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-    if (p.endsWith("/settings")) return p + "/config";
-    return "/settings/config";
+    if (p.endsWith("/settings")) return p;
+    return "/settings";
+  }
+
+  function configURL() {
+    return settingsBase() + "/config";
   }
 
   function headers(json) {
@@ -235,7 +240,7 @@
     status("Loading…");
     const res = await fetch(configURL(), { headers: headers(false), credentials: "same-origin" });
     if (res.status === 401) {
-      status("Unauthorized. Open with a Hub token or SEARCH_TOKEN (?token= or Authorization: Bearer).", "err");
+      status("Session expired. Reload this page to sign in.", "err");
       return;
     }
     if (!res.ok) {
@@ -286,6 +291,14 @@
     status("Saved.", "ok");
     await load();
     status("Saved.", "ok");
+  });
+
+  document.getElementById("logout").addEventListener("click", async function () {
+    status("Signing out…");
+    try {
+      await fetch(settingsBase() + "/logout", { method: "POST", credentials: "same-origin" });
+    } catch (e) {}
+    location.reload();
   });
 
   load().catch(function (e) { status(String(e), "err"); });
