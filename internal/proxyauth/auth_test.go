@@ -1,6 +1,7 @@
 package proxyauth
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,6 +47,70 @@ func TestBearerTokenFromHeaderAndQuery(t *testing.T) {
 	r = httptest.NewRequest(http.MethodGet, "/health", nil)
 	if got := BearerToken(r); got != "" {
 		t.Fatalf("empty: %q", got)
+	}
+}
+
+func TestRequestTokenCookieFallback(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	r.AddCookie(&http.Cookie{Name: SettingsCookie, Value: "cookie-tok"})
+	if got := RequestToken(r); got != "cookie-tok" {
+		t.Fatalf("cookie: %q", got)
+	}
+	if got := BearerToken(r); got != "" {
+		t.Fatalf("bearer must ignore cookie: %q", got)
+	}
+	r.Header.Set("Authorization", "Bearer header-tok")
+	if got := RequestToken(r); got != "header-tok" {
+		t.Fatalf("header wins over cookie: %q", got)
+	}
+}
+
+func TestHubValidRejectsSearchToken(t *testing.T) {
+	c := New("secret-token", []string{"http://127.0.0.1:1"})
+	if !c.Authorized("secret-token") {
+		t.Fatal("Authorized should accept SEARCH_TOKEN")
+	}
+	if c.HubValid("secret-token") {
+		t.Fatal("HubValid must not accept SEARCH_TOKEN")
+	}
+}
+
+func TestHubPasswordLoginThenHubValid(t *testing.T) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/admin/login":
+			var in struct {
+				Username string `json:"username"`
+				Password string `json:"password"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in.Username == "ada@hub.example" && in.Password == "correct-horse" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"viewer-from-password"}`))
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/llm/v1/models":
+			if r.Header.Get("Authorization") == "Bearer viewer-from-password" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer hub.Close()
+
+	c := New("search-secret", []string{hub.URL})
+	if tok := c.HubPasswordLogin("ada@hub.example", "correct-horse"); tok != "viewer-from-password" {
+		t.Fatalf("password login token=%q", tok)
+	}
+	if tok := c.HubPasswordLogin("ada@hub.example", "wrong"); tok != "" {
+		t.Fatalf("bad password returned %q", tok)
+	}
+	if !c.HubValid("viewer-from-password") {
+		t.Fatal("issued token should pass HubValid")
 	}
 }
 

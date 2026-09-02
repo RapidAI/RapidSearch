@@ -223,6 +223,8 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 		if lk == "authorization" && !tunnel.PathIsSettings(path) {
 			continue
 		}
+		// Cookie / Set-Cookie travel with other headers so POST /settings/login
+		// and subsequent /settings + /settings/config keep the HttpOnly session.
 		req.Header.Set(k, v)
 	}
 	log.Printf("backend %s %s", method, path)

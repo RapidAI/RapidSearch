@@ -43,6 +43,9 @@ func TestPathIsSettings(t *testing.T) {
 	if !PathIsSettings("/settings") || !PathIsSettings("/settings/config") || !PathIsSettings("/settings/config?x=1") {
 		t.Fatal("settings path")
 	}
+	if !PathIsSettings("/settings/login") || !PathIsSettings("/settings/logout") {
+		t.Fatal("settings login/logout path")
+	}
 	if PathIsSettings("/search") || PathIsSettings("/settingsx") {
 		t.Fatal("not settings")
 	}

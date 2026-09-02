@@ -79,7 +79,10 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
 	s.mux.HandleFunc("/settings", s.handleSettingsPage)
+	s.mux.HandleFunc("/settings/{$}", s.handleSettingsPage)
 	s.mux.HandleFunc("/settings/config", s.handleSettingsConfig)
+	s.mux.HandleFunc("/settings/login", s.handleSettingsLogin)
+	s.mux.HandleFunc("/settings/logout", s.handleSettingsLogout)
 	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
 	s.mux.HandleFunc("/download", s.handleDownload)
 	return s
