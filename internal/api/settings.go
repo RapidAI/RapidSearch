@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	_ "embed"
 
@@ -19,7 +18,7 @@ var settingsPageHTML []byte
 //go:embed login.html
 var loginPageHTML []byte
 
-const settingsCookieMaxAge = int((12 * time.Hour).Seconds())
+const settingsCookieMaxAge = 12 * 60 * 60
 
 func (s *Server) authorizeSettings(w http.ResponseWriter, r *http.Request) bool {
 	if s == nil || s.auth == nil || !s.auth.Authorized(proxyauth.RequestToken(r)) {
