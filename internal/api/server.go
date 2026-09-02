@@ -19,18 +19,40 @@ import (
 )
 
 type Server struct {
-	mgr      *browser.Manager
-	debugDir string
-	cache    *cache.Cache
-	dl       *download.Downloader
-	mux      *http.ServeMux
-	flight   flightGroup
-	breaker  *search.GoogleBreaker
-	admit    *chromeAdmit
+	mgr       *browser.Manager
+	debugDir  string
+	cache     *cache.Cache
+	dl        *download.Downloader
+	mux       *http.ServeMux
+	flight    flightGroup
+	breaker   *search.GoogleBreaker
+	admit     *chromeAdmit
+	httpAdmit *chromeAdmit
 	// hedgeAfter overrides the 3s hedged-failover delay (tests).
 	hedgeAfter time.Duration
 	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
 	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
+}
+
+type engineTransport int
+
+const (
+	transportAuto engineTransport = iota
+	transportHTTP
+	transportChrome
+)
+
+type ctxKey int
+
+const httpHeldKey ctxKey = 1
+
+func contextWithHTTPHeld(ctx context.Context) context.Context {
+	return context.WithValue(ctx, httpHeldKey, true)
+}
+
+func httpHeld(ctx context.Context) bool {
+	v, _ := ctx.Value(httpHeldKey).(bool)
+	return v
 }
 
 func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Downloader) http.Handler {
@@ -39,13 +61,14 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 		n = mgr.InstanceCount()
 	}
 	s := &Server{
-		mgr:      mgr,
-		debugDir: debugDir,
-		cache:    c,
-		dl:       dl,
-		mux:      http.NewServeMux(),
-		breaker:  search.DefaultGoogleBreaker(),
-		admit:    newChromeAdmit(n),
+		mgr:       mgr,
+		debugDir:  debugDir,
+		cache:     c,
+		dl:        dl,
+		mux:       http.NewServeMux(),
+		breaker:   search.DefaultGoogleBreaker(),
+		admit:     newChromeAdmit(n),
+		httpAdmit: newHTTPAdmit(),
 	}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
@@ -316,11 +339,49 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 		}
 	}
 
-	run := func(tryCtx context.Context, eng string) ([]search.Result, error) {
-		return s.runOneEngine(tryCtx, eng, q, limit)
+	httpChain, chromeChain := search.PartitionHTTPChrome(plan.Engines, requested, useFallback)
+	if len(httpChain) > 0 {
+		log.Printf("search phase=http requested=%s engines=%v", requested, httpChain)
+	}
+	if len(chromeChain) > 0 {
+		log.Printf("search phase=chrome requested=%s engines=%v", requested, chromeChain)
 	}
 
-	wonEngine, results, tried, lastErr := runHedgedChain(ctx, plan.Engines, s.hedgeDelay(), run)
+	var (
+		wonEngine string
+		results   []search.Result
+		tried     []string
+		lastErr   error
+	)
+
+	if len(httpChain) > 0 {
+		if err := s.acquireHTTP(ctx); err != nil {
+			code, msg := classifyLiveErr(err)
+			return liveSearchOut{errStatus: liveErrStatus(code), errMsg: msg, errCode: code, errEngine: "", tried: nil}
+		}
+		func() {
+			defer s.releaseHTTP()
+			httpCtx := contextWithHTTPHeld(ctx)
+			wonEngine, results, tried, lastErr = runSequentialChain(httpCtx, httpChain, func(tryCtx context.Context, eng string) ([]search.Result, error) {
+				return s.runOneEngineMode(tryCtx, eng, q, limit, transportHTTP)
+			})
+		}()
+	}
+
+	if wonEngine == "" && len(chromeChain) > 0 {
+		if s.admit != nil && s.admit.tooLittleTime(ctx) {
+			log.Printf("search phase=chrome skip remain_below_min tried=%v", tried)
+			if lastErr == nil {
+				lastErr = search.NewError(search.CodeTimeout, "search timed out")
+			}
+		} else {
+			var cTried []string
+			wonEngine, results, cTried, lastErr = runHedgedChain(ctx, chromeChain, s.hedgeDelay(), func(tryCtx context.Context, eng string) ([]search.Result, error) {
+				return s.runOneEngineMode(tryCtx, eng, q, limit, transportChrome)
+			})
+			tried = append(tried, cTried...)
+		}
+	}
 
 	if wonEngine == "" {
 		code, msg := classifyLiveErr(lastErr)
@@ -408,58 +469,78 @@ func (s *Server) releaseChrome(eng string) {
 	s.admit.Release()
 }
 
+func (s *Server) acquireHTTP(ctx context.Context) error {
+	if s == nil || s.httpAdmit == nil {
+		return nil
+	}
+	if httpHeld(ctx) {
+		return nil
+	}
+	start := time.Now()
+	waiting := s.httpAdmit.Waiting()
+	inflight := s.httpAdmit.InFlight()
+	if waiting > 0 || !s.httpAdmit.HasFree() {
+		log.Printf("search http-admit=wait waiting=%d inflight=%d cap=%d", waiting, inflight, s.httpAdmit.Cap())
+	}
+	err := s.httpAdmit.Acquire(ctx)
+	if err != nil {
+		log.Printf("search http-admit=%s wait_ms=%d waiting=%d inflight=%d", search.CodeOf(err), time.Since(start).Milliseconds(), s.httpAdmit.Waiting(), s.httpAdmit.InFlight())
+		return err
+	}
+	if time.Since(start) > 50*time.Millisecond {
+		log.Printf("search http-admit=go wait_ms=%d inflight=%d", time.Since(start).Milliseconds(), s.httpAdmit.InFlight())
+	}
+	return nil
+}
+
+func (s *Server) releaseHTTP() {
+	if s == nil || s.httpAdmit == nil {
+		return
+	}
+	s.httpAdmit.Release()
+}
+
 func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
+	return s.runOneEngineMode(ctx, eng, q, limit, transportAuto)
+}
+
+func (s *Server) runOneEngineMode(ctx context.Context, eng, q string, limit int, tr engineTransport) ([]search.Result, error) {
 	var results []search.Result
 	var err error
 
-	if s.runEngine != nil {
-		if search.NeedsChrome(eng) {
-			if err := s.acquireChrome(ctx, eng); err != nil {
-				return nil, err
-			}
-			defer s.releaseChrome(eng)
-		}
-		tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
-		defer cancel()
-		results, err = s.runEngine(tryCtx, eng, q, limit)
-	} else if !search.NeedsChrome(eng) {
-		tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
-		defer cancel()
-		results, err = search.RunHTTP(tryCtx, eng, q, limit)
-	} else {
-		if search.SupportsHTTP(eng) {
-			tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
-			results, err = search.RunHTTP(tryCtx, eng, q, limit)
-			cancel()
-			if err == nil && len(results) > 0 {
-				s.googleBreaker().Observe(eng, nil)
-				log.Printf("search attempt engine=%s ok count=%d via=http", eng, len(results))
-				return results, nil
-			}
-			log.Printf("search attempt engine=%s http-miss code=%s; chrome fallback", eng, search.CodeOf(err))
-		}
-		if s.mgr == nil {
-			if err == nil {
-				err = search.NewError(search.CodeOffline, "chrome not configured")
-			}
-		} else {
-			if aerr := s.acquireChrome(ctx, eng); aerr != nil {
-				return nil, aerr
-			}
-			defer s.releaseChrome(eng)
-			tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
-			defer cancel()
-			err = s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
-				page = page.Context(tryCtx)
-				var e error
-				results, e = search.Run(page, eng, q, limit)
-				if e != nil && search.Is(e, search.CodeCaptcha) {
-					_ = s.mgr.Screenshot(page, "captcha-"+eng)
-				}
-				return e
-			})
-		}
+	tryHTTP := tr == transportHTTP || (tr == transportAuto && search.SupportsHTTP(eng))
+	tryChrome := tr == transportChrome || (tr == transportAuto && search.NeedsChrome(eng))
+	if tr == transportHTTP {
+		tryChrome = false
 	}
+	if tr == transportChrome {
+		tryHTTP = false
+	}
+
+	if tryHTTP {
+		results, err = s.runHTTPAttempt(ctx, eng, q, limit)
+		if err == nil && len(results) > 0 {
+			s.googleBreaker().Observe(eng, nil)
+			log.Printf("search attempt engine=%s ok count=%d via=http", eng, len(results))
+			return results, nil
+		}
+		if !tryChrome {
+			if err == nil {
+				err = search.NewError(search.CodeParse, "no organic results parsed from "+eng)
+			}
+			s.googleBreaker().Observe(eng, err)
+			log.Printf("search attempt engine=%s failed code=%s err=%v via=http", eng, search.CodeOf(err), err)
+			return nil, err
+		}
+		log.Printf("search attempt engine=%s http-miss code=%s; chrome fallback", eng, search.CodeOf(err))
+	}
+
+	if tryChrome {
+		results, err = s.runChromeAttempt(ctx, eng, q, limit)
+	} else if err == nil {
+		err = search.NewError(search.CodeEngine, eng+" is HTTP-only; use RunHTTP")
+	}
+
 	if errors.Is(err, browser.ErrNoGoogleInstance) {
 		err = search.NewError(search.CodeCaptcha, "all chrome instances quarantined from google")
 	}
@@ -473,6 +554,53 @@ func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]
 	}
 	log.Printf("search attempt engine=%s ok count=%d", eng, len(results))
 	return results, nil
+}
+
+func (s *Server) runHTTPAttempt(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
+	if !httpHeld(ctx) {
+		if err := s.acquireHTTP(ctx); err != nil {
+			return nil, err
+		}
+		defer s.releaseHTTP()
+	}
+	tryCtx, cancel := context.WithTimeout(ctx, search.HTTPTryTimeout())
+	defer cancel()
+	if s.runEngine != nil {
+		return s.runEngine(tryCtx, eng, q, limit)
+	}
+	return search.RunHTTP(tryCtx, eng, q, limit)
+}
+
+func (s *Server) runChromeAttempt(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
+	if s.runEngine != nil {
+		if err := s.acquireChrome(ctx, eng); err != nil {
+			return nil, err
+		}
+		defer s.releaseChrome(eng)
+		tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+		defer cancel()
+		return s.runEngine(tryCtx, eng, q, limit)
+	}
+	if s.mgr == nil {
+		return nil, search.NewError(search.CodeOffline, "chrome not configured")
+	}
+	if err := s.acquireChrome(ctx, eng); err != nil {
+		return nil, err
+	}
+	defer s.releaseChrome(eng)
+	tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+	defer cancel()
+	var results []search.Result
+	err := s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
+		page = page.Context(tryCtx)
+		var e error
+		results, e = search.Run(page, eng, q, limit)
+		if e != nil && search.Is(e, search.CodeCaptcha) {
+			_ = s.mgr.Screenshot(page, "captcha-"+eng)
+		}
+		return e
+	})
+	return results, err
 }
 
 func cacheBypass(r *http.Request) bool {

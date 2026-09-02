@@ -33,6 +33,18 @@ func TestParseQueueEnv(t *testing.T) {
 	if parseChromeMinRemain("0") != 0 {
 		t.Fatal("zero min remain allowed")
 	}
+	if parseHTTPMax("") != defaultHTTPMax || parseHTTPMax("nope") != defaultHTTPMax {
+		t.Fatal("default http max")
+	}
+	if parseHTTPMax("8") != 8 {
+		t.Fatal("http max 8")
+	}
+	if parseHTTPMax("0") != 0 {
+		t.Fatal("http max 0 is unlimited")
+	}
+	if parseHTTPMax("99") != maxHTTPMax {
+		t.Fatal("http max clamp")
+	}
 }
 
 func TestAdmitCapsInFlight(t *testing.T) {

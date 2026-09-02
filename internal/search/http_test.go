@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunHTTPDuckDuckGoNoChrome(t *testing.T) {
@@ -39,6 +40,24 @@ func TestRunHTTPDuckDuckGoNoChrome(t *testing.T) {
 		if strings.Contains(h.URL, "ads.example.com") {
 			t.Fatalf("ad in RunHTTP: %+v", h)
 		}
+	}
+}
+
+func TestParseHTTPTryTimeout(t *testing.T) {
+	if parseHTTPTryTimeout("") != defaultHTTPTryTimeout {
+		t.Fatal("default")
+	}
+	if parseHTTPTryTimeout("4s") != 4*time.Second {
+		t.Fatal("duration")
+	}
+	if parseHTTPTryTimeout("6") != 6*time.Second {
+		t.Fatal("seconds")
+	}
+	if parseHTTPTryTimeout("500ms") != minHTTPTryTimeout {
+		t.Fatal("clamp min")
+	}
+	if parseHTTPTryTimeout("60s") != maxHTTPTryTimeout {
+		t.Fatal("clamp max")
 	}
 }
 

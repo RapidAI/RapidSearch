@@ -29,7 +29,7 @@ func TestExecuteLiveSearchBreakerSkipsGoogle(t *testing.T) {
 			return []search.Result{{Title: "Go docs", URL: "https://go.dev/doc", Snippet: "golang http server docs"}}, nil
 		},
 	}
-	chain := search.Schedule("auto", true, search.RouteHints{Query: "golang http server"})
+	chain := []string{"duckduckgo_html", "bing", "google", "duckduckgo"}
 	out := s.executeLiveSearch("golang http server", "auto", 5, false, true, chain, cache.KeyInput{})
 	if out.errStatus != 0 {
 		t.Fatalf("err %d %s %s", out.errStatus, out.errCode, out.errMsg)
@@ -85,15 +85,15 @@ func TestExecuteLiveSearchErrNoGoogleInstanceImmediateFailover(t *testing.T) {
 		},
 	}
 	start := time.Now()
-	chain := []string{"google", "bing"}
-	out := s.executeLiveSearch("golang http server", "auto", 5, false, true, chain, cache.KeyInput{})
+	chain := []string{"google", "duckduckgo"}
+	out := s.executeLiveSearch("golang http server", "google", 5, false, true, chain, cache.KeyInput{})
 	if time.Since(start) > 500*time.Millisecond {
 		t.Fatalf("ate try timeout: %s", time.Since(start))
 	}
 	if out.errStatus != 0 {
 		t.Fatalf("err %d %s %s", out.errStatus, out.errCode, out.errMsg)
 	}
-	if out.body.Engine != "bing" {
+	if out.body.Engine != "duckduckgo" {
 		t.Fatalf("engine=%s", out.body.Engine)
 	}
 	if !br.Open() {

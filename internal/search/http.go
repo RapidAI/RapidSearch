@@ -7,15 +7,22 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-const httpSearchTimeout = 12 * time.Second
+const (
+	defaultHTTPTryTimeout = 5 * time.Second
+	minHTTPTryTimeout     = 1 * time.Second
+	maxHTTPTryTimeout     = 15 * time.Second
+	envHTTPTryTimeout     = "SEARCH_HTTP_TRY_TIMEOUT"
+)
 
 var httpSearchClient = &http.Client{
-	Timeout: httpSearchTimeout,
+	Timeout: maxHTTPTryTimeout,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return http.ErrUseLastResponse
@@ -169,14 +176,17 @@ func RunHTTP(ctx context.Context, engineName, query string, limit int) ([]Result
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	PaceEngine(engName)
+	// Do not call PaceEngine here: the HTTP admission cap (SEARCH_HTTP_MAX)
+	// is the stampede brake. A process-wide 1.5–4s gap would serialize 100
+	// waiters past the handler deadline and starve later HTTP engines.
 
+	try := HTTPTryTimeout()
 	var lastErr error
 	for _, u := range urls {
 		if err := ctx.Err(); err != nil {
 			return nil, NewError(CodeTimeout, "timeout fetching "+engName)
 		}
-		reqCtx, cancel := context.WithTimeout(ctx, httpSearchTimeout)
+		reqCtx, cancel := context.WithTimeout(ctx, try)
 		body, status, err := getSearchHTML(reqCtx, u)
 		cancel()
 		if err != nil {
@@ -214,4 +224,32 @@ func RunHTTP(ctx context.Context, engineName, query string, limit int) ([]Result
 		lastErr = NewError(CodeParse, "no organic results parsed from "+engName)
 	}
 	return nil, lastErr
+}
+
+// HTTPTryTimeout is the per-engine HTTP SERP budget (default 5s) so auto
+// can fail over to the next HTTP engine instead of waiting on one GET.
+func HTTPTryTimeout() time.Duration {
+	return parseHTTPTryTimeout(os.Getenv(envHTTPTryTimeout))
+}
+
+func parseHTTPTryTimeout(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return defaultHTTPTryTimeout
+	}
+	var d time.Duration
+	if parsed, err := time.ParseDuration(v); err == nil && parsed > 0 {
+		d = parsed
+	} else if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		d = time.Duration(n) * time.Second
+	} else {
+		return defaultHTTPTryTimeout
+	}
+	if d < minHTTPTryTimeout {
+		return minHTTPTryTimeout
+	}
+	if d > maxHTTPTryTimeout {
+		return maxHTTPTryTimeout
+	}
+	return d
 }

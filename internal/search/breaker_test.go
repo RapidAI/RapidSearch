@@ -10,13 +10,17 @@ func TestBreakerSkipsGoogleInAutoChain(t *testing.T) {
 	b := NewGoogleBreaker()
 	frozen := time.Unix(1_700_000_000, 0)
 	b.now = func() time.Time { return frozen }
-	b.Trip()
 
 	chain := Schedule("auto", true, RouteHints{Query: "golang http server"})
-	if !reflect.DeepEqual(chain, []string{"duckduckgo_html", "bing", "google", "duckduckgo"}) {
+	if containsEngine(chain, "google") {
+		t.Fatalf("auto schedule must omit google: %v", chain)
+	}
+	if !reflect.DeepEqual(chain, []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
 		t.Fatalf("global chain: %v", chain)
 	}
-	plan := b.Apply("auto", chain)
+	// Even a leftover google in an auto chain is dropped while the breaker
+	// is still closed (datacenter policy).
+	plan := b.Apply("auto", []string{"duckduckgo_html", "bing", "google", "duckduckgo"})
 	if containsEngine(plan.Engines, "google") {
 		t.Fatalf("auto chain still has google: %v", plan.Engines)
 	}
@@ -67,17 +71,17 @@ func TestBreakerHalfOpenOneGoogleProbeThenSuccessCloses(t *testing.T) {
 
 	b.now = func() time.Time { return frozen.Add(DefaultGoogleBreakerCooldown + time.Second) }
 	chain := []string{"google", "bing", "duckduckgo"}
-	p1 := b.Apply("auto", chain)
+	p1 := b.Apply("google", chain)
 	if !reflect.DeepEqual(p1.Engines, chain) || p1.FailFast {
 		t.Fatalf("half-open probe: %#v", p1)
 	}
-	p2 := b.Apply("auto", chain)
+	p2 := b.Apply("google", chain)
 	if containsEngine(p2.Engines, "google") {
 		t.Fatalf("second request should skip while probe held: %v", p2.Engines)
 	}
 
 	b.Observe("google", nil)
-	p3 := b.Apply("auto", chain)
+	p3 := b.Apply("google", chain)
 	if !reflect.DeepEqual(p3.Engines, chain) {
 		t.Fatalf("closed after success: %#v", p3)
 	}
@@ -95,7 +99,7 @@ func TestBreakerCaptchaReopens(t *testing.T) {
 		t.Fatal("captcha should open breaker")
 	}
 	b.Observe("bing", NewError(CodeCaptcha, "bing captcha"))
-	plan := b.Apply("auto", []string{"google", "bing", "duckduckgo"})
+	plan := b.Apply("google", []string{"google", "bing", "duckduckgo"})
 	if containsEngine(plan.Engines, "google") {
 		t.Fatalf("still skip google: %v", plan.Engines)
 	}
