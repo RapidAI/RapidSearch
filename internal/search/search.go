@@ -58,6 +58,7 @@ const (
 	CodeEngine       = "engine"
 	CodeOffline      = "offline"
 	CodeUnauthorized = "unauthorized"
+	CodeBusy         = "busy"
 )
 
 // Engine metadata.
@@ -82,6 +83,7 @@ var engines = map[string]Engine{
 		HomeURL: "https://www.bing.com/",
 		WaitSel: `li.b_algo, #b_results h2, #captcha-form, #b_captcha`,
 		Parse:   parseBing,
+		SERPURL: func(q string) string { return engineSERPURL("bing", q) },
 	},
 	"duckduckgo": {
 		Name:    "duckduckgo",
@@ -99,6 +101,7 @@ var engines = map[string]Engine{
 		HomeURL: "https://www.baidu.com/",
 		WaitSel: `#content_left .result, #content_left .c-container, h3.t a, #content_left, .result-op, #captcha, #wappass, iframe[src*="wappass"]`,
 		Parse:   parseBaidu,
+		SERPURL: func(q string) string { return engineSERPURL("baidu", q) },
 	},
 	"sogou": {
 		Name:    "sogou",

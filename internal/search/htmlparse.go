@@ -552,6 +552,153 @@ func parse360HTML(doc string, limit int) []Result {
 	return hitsToResults(hits, limit, "360")
 }
 
+func baiduLooksAd(e htmlElem) bool {
+	if strings.TrimSpace(elemAttr(e, "cmatchid")) != "" {
+		return true
+	}
+	tpl := strings.ToLower(elemAttr(e, "tpl") + " " + elemAttr(e, "data-tpl"))
+	if strings.Contains(tpl, "adv") || strings.Contains(tpl, "ad_") {
+		return true
+	}
+	for _, c := range classTokens(e) {
+		cl := strings.ToLower(c)
+		if strings.Contains(cl, "tuiguang") || strings.HasPrefix(cl, "ec-") || strings.HasPrefix(cl, "ec_") || cl == "c-container-ad" {
+			return true
+		}
+	}
+	return elemLooksAd(e)
+}
+
+func baiduCardHref(card htmlElem, href string) string {
+	if mu := elemAttr(card, "mu"); looksLikeAbsURL(absHref(mu)) && !strings.Contains(strings.ToLower(mu), "baidu.com/link") {
+		return mu
+	}
+	return href
+}
+
+func parseBaiduHTML(doc string, limit int) []Result {
+	roots := findElements(doc, "div", func(e htmlElem) bool {
+		return strings.EqualFold(elemAttr(e, "id"), "content_left")
+	})
+	body := doc
+	if len(roots) > 0 {
+		body = roots[0].Inner
+	}
+	cards := findElements(body, "div", func(e htmlElem) bool {
+		if hasClass(e, "result") || hasClass(e, "c-container") || hasClass(e, "result-op") {
+			return true
+		}
+		return strings.TrimSpace(elemAttr(e, "mu")) != "" || strings.TrimSpace(elemAttr(e, "srcid")) != ""
+	})
+	var hits []rawHit
+	for _, card := range cards {
+		if baiduLooksAd(card) {
+			continue
+		}
+		title, href := "", ""
+		h3s := findElements(card.Inner, "h3", nil)
+		if len(h3s) > 0 {
+			title, href = firstAnchor(h3s[0].Inner, "")
+			if title == "" {
+				title = innerText(h3s[0].Inner)
+			}
+		}
+		if href == "" {
+			title, href = firstAnchor(card.Inner, "")
+		}
+		href = baiduCardHref(card, href)
+		if title == "" || href == "" {
+			continue
+		}
+		snippet := firstSnippet(card.Inner, "c-abstract", "content-right_8ZsFk", "c-span9", "c-line-clamp3", "c-line-clamp2", "c-font-normal")
+		hits = append(hits, rawHit{Title: title, URL: href, Snippet: snippet})
+		if len(hits) >= limit*2 {
+			break
+		}
+	}
+	if len(hits) == 0 {
+		for _, h3 := range findElements(body, "h3", nil) {
+			title, href := firstAnchor(h3.Inner, "")
+			if title == "" || href == "" {
+				continue
+			}
+			hits = append(hits, rawHit{Title: title, URL: href})
+			if len(hits) >= limit*2 {
+				break
+			}
+		}
+	}
+	return hitsToResults(hits, limit, "baidu")
+}
+
+func bingLooksAd(e htmlElem) bool {
+	if hasClass(e, "b_ad") || hasClass(e, "b_adlastchild") || hasClass(e, "b_adslug") {
+		return true
+	}
+	switch strings.ToLower(elemAttr(e, "id")) {
+	case "b_ads", "b_pole", "b_ad", "b_topw":
+		return true
+	}
+	return elemLooksAd(e)
+}
+
+func parseBingHTML(doc string, limit int) []Result {
+	var hits []rawHit
+	items := findElements(doc, "li", func(e htmlElem) bool {
+		return hasClass(e, "b_algo")
+	})
+	for _, li := range items {
+		if bingLooksAd(li) {
+			continue
+		}
+		title, href := "", ""
+		h2s := findElements(li.Inner, "h2", nil)
+		if len(h2s) > 0 {
+			title, href = firstAnchor(h2s[0].Inner, "")
+			if title == "" {
+				title = innerText(h2s[0].Inner)
+			}
+		}
+		if href == "" {
+			title, href = firstAnchor(li.Inner, "")
+		}
+		if title == "" || href == "" {
+			continue
+		}
+		snippet := firstSnippet(li.Inner, "b_lineclamp2", "b_lineclamp3", "b_lineclamp4", "b_algoSlug", "b_snippet", "b_caption")
+		if snippet == "" {
+			ps := findElements(li.Inner, "p", nil)
+			if len(ps) > 0 {
+				snippet = innerText(ps[0].Inner)
+			}
+		}
+		hits = append(hits, rawHit{Title: title, URL: href, Snippet: snippet})
+		if len(hits) >= limit*2 {
+			break
+		}
+	}
+	if len(hits) == 0 {
+		roots := findElements(doc, "ol", func(e htmlElem) bool {
+			return strings.EqualFold(elemAttr(e, "id"), "b_results")
+		})
+		scope := doc
+		if len(roots) > 0 {
+			scope = roots[0].Inner
+		}
+		for _, h2 := range findElements(scope, "h2", nil) {
+			title, href := firstAnchor(h2.Inner, "")
+			if title == "" || href == "" {
+				continue
+			}
+			hits = append(hits, rawHit{Title: title, URL: href})
+			if len(hits) >= limit*2 {
+				break
+			}
+		}
+	}
+	return hitsToResults(hits, limit, "bing")
+}
+
 func parseEngineHTML(engine, body string, limit int) []Result {
 	switch engine {
 	case "duckduckgo_html", "duckduckgo":
@@ -560,6 +707,10 @@ func parseEngineHTML(engine, body string, limit int) []Result {
 		return parseSogouHTML(body, limit)
 	case "360":
 		return parse360HTML(body, limit)
+	case "baidu":
+		return parseBaiduHTML(body, limit)
+	case "bing":
+		return parseBingHTML(body, limit)
 	default:
 		return nil
 	}

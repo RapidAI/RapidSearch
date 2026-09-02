@@ -26,6 +26,7 @@ type Server struct {
 	mux      *http.ServeMux
 	flight   flightGroup
 	breaker  *search.GoogleBreaker
+	admit    *chromeAdmit
 	// hedgeAfter overrides the 3s hedged-failover delay (tests).
 	hedgeAfter time.Duration
 	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
@@ -33,7 +34,19 @@ type Server struct {
 }
 
 func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Downloader) http.Handler {
-	s := &Server{mgr: mgr, debugDir: debugDir, cache: c, dl: dl, mux: http.NewServeMux(), breaker: search.DefaultGoogleBreaker()}
+	n := 3
+	if mgr != nil {
+		n = mgr.InstanceCount()
+	}
+	s := &Server{
+		mgr:      mgr,
+		debugDir: debugDir,
+		cache:    c,
+		dl:       dl,
+		mux:      http.NewServeMux(),
+		breaker:  search.DefaultGoogleBreaker(),
+		admit:    newChromeAdmit(n),
+	}
 	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/search", s.handleSearch)
 	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
@@ -364,19 +377,60 @@ func (s *Server) executeLiveSearch(q, requested string, limit int, wantContent, 
 	}}
 }
 
-func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
-	tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
-	defer cancel()
+func (s *Server) acquireChrome(ctx context.Context, eng string) error {
+	if s == nil || s.admit == nil {
+		return nil
+	}
+	if !search.NeedsChrome(eng) {
+		return nil
+	}
+	start := time.Now()
+	waiting := s.admit.Waiting()
+	inflight := s.admit.InFlight()
+	if waiting > 0 || !s.admit.HasFree() {
+		log.Printf("search admit=wait engine=%s waiting=%d inflight=%d cap=%d", eng, waiting, inflight, s.admit.Cap())
+	}
+	err := s.admit.Acquire(ctx)
+	if err != nil {
+		log.Printf("search admit=%s engine=%s wait_ms=%d waiting=%d inflight=%d", search.CodeOf(err), eng, time.Since(start).Milliseconds(), s.admit.Waiting(), s.admit.InFlight())
+		return err
+	}
+	if time.Since(start) > 50*time.Millisecond {
+		log.Printf("search admit=go engine=%s wait_ms=%d inflight=%d", eng, time.Since(start).Milliseconds(), s.admit.InFlight())
+	}
+	return nil
+}
 
+func (s *Server) releaseChrome(eng string) {
+	if s == nil || s.admit == nil || !search.NeedsChrome(eng) {
+		return
+	}
+	s.admit.Release()
+}
+
+func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]search.Result, error) {
 	var results []search.Result
 	var err error
+
 	if s.runEngine != nil {
+		if search.NeedsChrome(eng) {
+			if err := s.acquireChrome(ctx, eng); err != nil {
+				return nil, err
+			}
+			defer s.releaseChrome(eng)
+		}
+		tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+		defer cancel()
 		results, err = s.runEngine(tryCtx, eng, q, limit)
 	} else if !search.NeedsChrome(eng) {
+		tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+		defer cancel()
 		results, err = search.RunHTTP(tryCtx, eng, q, limit)
 	} else {
 		if search.SupportsHTTP(eng) {
+			tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
 			results, err = search.RunHTTP(tryCtx, eng, q, limit)
+			cancel()
 			if err == nil && len(results) > 0 {
 				s.googleBreaker().Observe(eng, nil)
 				log.Printf("search attempt engine=%s ok count=%d via=http", eng, len(results))
@@ -389,6 +443,12 @@ func (s *Server) runOneEngine(ctx context.Context, eng, q string, limit int) ([]
 				err = search.NewError(search.CodeOffline, "chrome not configured")
 			}
 		} else {
+			if aerr := s.acquireChrome(ctx, eng); aerr != nil {
+				return nil, aerr
+			}
+			defer s.releaseChrome(eng)
+			tryCtx, cancel := context.WithTimeout(ctx, perTryTimeout)
+			defer cancel()
 			err = s.mgr.Do(tryCtx, eng, func(page *rod.Page) error {
 				page = page.Context(tryCtx)
 				var e error

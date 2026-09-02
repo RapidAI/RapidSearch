@@ -26,8 +26,10 @@ Environment / 环境变量:
 - `DISPLAY` (default `:1`)
 - `CHROME_BIN` (optional chrome path)
 - `SEARCH_LISTEN` (optional, default `127.0.0.1:18765`)
-- `SEARCH_BROWSER_INSTANCES` (optional, default `3`, clamp 1–4): independent headed Chrome processes. Each runs **one SERP at a time**. Profiles: `chrome-profile/i0`, `i1`, `i2`. Lazy-launched (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone.
+- `SEARCH_BROWSER_INSTANCES` (optional, default `3`, clamp 1–4): independent headed Chrome processes. Each runs **one SERP at a time**. This is also the Chrome **admission** cap (in-flight Chrome jobs). Profiles: `chrome-profile/i0`, `i1`, `i2`. Lazy-launched (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone.
 - `SEARCH_BROWSER_SLOTS` (optional): legacy alias/cap. When set, total in-flight SERPs = `min(instances, slots)`. Per-process is always 1.
+- `SEARCH_QUEUE_MAX` (optional, default `0` = unlimited waiters): max Chrome jobs waiting for a slot. Overflow returns `{"ok":false,"code":"busy"}` (HTTP 503) instead of sitting until 504. HTTP-only work never queues.
+- `SEARCH_CHROME_MIN_REMAIN` (optional, default `15s`): do not start a Chrome SERP if remaining handler time is below this (Go duration or integer seconds). Those requests fail with `code=timeout` so a doomed 40s try is not started.
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
 
@@ -107,7 +109,7 @@ Errors: HTTP 4xx/5xx with:
 }
 ```
 
-`code` is one of `captcha` | `timeout` | `parse` | `offline` | `unauthorized` | `engine` | `bad_request`. `error` is short English. `engine` is the last engine tried when known. Error responses are not cached.
+`code` is one of `captcha` | `timeout` | `busy` | `parse` | `offline` | `unauthorized` | `engine` | `bad_request`. `error` is short English. `engine` is the last engine tried when known. Error responses are not cached. `busy` (HTTP 503) means the Chrome admission queue was full (`SEARCH_QUEUE_MAX`). `timeout` (HTTP 504) includes “could not start Chrome before the handler deadline”.
 
 
 ## Result cache / 结果缓存
@@ -159,8 +161,8 @@ Public proxy (Bearer token) also exposes `/download`; the relay streams the file
 |---|---|---|---|
 | `auto` (default when omitted) | (router) | | |
 | `google` | https://www.google.com/ | Chrome | |
-| `bing` | https://www.bing.com/ | Chrome | |
-| `baidu` | https://www.baidu.com/ | Chrome | `bd` |
+| `bing` | https://www.bing.com/search?q= | HTTP then Chrome | |
+| `baidu` | https://www.baidu.com/s?wd= | HTTP then Chrome | `bd` |
 | `sogou` | https://www.sogou.com/web?query= | HTTP then Chrome | |
 | `360` | https://www.so.com/s?q= | HTTP then Chrome | `so360` |
 | `duckduckgo_html` | https://html.duckduckgo.com/html/ | HTTP only (no Chrome slot) | `ddg_html` |
@@ -183,17 +185,17 @@ Failover chains (next engine on captcha, timeout, parse error, or empty results;
 | China | `baidu` → `sogou` → `360` → `bing` → `duckduckgo_html` → `duckduckgo` |
 | Global | `duckduckgo_html` → `bing` → `google` → `duckduckgo` |
 
-Google is **not** on the China chain (captcha-prone here, wrong corpus). Global tries DuckDuckGo HTML before Google so auto can succeed without waiting on a captcha. `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`) and does **not** take a Chrome SERP slot. If HTML returns 0 hits, Chrome DuckDuckGo remains later in the chain. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=duckduckgo_html` still work.
+Google is **not** on the China chain (captcha-prone here, wrong corpus). Global tries DuckDuckGo HTML before Google so auto can succeed without waiting on a captcha. `duckduckgo_html` is a datacenter-friendly GET of `html.duckduckgo.com` (fallback `duckduckgo.com/html/`) and does **not** take a Chrome SERP slot. If HTML returns 0 hits, Chrome DuckDuckGo remains later in the chain. Explicit `engine=duckduckgo` means HTML then Chrome once. Explicit `engine=sogou` / `engine=360` / `engine=baidu` / `engine=bing` / `engine=duckduckgo_html` try HTTP first (Chrome only if the GET/parse fails). `engine=google` is still Chrome-only.
 
 **Google circuit breaker** (process-wide, in addition to per-instance quarantine): after a Google captcha or “no Google Chrome instance”, auto/fallback chains **skip Google for ~15 minutes** (global becomes `duckduckgo_html` → `bing` → `duckduckgo`). A half-open probe allows one Google attempt after 15 minutes; success closes the breaker. Explicit `engine=google` is still attempted: if the breaker is open it **fails fast** with `code=captcha` (no 40s wait), or skips to the next engine when `fallback=1`.
 
-**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts in parallel (cap 2 in-flight engines per request). HTML engines (`duckduckgo_html`, and HTTP probes for sogou/360) do not take a Chrome instance slot. First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
+**Hedged failover** (auto/fallback): if the first engine has not returned in ~3s and another engine is in the chain, the next engine starts in parallel (cap 2 in-flight engines per request). HTML / HTTP-first engines (`duckduckgo_html`, and HTTP probes for sogou/360/baidu/bing) do not take a Chrome instance slot. Chrome fallback waits on the admission queue (bounded to `SEARCH_BROWSER_INSTANCES`) instead of starting a Chrome job per client. First success wins; the loser is cancelled. Never runs three Googles. `ErrNoGoogleInstance` failovers immediately (does not consume the 40s per-try timeout).
 
 Explicit `engine=google|bing|baidu|sogou|360|duckduckgo_html` is predictable: no failover unless `fallback=1`. `engine=duckduckgo` still tries HTML then Chrome once. Auto defaults to failover on (`fallback=0` disables it).
 
 Per-try Chrome timeout ~40s; whole request ~3 min. Preprocess (relevance + optional content extract) runs on the **winning** result set, including Baidu hits. `content=0` still skips fetch.
 
-Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。`duckduckgo_html` 与落地页抽取/下载一样不占 Chrome 槽。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/搜狗/360/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
+Chrome SERP 工作最多 `SEARCH_BROWSER_INSTANCES` 路并发（默认 3 个独立 Chrome 进程，每进程 1 路 SERP）。额外请求在准入队列里等槽，而不是每人开一路 Chrome 等到 504。`duckduckgo_html` 以及百度/Bing/搜狗/360 的 HTTP 探测与落地页抽取/下载一样不占 Chrome 槽。Google 全池串行并保持 8–15s 间隔；某实例 Google captcha 后约 10 分钟内不再用该实例打 Google（仍可用于 Bing/百度/搜狗/360/DDG）。另有进程级 Google 熔断 ~15 分钟，避免 auto 在验证码上烧 40s+。缓存命中、预处理和正文抽取不受此限制。
 
 ## Preprocessing / 结果预处理
 
@@ -277,9 +279,9 @@ Windows 11：在仓库根目录运行 `deploy-proxy.cmd`。Linux/mac：`./deploy
 
 ## Concurrency / 并发
 
-Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight SERPs = instance count. `SEARCH_BROWSER_SLOTS` if set caps that total (`min(instances, slots)`); per-process is always 1.
+Identical in-flight searches (same cache key) share one Chrome trip via singleflight. Cache hits never touch Chrome. A **pool of independent headed Chrome processes** (default 3, `SEARCH_BROWSER_INSTANCES`, clamp 1–4) each runs one SERP on a **fresh stealth page** (closed afterwards). Total in-flight Chrome SERPs = instance count. Extra Chrome work **waits in an admission queue** (handler timeout ~170s) instead of overlapping until 504. If a request cannot start Chrome before the deadline it returns `ok:false` with `code=timeout` (or `busy` when `SEARCH_QUEUE_MAX` is set and the waiter list is full) — never HTTP 200 with empty results. `SEARCH_BROWSER_SLOTS` if set caps that total (`min(instances, slots)`); per-process is always 1.
 
-Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). A **process-wide Google breaker** then skips Google on auto/fallback for ~15 minutes so later requests do not queue behind captcha. Hedged failover may start the next engine after ~3s on another instance (max 2 in-flight engines per request).
+Google is globally serialized (at most one in-flight Google across the whole pool) and still paced 8–15s between navigations so the same datacenter IP is not hit in parallel. Bing / Baidu / DuckDuckGo may overlap a Google on other instances. If an instance hits `code=captcha` on Google, it is quarantined from Google for ~10 minutes (still used for other engines). A **process-wide Google breaker** then skips Google on auto/fallback for ~15 minutes so later requests do not queue behind captcha. Hedged failover may start the next engine after ~3s (max 2 in-flight engines per request); HTTP probes do not take a slot, and Chrome fallbacks share the same admission cap.
 
 Instances launch lazily (instance 0 on first search / Ensure; others when all busy). If one Chrome dies it is relaunched alone; the pool is not killed. Downloads (`WithPage`) use any idle instance and do not take a SERP slot.
 

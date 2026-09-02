@@ -87,10 +87,64 @@ func TestNeedsChromeHTTPOnly(t *testing.T) {
 	if !NeedsChrome("google") || !NeedsChrome("duckduckgo") || !NeedsChrome("sogou") || !NeedsChrome("360") {
 		t.Fatal("chrome engines should need chrome")
 	}
+	if !NeedsChrome("baidu") || !NeedsChrome("bing") {
+		t.Fatal("baidu/bing still have a Chrome fallback")
+	}
 	if !SupportsHTTP("duckduckgo_html") || !SupportsHTTP("sogou") || !SupportsHTTP("360") {
 		t.Fatal("expected HTTP-capable engines")
 	}
-	if SupportsHTTP("google") || SupportsHTTP("bing") {
-		t.Fatal("google/bing are chrome SERPs")
+	if !SupportsHTTP("baidu") || !SupportsHTTP("bing") {
+		t.Fatal("baidu/bing should be HTTP-first")
+	}
+	if SupportsHTTP("google") {
+		t.Fatal("google is chrome-only")
+	}
+}
+
+func TestParseBaiduHTMLDropsAds(t *testing.T) {
+	hits := parseBaiduHTML(readTestdata(t, "baidu.html"), 10)
+	if len(hits) < 2 {
+		t.Fatalf("want organic baidu hits, got %+v", hits)
+	}
+	var urls []string
+	for _, h := range hits {
+		if strings.Contains(h.URL, "ad.example.com") || strings.Contains(h.Title, "买云服务器") {
+			t.Fatalf("baidu ad kept: %+v", h)
+		}
+		if strings.Contains(h.URL, "baidu.com/s") {
+			t.Fatalf("SERP self url kept: %+v", h)
+		}
+		urls = append(urls, h.URL)
+	}
+	joined := strings.Join(urls, " ")
+	if !strings.Contains(joined, "pkg.go.dev/net/http") {
+		t.Fatalf("mu unwrap failed: %v", urls)
+	}
+	if !strings.Contains(joined, "go.dev/doc") {
+		t.Fatalf("missing go.dev/doc: %v", urls)
+	}
+}
+
+func TestParseBingHTMLDropsAds(t *testing.T) {
+	hits := parseBingHTML(readTestdata(t, "bing.html"), 10)
+	if len(hits) < 2 {
+		t.Fatalf("want organic bing hits, got %+v", hits)
+	}
+	var urls []string
+	for _, h := range hits {
+		if strings.Contains(h.URL, "ads.example.com") || strings.Contains(h.Title, "Buy Go hosting") {
+			t.Fatalf("bing ad kept: %+v", h)
+		}
+		if strings.Contains(h.URL, "bing.com/search") {
+			t.Fatalf("SERP self url kept: %+v", h)
+		}
+		urls = append(urls, h.URL)
+	}
+	joined := strings.Join(urls, " ")
+	if !strings.Contains(joined, "pkg.go.dev/net/http") {
+		t.Fatalf("missing pkg.go.dev: %v", urls)
+	}
+	if !strings.Contains(joined, "go.dev/doc") {
+		t.Fatalf("missing go.dev/doc: %v", urls)
 	}
 }
