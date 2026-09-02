@@ -155,6 +155,8 @@ func clientMessage(code, fallback string) string {
 		return "search blocked by captcha"
 	case search.CodeTimeout:
 		return "search timed out"
+	case search.CodeBusy:
+		return "search backend busy"
 	case search.CodeParse:
 		return "search failed to parse"
 	case search.CodeOffline:
@@ -185,6 +187,8 @@ func liveErrStatus(code string) int {
 		return 400
 	case search.CodeTimeout:
 		return 504
+	case search.CodeBusy:
+		return 503
 	case search.CodeCaptcha:
 		return 403
 	case search.CodeUnauthorized:

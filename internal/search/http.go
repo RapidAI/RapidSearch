@@ -69,7 +69,7 @@ func SupportsHTTP(engine string) bool {
 		return false
 	}
 	switch name {
-	case "duckduckgo_html", "sogou", "360":
+	case "duckduckgo_html", "sogou", "360", "baidu", "bing":
 		return true
 	default:
 		return false
@@ -88,6 +88,13 @@ func httpSERPURLs(engine, query string) []string {
 		return []string{"https://www.sogou.com/web?query=" + q}
 	case "360":
 		return []string{"https://www.so.com/s?q=" + q}
+	case "baidu":
+		return []string{
+			"https://www.baidu.com/s?ie=utf-8&wd=" + q,
+			"https://www.baidu.com/s?wd=" + q,
+		}
+	case "bing":
+		return []string{"https://www.bing.com/search?q=" + q}
 	default:
 		return nil
 	}
@@ -100,6 +107,10 @@ func engineSERPURL(engine, query string) string {
 		return "https://www.sogou.com/web?query=" + q
 	case "360":
 		return "https://www.so.com/s?q=" + q
+	case "baidu":
+		return "https://www.baidu.com/s?ie=utf-8&wd=" + q
+	case "bing":
+		return "https://www.bing.com/search?q=" + q
 	default:
 		return ""
 	}
@@ -121,13 +132,26 @@ func httpLooksBlocked(engine, body string) bool {
 			return false
 		}
 		return strings.Contains(low, "captcha") && strings.Contains(low, "verify")
+	case "baidu":
+		if strings.Contains(low, "content_left") && (strings.Contains(low, "c-container") || strings.Contains(low, "class=\"result\"") || strings.Contains(low, "class='result'")) {
+			return false
+		}
+		return strings.Contains(low, "wappass") || strings.Contains(low, "安全验证") ||
+			(strings.Contains(low, "captcha") && strings.Contains(low, "verify"))
+	case "bing":
+		if strings.Contains(low, "b_algo") {
+			return false
+		}
+		return strings.Contains(low, "please verify you are a human") ||
+			strings.Contains(low, "help us confirm you are not a robot") ||
+			strings.Contains(low, `id="b_captcha"`) || strings.Contains(low, `id='b_captcha'`)
 	default:
 		return false
 	}
 }
 
 // RunHTTP fetches a SERP over net/http (no Chrome). Used for duckduckgo_html
-// and as a first try for sogou/360 when the first response has organic hits.
+// and as a first try for sogou/360/baidu/bing when the first response has organic hits.
 func RunHTTP(ctx context.Context, engineName, query string, limit int) ([]Result, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
