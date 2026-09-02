@@ -13,9 +13,15 @@ var cnIntentTokens = []string{
 }
 
 // Failover chains. HTTP-capable engines come first so auto can finish without
-// a Chrome slot. Google is omitted from both auto chains: a datacenter IP
-// burns the handler budget on Google Chrome before any captcha can trip the
-// breaker.
+// a Chrome slot. Google is omitted from both built-in auto chains: a
+// datacenter IP burns the handler budget on Google Chrome before any captcha
+// can trip the breaker. A saved settings priority may enable google; the
+// breaker still fail-fasts / skips when open.
+//
+// Default (no saved priority, no API keys): these chains unchanged.
+// With a Serper and/or Brave key (and that engine not disabled): serper then
+// brave are prepended. After the user saves a priority list, auto uses that
+// enabled order (keyed engines without a key are skipped).
 var (
 	chinaChain  = []string{"baidu", "sogou", "360", "bing", "duckduckgo_html", "duckduckgo"}
 	globalChain = []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}
@@ -85,19 +91,30 @@ func ShouldFallback(requested string, fallbackSet, fallback bool) bool {
 	return requested == "auto" || requested == ""
 }
 
-// Schedule returns the engine attempt list. requested is already normalized
-// (auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360). The same
-// engine is never listed twice.
+// Schedule returns the engine attempt list using the built-in China/Global
+// chains (no saved settings). Same as ScheduleWith with an empty snapshot.
+func Schedule(requested string, fallback bool, h RouteHints) []string {
+	return ScheduleWith(requested, fallback, h, ConfigSnapshot{})
+}
+
+// ScheduleWith returns the engine attempt list. requested is already
+// normalized (auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360|
+// serper|brave). The same engine is never listed twice.
 //
 // engine=duckduckgo is a transport split: HTML first (no Chrome slot), then
 // Chrome DDG even when fallback is off.
-func Schedule(requested string, fallback bool, h RouteHints) []string {
+//
+// When cfg has API keys and no custom priority, serper/brave are prepended
+// to the built-in auto chain. A saved priority list replaces the built-in
+// order for auto (disabled / missing-key keyed engines skipped). Google
+// stays off auto unless the user enabled it in that list.
+func ScheduleWith(requested string, fallback bool, h RouteHints, cfg ConfigSnapshot) []string {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	china := IsChinaRoute(h)
 	if requested == "" || requested == "auto" {
-		chain := globalChain
-		if china {
-			chain = chinaChain
+		chain := autoChain(china, cfg)
+		if len(chain) == 0 {
+			return nil
 		}
 		if !fallback {
 			return []string{chain[0]}
@@ -111,10 +128,7 @@ func Schedule(requested string, fallback bool, h RouteHints) []string {
 		if !fallback {
 			return out
 		}
-		base := globalChain
-		if china {
-			base = chinaChain
-		}
+		base := autoChain(china, cfg)
 		seen := map[string]bool{"duckduckgo_html": true, "duckduckgo": true}
 		for _, e := range base {
 			if seen[e] {
@@ -128,12 +142,51 @@ func Schedule(requested string, fallback bool, h RouteHints) []string {
 	if !fallback {
 		return []string{requested}
 	}
-	base := globalChain
-	if china || requested == "baidu" || requested == "sogou" || requested == "360" {
-		base = chinaChain
-	}
+	baseChina := china || requested == "baidu" || requested == "sogou" || requested == "360"
+	base := autoChain(baseChina, cfg)
 	out := []string{requested}
 	seen := map[string]bool{requested: true}
+	for _, e := range base {
+		if seen[e] {
+			continue
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
+	return out
+}
+
+func autoChain(china bool, cfg ConfigSnapshot) []string {
+	if cfg.HasCustomPriority() {
+		if out := cfg.filterCustomAuto(); len(out) > 0 {
+			return out
+		}
+	}
+	base := globalChain
+	if china {
+		base = chinaChain
+	}
+	return prependKeyedDefaults(base, cfg)
+}
+
+func prependKeyedDefaults(base []string, cfg ConfigSnapshot) []string {
+	var front []string
+	for _, id := range []string{"serper", "brave"} {
+		if cfg.keyedWantedOnDefaultAuto(id) {
+			front = append(front, id)
+		}
+	}
+	if len(front) == 0 {
+		out := make([]string, len(base))
+		copy(out, base)
+		return out
+	}
+	out := make([]string, 0, len(front)+len(base))
+	out = append(out, front...)
+	seen := map[string]bool{}
+	for _, e := range front {
+		seen[e] = true
+	}
 	for _, e := range base {
 		if seen[e] {
 			continue
@@ -158,8 +211,10 @@ func IsChromeOnly(engine string) bool {
 //
 // Dual engines (baidu/sogou/360/bing) are HTTP-only on auto. Their Chrome
 // fallback is only queued when that engine was explicitly requested.
-// Auto never includes Google Chrome. Chrome-only leftovers (duckduckgo,
-// and google when explicitly requested) run after HTTP is exhausted.
+// Built-in auto chains omit Google Chrome. If the user enabled google in
+// settings priority, it is queued as Chrome after HTTP (breaker still
+// applies). Keyed APIs (serper/brave) stay on the HTTP side and never take
+// a Chrome slot.
 func PartitionHTTPChrome(chain []string, requested string, fallback bool) (httpChain, chromeChain []string) {
 	_ = fallback
 	requested, _ = NormalizeEngine(requested)
@@ -183,9 +238,8 @@ func PartitionHTTPChrome(chain []string, requested string, fallback bool) (httpC
 			continue
 		}
 		if IsChromeOnly(e) {
-			if auto && e == "google" {
-				continue
-			}
+			// Auto includes Google Chrome only when the user enabled it in
+			// settings priority. Built-in chains never list google.
 			chromeChain = append(chromeChain, e)
 			seenC[e] = true
 			continue

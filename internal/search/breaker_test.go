@@ -18,11 +18,20 @@ func TestBreakerSkipsGoogleInAutoChain(t *testing.T) {
 	if !reflect.DeepEqual(chain, []string{"duckduckgo_html", "bing", "sogou", "360", "baidu", "duckduckgo"}) {
 		t.Fatalf("global chain: %v", chain)
 	}
-	// Even a leftover google in an auto chain is dropped while the breaker
-	// is still closed (datacenter policy).
+	// User-enabled google on auto (present in the scheduled chain) is kept
+	// while the breaker is closed. Open breaker still skips it without
+	// fail-fast so the rest of auto can run.
+	closed := b.Apply("auto", []string{"duckduckgo_html", "bing", "google", "duckduckgo"})
+	if !reflect.DeepEqual(closed.Engines, []string{"duckduckgo_html", "bing", "google", "duckduckgo"}) {
+		t.Fatalf("closed auto should honor enabled google: %v", closed.Engines)
+	}
+	if closed.FailFast || len(closed.Skipped) != 0 {
+		t.Fatalf("closed auto: %#v", closed)
+	}
+	b.Trip()
 	plan := b.Apply("auto", []string{"duckduckgo_html", "bing", "google", "duckduckgo"})
 	if containsEngine(plan.Engines, "google") {
-		t.Fatalf("auto chain still has google: %v", plan.Engines)
+		t.Fatalf("open auto chain still has google: %v", plan.Engines)
 	}
 	if !reflect.DeepEqual(plan.Engines, []string{"duckduckgo_html", "bing", "duckduckgo"}) {
 		t.Fatalf("rewritten chain: %v", plan.Engines)

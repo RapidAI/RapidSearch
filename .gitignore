@@ -17,3 +17,7 @@ search-relay
 
 # Search / download cache (data dir at repo root, not internal/cache)
 /cache/
+
+# Local API keys + engine priority (mode 0600). Never commit.
+search-config.json
+**/search-config.json

@@ -217,7 +217,10 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 	}
 	for k, v := range f.Headers {
 		lk := strings.ToLower(k)
-		if lk == "host" || lk == "authorization" || lk == "content-length" {
+		if lk == "host" || lk == "content-length" {
+			continue
+		}
+		if lk == "authorization" && !tunnel.PathIsSettings(path) {
 			continue
 		}
 		req.Header.Set(k, v)
@@ -268,7 +271,10 @@ func streamBackend(ctx context.Context, client *http.Client, backend string, f t
 	}
 	for k, v := range f.Headers {
 		lk := strings.ToLower(k)
-		if lk == "host" || lk == "authorization" || lk == "content-length" {
+		if lk == "host" || lk == "content-length" {
+			continue
+		}
+		if lk == "authorization" && !tunnel.PathIsSettings(path) {
 			continue
 		}
 		req.Header.Set(k, v)

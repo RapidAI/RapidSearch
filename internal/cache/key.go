@@ -10,15 +10,18 @@ import (
 
 // KeyInput is the request-side identity of a cached search.
 // content=0 and content=1 are different keys.
+// ConfigSig fingerprints which keyed engines are available / enabled so
+// engine=serper and engine=bing (or auto after a key change) cannot collide.
 type KeyInput struct {
-	Query    string
-	Engine   string
-	Limit    int
-	Content  bool
-	Region   string
-	Locale   string
-	HL       string
-	Fallback bool
+	Query     string
+	Engine    string
+	Limit     int
+	Content   bool
+	Region    string
+	Locale    string
+	HL        string
+	Fallback  bool
+	ConfigSig string
 }
 
 // NormalizeQuery trims, lowercases, and collapses whitespace.
@@ -40,7 +43,7 @@ func bool01(b bool) string {
 // Canonical is the stable preimage hashed into a key. Exported for tests.
 func Canonical(in KeyInput) string {
 	var b strings.Builder
-	b.WriteString("v3|")
+	b.WriteString("v4|")
 	b.WriteString(NormalizeQuery(in.Query))
 	b.WriteByte('|')
 	b.WriteString(normField(in.Engine))
@@ -56,6 +59,8 @@ func Canonical(in KeyInput) string {
 	b.WriteString(normField(in.HL))
 	b.WriteByte('|')
 	b.WriteString(bool01(in.Fallback))
+	b.WriteByte('|')
+	b.WriteString(normField(in.ConfigSig))
 	return b.String()
 }
 

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	MaxFrame    = 4 << 20  // 4 MiB JSON frame
+	MaxFrame    = 4 << 20   // 4 MiB JSON frame
 	StreamChunk = 256 << 10 // raw bytes per resp-chunk
 )
 
@@ -78,10 +78,20 @@ func ReadFrame(r io.Reader, f *Frame) error {
 
 // PathIsDownload reports whether the tunneled request is /download.
 func PathIsDownload(p string) bool {
+	return pathOnly(p) == "/download"
+}
+
+// PathIsSettings reports /settings or /settings/* (config UI).
+func PathIsSettings(p string) bool {
+	p = pathOnly(p)
+	return p == "/settings" || strings.HasPrefix(p, "/settings/")
+}
+
+func pathOnly(p string) string {
 	if i := strings.IndexByte(p, '?'); i >= 0 {
 		p = p[:i]
 	}
-	return p == "/download"
+	return p
 }
 
 func ParseAuthLine(line string) (token string, ok bool) {

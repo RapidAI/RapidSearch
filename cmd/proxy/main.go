@@ -59,6 +59,8 @@ func main() {
 	mux.HandleFunc("/health", hub.serveHTTP)
 	mux.HandleFunc("/search", hub.serveHTTP)
 	mux.HandleFunc("/download", hub.serveHTTP)
+	mux.HandleFunc("/settings", hub.serveHTTP)
+	mux.HandleFunc("/settings/", hub.serveHTTP)
 
 	hs := &http.Server{
 		Addr:              publicAddr,
@@ -172,7 +174,9 @@ func (h *hub) authorized(r *http.Request) bool {
 }
 
 func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodHead {
+	switch r.Method {
+	case http.MethodGet, http.MethodPost, http.MethodHead, http.MethodPut:
+	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", "bad_request")
 		return
 	}
@@ -206,6 +210,13 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(vs) > 0 {
 			hdrs[k] = vs[0]
+		}
+	}
+	// Settings re-checks Hub / SEARCH_TOKEN on the search process. Forward
+	// the bearer so keys are never served on an unauthenticated backend.
+	if tunnel.PathIsSettings(path) {
+		if a := r.Header.Get("Authorization"); a != "" {
+			hdrs["Authorization"] = a
 		}
 	}
 

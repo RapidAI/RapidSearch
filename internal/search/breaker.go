@@ -129,11 +129,24 @@ func (b *GoogleBreaker) Apply(requested string, chain []string) ChainPlan {
 		return ChainPlan{Engines: append([]string(nil), chain...)}
 	}
 
-	// Auto never spends the ~170s handler budget on Google Chrome. The
-	// breaker starts closed; the last 100-way public test still launched
-	// Google and then timed out on a later Chrome engine.
+	// Built-in auto chains omit Google. If the user enabled google in
+	// settings priority, honor the list but keep the captcha breaker:
+	// open → skip (do not fail the whole auto request); closed → attempt;
+	// half-open → one probe. Fail-fast remains explicit engine=google only.
 	if auto {
-		return ChainPlan{Engines: dropEngine(chain, "google"), Skipped: []string{"google"}}
+		now := b.clock()
+		switch b.stateLocked(now) {
+		case breakerClosed:
+			return ChainPlan{Engines: append([]string(nil), chain...)}
+		case breakerOpen:
+			return ChainPlan{Engines: dropEngine(chain, "google"), Skipped: []string{"google"}}
+		default: // half-open
+			if b.probeHeld {
+				return ChainPlan{Engines: dropEngine(chain, "google"), Skipped: []string{"google"}}
+			}
+			b.probeHeld = true
+			return ChainPlan{Engines: append([]string(nil), chain...)}
+		}
 	}
 
 	now := b.clock()
