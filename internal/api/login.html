@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RapidSearch sign in</title>
+  <title>RapidSearch 登录</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -35,7 +35,7 @@
     }
     h2 { font-size: 1.05rem; margin: 0 0 12px; }
     label.field { display: block; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
-    input[type="password"], input[type="text"], input[type="email"] {
+    input[type="password"], input[type="text"] {
       width: 100%;
       margin-top: 4px;
       padding: 9px 10px;
@@ -60,30 +60,25 @@
     #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin-top: 10px; }
     #status.err { color: var(--bad); }
     #status.ok { color: var(--ok); }
-    a { color: var(--accent); }
-    code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
   </style>
 </head>
 <body>
 <main>
-  <h1>RapidSearch settings</h1>
-  <p class="lead">Sign in with your Hub account or paste a Hub viewer / access token. This page never asks for the operator proxy token.</p>
+  <h1>RapidSearch 设置</h1>
+  <p class="lead">Hub 全局管理员账号密码登录。<br>Sign in with Hub global admin username and password.</p>
 
   <section>
-    <h2>Hub account</h2>
-    <p class="hint">Hub viewer sign-in on <a href="https://hub.maclaw.top/app" rel="noopener">hub.maclaw.top/app</a> (or <a href="https://hub.mypapers.top/app" rel="noopener">hub.mypapers.top/app</a>) is an email link, not a password. If you have a Hub username/password that issues a viewer token, enter it here. Otherwise paste the token below after you sign in to Hub.</p>
+    <h2>Hub 全局管理员 / Global admin</h2>
+    <p class="hint">仅支持 Hub 全局管理员账号密码，不接受租户管理员或粘贴 token。</p>
     <form id="login" method="post" action="" autocomplete="on">
-      <label class="field">Username or email
+      <label class="field">用户名 / Username
         <input id="username" name="username" type="text" autocomplete="username" spellcheck="false">
       </label>
-      <label class="field">Password
+      <label class="field">密码 / Password
         <input id="password" name="password" type="password" autocomplete="current-password">
       </label>
-      <label class="field">Hub access / viewer token
-        <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste token from Hub">
-      </label>
       <div class="actions">
-        <button class="primary" type="submit">Sign in</button>
+        <button class="primary" type="submit">登录 / Sign in</button>
       </div>
       <p id="status"></p>
     </form>
@@ -107,8 +102,7 @@
     status.className = "";
     const body = {
       username: document.getElementById("username").value,
-      password: document.getElementById("password").value,
-      token: document.getElementById("token").value
+      password: document.getElementById("password").value
     };
     try {
       const res = await fetch(loginURL(), {

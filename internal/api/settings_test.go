@@ -42,8 +42,20 @@ func TestSettingsUnauthenticatedLoginHTML(t *testing.T) {
 		if strings.Contains(body, "serper_api_key") || strings.Contains(body, "Serper API key") {
 			t.Fatal("unauthenticated /settings served settings form")
 		}
-		if !strings.Contains(body, "Hub access / viewer token") {
-			t.Fatal("login page missing token field")
+		if strings.Contains(body, "Hub access / viewer token") || strings.Contains(body, "Paste token") {
+			t.Fatal("login page still has token paste field")
+		}
+		if strings.Contains(body, "email link") || strings.Contains(body, "magic") {
+			t.Fatal("login page still mentions email magic link")
+		}
+		if !strings.Contains(body, "Hub 全局管理员账号密码登录") {
+			t.Fatal("login page missing global-admin copy")
+		}
+		if !strings.Contains(body, `id="username"`) || !strings.Contains(body, `id="password"`) {
+			t.Fatal("login page missing username/password")
+		}
+		if strings.Contains(body, `id="token"`) || strings.Contains(body, `name="token"`) {
+			t.Fatal("login page still has token input")
 		}
 		if strings.Contains(body, "SEARCH_TOKEN") || strings.Contains(body, "proxy.token") {
 			t.Fatal("login page mentioned operator token")
@@ -170,16 +182,35 @@ func mockHub(t *testing.T) (*httptest.Server, http.Handler) {
 			var in struct {
 				Username string `json:"username"`
 				Password string `json:"password"`
+				Tenant   string `json:"tenant"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in.Tenant != "" && in.Tenant != "__global__" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			if in.Username == "ada@hub.example" && in.Password == "correct-horse" {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"access_token":"good-hub-token"}`))
+				_, _ = w.Write([]byte(`{"access_token":"good-admin-token","admin":{"username":"ada","scope":"global"}}`))
+				return
+			}
+			if in.Username == "tenant-ada" && in.Password == "tenant-pass" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"tenant-admin-token","admin":{"username":"tenant-ada","scope":"tenant","tenant_id":"tenant_default"}}`))
 				return
 			}
 			w.WriteHeader(http.StatusUnauthorized)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/admin/users":
+			auth := r.Header.Get("Authorization")
+			if auth == "Bearer good-admin-token" || auth == "Bearer tenant-admin-token" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":"ADMIN_UNAUTHORIZED","message":"Invalid admin token"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/llm/v1/models":
-			if r.Header.Get("Authorization") == "Bearer good-hub-token" {
+			if r.Header.Get("Authorization") == "Bearer good-viewer-token" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -223,6 +254,28 @@ func TestSettingsLoginSearchTokenRejected(t *testing.T) {
 	}
 }
 
+func TestSettingsLoginIgnoresPastedTokenWhenPasswordOk(t *testing.T) {
+	_, h := mockHub(t)
+	ck := cookieFromLogin(t, h, `{"username":"ada@hub.example","password":"correct-horse","token":"good-viewer-token"}`)
+	if ck.Value != "good-admin-token" {
+		t.Fatalf("cookie should be admin login token, got %q", ck.Value)
+	}
+}
+
+func TestSettingsCookieSearchTokenNotEnough(t *testing.T) {
+	_, h := mockHub(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.AddCookie(&http.Cookie{Name: "rs_settings", Value: "settings-secret"})
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Hub 全局管理员账号密码登录") {
+		t.Fatal("SEARCH_TOKEN cookie must not open settings")
+	}
+}
+
 func cookieFromLogin(t *testing.T, h http.Handler, body string) *http.Cookie {
 	t.Helper()
 	rr := httptest.NewRecorder()
@@ -260,9 +313,32 @@ func cookieFromLogin(t *testing.T, h http.Handler, body string) *http.Cookie {
 	return ck
 }
 
-func TestSettingsLoginTokenSetCookieThenSettingsHTML(t *testing.T) {
+func TestSettingsLoginPastedTokenRejected(t *testing.T) {
 	_, h := mockHub(t)
-	ck := cookieFromLogin(t, h, `{"token":"good-hub-token"}`)
+	for _, body := range []string{
+		`{"token":"good-admin-token"}`,
+		`{"token":"good-viewer-token"}`,
+		`{"token":"settings-secret"}`,
+	} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/settings/login", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("pasted token %s status=%d body=%s", body, rr.Code, rr.Body.String())
+		}
+		if ck := rr.Result().Cookies(); len(ck) != 0 {
+			t.Fatalf("pasted token set cookies: %+v", ck)
+		}
+	}
+}
+
+func TestSettingsLoginPasswordSetCookieThenSettingsHTML(t *testing.T) {
+	_, h := mockHub(t)
+	ck := cookieFromLogin(t, h, `{"username":"ada@hub.example","password":"correct-horse"}`)
+	if ck.Value != "good-admin-token" {
+		t.Fatalf("cookie value=%q", ck.Value)
+	}
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
@@ -279,18 +355,61 @@ func TestSettingsLoginTokenSetCookieThenSettingsHTML(t *testing.T) {
 	}
 }
 
-func TestSettingsLoginPasswordSetCookie(t *testing.T) {
+func TestSettingsLoginTenantAdminRejected(t *testing.T) {
 	_, h := mockHub(t)
-	ck := cookieFromLogin(t, h, `{"username":"ada@hub.example","password":"correct-horse"}`)
-	if ck.Value != "good-hub-token" {
-		t.Fatalf("cookie value=%q", ck.Value)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/settings/login", strings.NewReader(`{"username":"tenant-ada","password":"tenant-pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("tenant admin status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if ck := rr.Result().Cookies(); len(ck) != 0 {
+		t.Fatalf("tenant admin set cookies: %+v", ck)
+	}
+}
+
+func TestSettingsViewerTokenNotEnough(t *testing.T) {
+	_, h := mockHub(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.Header.Set("Authorization", "Bearer good-viewer-token")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "Serper API key") || strings.Contains(body, "serper_api_key") {
+		t.Fatal("models-only token opened settings form")
+	}
+	if !strings.Contains(body, "Hub 全局管理员账号密码登录") {
+		t.Fatal("expected login HTML for viewer token")
+	}
+
+	cfg := httptest.NewRecorder()
+	creq := httptest.NewRequest(http.MethodGet, "/settings/config", nil)
+	creq.Header.Set("Authorization", "Bearer good-viewer-token")
+	h.ServeHTTP(cfg, creq)
+	if cfg.Code != http.StatusUnauthorized {
+		t.Fatalf("config status=%d body=%s", cfg.Code, cfg.Body.String())
+	}
+}
+
+func TestSettingsAdminBearerOpensConfig(t *testing.T) {
+	_, h := mockHub(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings/config", nil)
+	req.Header.Set("Authorization", "Bearer good-admin-token")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 
 func TestSettingsLoginHTTPSSetsSecureCookie(t *testing.T) {
 	_, h := mockHub(t)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/settings/login", strings.NewReader(`{"token":"good-hub-token"}`))
+	req := httptest.NewRequest(http.MethodPost, "/settings/login", strings.NewReader(`{"username":"ada@hub.example","password":"correct-horse"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-Proto", "https")
 	h.ServeHTTP(rr, req)
@@ -323,7 +442,7 @@ func TestSettingsConfig401WithoutCookie(t *testing.T) {
 
 func TestSearchStill401WithoutBearerEvenWithSettingsCookie(t *testing.T) {
 	_, h := mockHub(t)
-	ck := cookieFromLogin(t, h, `{"token":"good-hub-token"}`)
+	ck := cookieFromLogin(t, h, `{"username":"ada@hub.example","password":"correct-horse"}`)
 	search.ActivateStore(nil)
 	search.SetKeyedTestHooks("http://127.0.0.1:1", "", func(string) string { return "" })
 	t.Cleanup(search.ResetKeyedTestHooks)
@@ -345,7 +464,7 @@ func TestSearchStill401WithoutBearerEvenWithSettingsCookie(t *testing.T) {
 
 func TestSettingsLogoutClearsCookie(t *testing.T) {
 	_, h := mockHub(t)
-	ck := cookieFromLogin(t, h, `{"token":"good-hub-token"}`)
+	ck := cookieFromLogin(t, h, `{"username":"ada@hub.example","password":"correct-horse"}`)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/settings/logout", nil)
 	req.AddCookie(ck)

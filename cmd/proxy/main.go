@@ -215,9 +215,10 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			hdrs[k] = vs[0]
 		}
 	}
-	// Settings re-checks Hub / SEARCH_TOKEN / session cookie on the search
-	// process. Forward bearer and Cookie so login and /settings/config work
-	// through the tunnel. Authorization is a hop header and must be restored.
+	// Settings re-checks Hub global admin / SEARCH_TOKEN / session cookie
+	// on the search process. Forward bearer and Cookie so login and
+	// /settings/config work through the tunnel. Authorization is a hop
+	// header and must be restored.
 	if tunnel.PathIsSettings(path) {
 		if a := r.Header.Get("Authorization"); a != "" {
 			hdrs["Authorization"] = a
