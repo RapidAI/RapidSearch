@@ -178,6 +178,9 @@ func TestSettingsPageHTMLAuthenticated(t *testing.T) {
 	if !strings.Contains(string(body), `rs_settings_lang`) || !strings.Contains(string(body), "退出登录") || !strings.Contains(string(body), "Log out") {
 		t.Fatal("settings page missing ZH/EN strings or language toggle")
 	}
+	if !strings.Contains(string(body), "hint_google") || !strings.Contains(string(body), "仅 Chrome") {
+		t.Fatal("settings page missing localized engine hints")
+	}
 }
 
 func TestSettingsAcceptLanguageZh(t *testing.T) {

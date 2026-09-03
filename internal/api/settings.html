@@ -114,7 +114,7 @@
 </head>
 <body>
 <div class="top">
-  <div class="lang-switch" role="group" aria-label="Language">
+  <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
     <button type="button" id="lang-zh" data-lang="zh">中文</button>
     <button type="button" id="lang-en" data-lang="en">EN</button>
   </div>
@@ -186,7 +186,21 @@
       saved: "Saved.",
       signingOut: "Signing out…",
       keySet: "key set",
-      noKey: "no key (skipped on auto)"
+      noKey: "no key (skipped on auto)",
+      langLabel: "Language",
+      kind_keyed: "keyed",
+      kind_http: "http",
+      kind_chrome: "chrome",
+      kind_dual: "http + chrome",
+      hint_serper: "google.serper.dev · requires API key",
+      hint_brave: "api.search.brave.com · requires API key",
+      hint_baidu: "HTTP scrape; Chrome only if requested explicitly",
+      hint_sogou: "HTTP scrape; Chrome only if requested explicitly",
+      hint_360: "HTTP scrape; Chrome only if requested explicitly",
+      hint_bing: "HTTP scrape; Chrome only if requested explicitly",
+      hint_duckduckgo_html: "HTTP only · no Chrome slot",
+      hint_duckduckgo: "Chrome fallback after HTML",
+      hint_google: "Chrome only · disabled on auto by default; captcha breaker if enabled"
     },
     zh: {
       title: "RapidSearch 设置",
@@ -216,7 +230,21 @@
       saved: "已保存。",
       signingOut: "正在退出…",
       keySet: "已配置 key",
-      noKey: "无 key（自动跳过）"
+      noKey: "无 key（自动跳过）",
+      langLabel: "语言",
+      kind_keyed: "付费 API",
+      kind_http: "HTTP",
+      kind_chrome: "Chrome",
+      kind_dual: "HTTP + Chrome",
+      hint_serper: "google.serper.dev · 需要 API key",
+      hint_brave: "api.search.brave.com · 需要 API key",
+      hint_baidu: "HTTP 抓取；仅在显式指定时才用 Chrome",
+      hint_sogou: "HTTP 抓取；仅在显式指定时才用 Chrome",
+      hint_360: "HTTP 抓取；仅在显式指定时才用 Chrome",
+      hint_bing: "HTTP 抓取；仅在显式指定时才用 Chrome",
+      hint_duckduckgo_html: "仅 HTTP · 不占用 Chrome",
+      hint_duckduckgo: "HTML 之后的 Chrome 兜底",
+      hint_google: "仅 Chrome · 默认不参与自动搜索；启用后仍受验证码熔断约束"
     }
   };
 
@@ -250,6 +278,11 @@
     return s;
   }
 
+  function hasT(key) {
+    const pack = I18N[lang] || I18N.en;
+    return !!(pack[key] || (I18N.en && I18N.en[key]));
+  }
+
   function applyI18n() {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
@@ -259,6 +292,9 @@
     });
     document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
       el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder")));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+      el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
     });
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
@@ -335,9 +371,12 @@
       name.textContent = e.label || e.id;
       const meta = document.createElement("div");
       meta.className = "meta";
-      let extra = e.kind || "";
+      const kindKey = "kind_" + (e.kind || "");
+      let extra = hasT(kindKey) ? t(kindKey) : (e.kind || "");
       if (e.kind === "keyed") extra += e.available ? " · " + t("keySet") : " · " + t("noKey");
-      if (e.hint) extra += (extra ? " · " : "") + e.hint;
+      const hintKey = "hint_" + (e.id || "");
+      const hintText = hasT(hintKey) ? t(hintKey) : (e.hint || "");
+      if (hintText) extra += (extra ? " · " : "") + hintText;
       meta.textContent = extra;
       mid.appendChild(name);
       mid.appendChild(meta);

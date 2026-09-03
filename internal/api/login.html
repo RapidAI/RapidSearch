@@ -88,7 +88,7 @@
 </head>
 <body>
 <div class="top">
-  <div class="lang-switch" role="group" aria-label="Language">
+  <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
     <button type="button" id="lang-zh" data-lang="zh">中文</button>
     <button type="button" id="lang-en" data-lang="en">EN</button>
   </div>
@@ -130,7 +130,8 @@
       signingIn: "Signing in…",
       signedIn: "Signed in.",
       loginFailed: "Sign-in failed.",
-      invalidAdmin: "Invalid Hub global admin account."
+      invalidAdmin: "Invalid Hub global admin account.",
+      langLabel: "Language"
     },
     zh: {
       title: "RapidSearch 登录",
@@ -144,7 +145,8 @@
       signingIn: "正在登录…",
       signedIn: "已登录。",
       loginFailed: "登录失败。",
-      invalidAdmin: "Hub 全局管理员账号无效。"
+      invalidAdmin: "Hub 全局管理员账号无效。",
+      langLabel: "语言"
     }
   };
 
@@ -173,6 +175,9 @@
     document.title = t("title");
     document.querySelectorAll("[data-i18n]").forEach(function (el) {
       el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+      el.setAttribute("aria-label", t(el.getAttribute("data-i18n-aria")));
     });
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
