@@ -21,20 +21,21 @@ const (
 	defaultTimeout = 5 * time.Second
 	defaultCache   = 5 * time.Minute
 	modelsPath     = "/api/llm/v1/models"
-	// adminLoginPath is Hub's only password login (admin web). Viewer
-	// accounts on hub.maclaw.top / hub.mypapers.top use email magic-link
-	// (/api/auth/email-request), not a password. A returned access_token
-	// is accepted only if HubValid still passes (same models check).
+	// adminLoginPath is Hub's password login for the admin console.
+	// Request tenant "__global__" (or omit tenant) for a global admin.
+	// Admin tokens are validated by Hub admin middleware, not models.
 	adminLoginPath = "/api/admin/login"
+	adminUsersPath = "/api/admin/users"
+	globalTenant   = "__global__"
 )
 
 // SettingsCookie is the HttpOnly settings-session cookie. Path=/ covers
 // both /settings and the public nginx prefix /searchproxy/settings.
 const SettingsCookie = "rs_settings"
 
-// Checker accepts SEARCH_TOKEN or a Hub token that Hub's models endpoint
-// accepts. Positive Hub results are cached by sha256(token). The raw token
-// is never logged.
+// Checker accepts SEARCH_TOKEN, Hub viewer tokens (models), and Hub admin
+// tokens (admin users). Positive Hub results are cached by sha256(token).
+// The raw token is never logged.
 type Checker struct {
 	SearchToken string
 	Bases       []string
@@ -43,8 +44,9 @@ type Checker struct {
 	Timeout     time.Duration
 	now         func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]time.Time // hex(sha256(token)) -> expiry
+	mu         sync.Mutex
+	cache      map[string]time.Time // models: hex(sha256(token)) -> expiry
+	adminCache map[string]time.Time // admin: hex(sha256(token)) -> expiry
 }
 
 // ParseBases splits HUB_AUTH_BASES (comma-separated). Empty input uses DefaultBases.
@@ -80,6 +82,7 @@ func New(searchToken string, bases []string) *Checker {
 		CacheTTL:    defaultCache,
 		Timeout:     defaultTimeout,
 		cache:       map[string]time.Time{},
+		adminCache:  map[string]time.Time{},
 	}
 }
 
@@ -158,7 +161,8 @@ func RequestToken(r *http.Request) string {
 	return CookieToken(r)
 }
 
-// Authorized reports whether token is SEARCH_TOKEN or a cached/live Hub token.
+// Authorized reports whether token is SEARCH_TOKEN or a cached/live Hub
+// viewer token (GET /api/llm/v1/models). Used by /search on the public proxy.
 func (c *Checker) Authorized(token string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" || c == nil {
@@ -170,9 +174,23 @@ func (c *Checker) Authorized(token string) bool {
 	return c.hubValid(token)
 }
 
+// SettingsAuthorized reports whether token may open /settings APIs: the
+// operator SEARCH_TOKEN (Bearer / ?token=, not the browser cookie) or a
+// Hub admin token accepted by GET /api/admin/users. Viewer/models tokens
+// are not enough.
+func (c *Checker) SettingsAuthorized(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" || c == nil {
+		return false
+	}
+	if c.SearchToken != "" && tokenEq(token, c.SearchToken) {
+		return true
+	}
+	return c.adminValid(token)
+}
+
 // HubValid reports whether token is accepted by Hub GET /api/llm/v1/models.
-// It does not accept SEARCH_TOKEN. Used by the settings login form so the
-// operator-only proxy token is never stored in the browser cookie.
+// It does not accept SEARCH_TOKEN. Used by /search Hub-viewer checks.
 func (c *Checker) HubValid(token string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" || c == nil {
@@ -181,8 +199,21 @@ func (c *Checker) HubValid(token string) bool {
 	return c.hubValid(token)
 }
 
-// HubPasswordLogin POSTs username/password to Hub /api/admin/login on each
-// configured base and returns the access_token only when HubValid accepts it.
+// AdminValid reports whether token is accepted by Hub GET /api/admin/users
+// (requireAdmin). It does not accept SEARCH_TOKEN. Admin tokens fail the
+// models endpoint; do not use HubValid for settings sessions.
+func (c *Checker) AdminValid(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" || c == nil {
+		return false
+	}
+	return c.adminValid(token)
+}
+
+// HubPasswordLogin POSTs username/password to Hub /api/admin/login with
+// global scope (tenant "__global__") on each configured base. It returns
+// access_token only when the response admin is a global admin (not
+// tenant-scoped) and GET /api/admin/users accepts the token.
 // Empty username or password returns "".
 func (c *Checker) HubPasswordLogin(username, password string) string {
 	username = strings.TrimSpace(username)
@@ -190,7 +221,11 @@ func (c *Checker) HubPasswordLogin(username, password string) string {
 		return ""
 	}
 	for _, base := range c.Bases {
-		if tok := c.hubPasswordLogin(base, username, password); tok != "" && c.hubValid(tok) {
+		tok, global, issued := c.hubPasswordLogin(base, username, password)
+		if issued && !global {
+			return ""
+		}
+		if tok != "" && global && c.adminValid(tok) {
 			return tok
 		}
 	}
@@ -198,56 +233,79 @@ func (c *Checker) HubPasswordLogin(username, password string) string {
 }
 
 func (c *Checker) hubValid(token string) bool {
+	return c.cachedValid(token, &c.cache, c.checkHubs)
+}
+
+func (c *Checker) adminValid(token string) bool {
+	return c.cachedValid(token, &c.adminCache, c.checkHubAdmins)
+}
+
+func (c *Checker) cachedValid(token string, cache *map[string]time.Time, live func(string) bool) bool {
 	key := tokenKey(token)
 	now := c.nowTime()
 	c.mu.Lock()
-	if exp, ok := c.cache[key]; ok && now.Before(exp) {
+	if *cache == nil {
+		*cache = map[string]time.Time{}
+	}
+	if exp, ok := (*cache)[key]; ok && now.Before(exp) {
 		c.mu.Unlock()
 		return true
 	}
-	if exp, ok := c.cache[key]; ok && !now.Before(exp) {
-		delete(c.cache, key)
+	if exp, ok := (*cache)[key]; ok && !now.Before(exp) {
+		delete(*cache, key)
 	}
 	c.mu.Unlock()
 
-	if c.checkHubs(token) {
+	if live(token) {
 		c.mu.Lock()
-		c.cache[key] = now.Add(c.cacheTTL())
-		c.pruneLocked(now)
+		if *cache == nil {
+			*cache = map[string]time.Time{}
+		}
+		(*cache)[key] = now.Add(c.cacheTTL())
+		c.pruneLocked(*cache, now)
 		c.mu.Unlock()
 		return true
 	}
 	return false
 }
 
-func (c *Checker) pruneLocked(now time.Time) {
-	if len(c.cache) < 1024 {
+func (c *Checker) pruneLocked(cache map[string]time.Time, now time.Time) {
+	if len(cache) < 1024 {
 		return
 	}
-	for k, exp := range c.cache {
+	for k, exp := range cache {
 		if !now.Before(exp) {
-			delete(c.cache, k)
+			delete(cache, k)
 		}
 	}
 }
 
 func (c *Checker) checkHubs(token string) bool {
 	for _, base := range c.Bases {
-		if c.checkHub(base, token) {
+		if c.checkHubPath(base, modelsPath, token) {
 			return true
 		}
 	}
 	return false
 }
 
-func (c *Checker) checkHub(base, token string) bool {
+func (c *Checker) checkHubAdmins(token string) bool {
+	for _, base := range c.Bases {
+		if c.checkHubPath(base, adminUsersPath, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) checkHubPath(base, path, token string) bool {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
-	if base == "" {
+	if base == "" || path == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout())
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+modelsPath, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
 		return false
 	}
@@ -261,46 +319,99 @@ func (c *Checker) checkHub(base, token string) bool {
 	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
-func (c *Checker) hubPasswordLogin(base, username, password string) string {
+// hubPasswordLogin returns (token, isGlobal, issued). issued is true when Hub
+// returned a 2xx login body with an access_token (tenant admins included).
+func (c *Checker) hubPasswordLogin(base, username, password string) (token string, global, issued bool) {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if base == "" {
-		return ""
+		return "", false, false
 	}
 	payload, err := json.Marshal(map[string]string{
 		"username": username,
 		"password": password,
+		"tenant":   globalTenant,
 	})
 	if err != nil {
-		return ""
+		return "", false, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout())
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+adminLoginPath, strings.NewReader(string(payload)))
 	if err != nil {
-		return ""
+		return "", false, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return ""
+		return "", false, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return ""
+		return "", false, false
 	}
 	var out struct {
-		AccessToken string `json:"access_token"`
-		Token       string `json:"token"`
-		ViewerToken string `json:"viewer_token"`
+		AccessToken string          `json:"access_token"`
+		Token       string          `json:"token"`
+		Admin       json.RawMessage `json:"admin"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
-		return ""
+		return "", false, false
 	}
-	for _, tok := range []string{out.AccessToken, out.Token, out.ViewerToken} {
-		if t := strings.TrimSpace(tok); t != "" {
-			return t
-		}
+	tok := strings.TrimSpace(out.AccessToken)
+	if tok == "" {
+		tok = strings.TrimSpace(out.Token)
 	}
-	return ""
+	if tok == "" {
+		return "", false, false
+	}
+	return tok, isGlobalHubAdmin(out.Admin), true
+}
+
+type hubAdminProfile struct {
+	Scope    string `json:"scope"`
+	Tenant   string `json:"tenant"`
+	TenantID string `json:"tenant_id"`
+	Role     string `json:"role"`
+	IsGlobal *bool  `json:"is_global"`
+	Global   *bool  `json:"global"`
+}
+
+func isGlobalHubAdmin(raw json.RawMessage) bool {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var a hubAdminProfile
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return false
+	}
+	if a.IsGlobal != nil {
+		return *a.IsGlobal
+	}
+	if a.Global != nil {
+		return *a.Global
+	}
+	scope := strings.ToLower(strings.TrimSpace(a.Scope))
+	if scope == "tenant" {
+		return false
+	}
+	role := strings.ToLower(strings.TrimSpace(a.Role))
+	if strings.Contains(role, "tenant") {
+		return false
+	}
+	tenant := strings.TrimSpace(a.TenantID)
+	if tenant == "" {
+		tenant = strings.TrimSpace(a.Tenant)
+	}
+	if isGlobalTenantID(tenant) {
+		return scope == "" || scope == "global" || scope == globalTenant
+	}
+	// Non-empty tenant id: only accept when Hub explicitly marks global.
+	return scope == "global" || scope == globalTenant
+}
+
+func isGlobalTenantID(id string) bool {
+	id = strings.ToLower(strings.TrimSpace(id))
+	return id == "" || id == globalTenant || id == "global"
 }

@@ -35,8 +35,8 @@ Environment / 环境变量:
 - `CACHE_DIR` (optional, default `./cache`)
 - `CACHE_TTL` (optional Go duration, default `1h`)
 - `SEARCH_CONFIG_PATH` (optional, default `./search-config.json`): API keys + engine priority. Created with mode `0600`, gitignored. Never commit this file.
-- `SEARCH_TOKEN` (optional on the search process): same secret as the public proxy. Required to open `/settings` locally unless you send a Hub viewer/session/machine token. If unset, `./proxy.token` is read when present.
-- `HUB_AUTH_BASES` (optional): comma-separated Hub origins used to validate Hub tokens on `/settings`. Default `https://hub.mypapers.top,https://hub.maclaw.top`.
+- `SEARCH_TOKEN` (optional on the search process): same secret as the public proxy. Operator Bearer / `?token=` can still open `/settings/config` for non-browser use. Browser settings login is Hub **global admin** username + password only. If unset, `./proxy.token` is read when present.
+- `HUB_AUTH_BASES` (optional): comma-separated Hub origins used to validate Hub tokens. Default `https://hub.mypapers.top,https://hub.maclaw.top`. `/search` checks viewer tokens with `GET {HUB}/api/llm/v1/models`. Settings cookie/admin Bearer is checked with `GET {HUB}/api/admin/users` (not models).
 
 ## API
 
@@ -46,17 +46,17 @@ Environment / 环境变量:
 
 HTML + JSON on the search process. Open `https://hub.maclaw.top/searchproxy/settings` in a browser and sign in — no `Authorization` header required after login.
 
-- `GET /settings` — if signed in (Hub cookie, Bearer, or `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority). If not signed in: **HTML login page** (HTTP 200), not JSON 401.
-- `POST /settings/login` (also `POST /settings`) — Hub username/email + password and/or Hub viewer/access token. Sets HttpOnly cookie `rs_settings` (`Path=/`, `SameSite=Lax`, `Secure` when HTTPS). Login never accepts or displays the operator `SEARCH_TOKEN` / `proxy.token`.
+- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
+- `POST /settings/login` (also `POST /settings`) — Hub **global admin** username + password only (`POST {HUB}/api/admin/login` with `tenant` omitted or `"__global__"`). Parses `access_token` and rejects the login unless the returned `admin` is a **global** admin (not tenant-scoped). Then checks `GET {HUB}/api/admin/users` (2xx). Sets HttpOnly cookie `rs_settings` (`Path=/`, `SameSite=Lax`, `Secure` when HTTPS). No token paste field. Login never accepts or displays the operator `SEARCH_TOKEN` / `proxy.token`.
 - `POST /settings/logout` — clears the cookie.
 - `GET /settings/config` — masked JSON (`configured` yes/no, optional `last4`). Never returns raw keys. Unauthenticated → **JSON 401** (API stays machine-readable).
 - `PUT /settings/config` — update keys and/or priority. An empty key string **does not wipe** a stored key; send `"clear_serper": true` / `"clear_brave": true` to delete.
 
-Hub investigation: viewer accounts on `hub.maclaw.top` / `hub.mypapers.top` sign in via email link (`POST /api/auth/email-request`), not a password. Password login is tried against Hub `POST /api/admin/login`; the returned `access_token` is accepted only if it also passes `GET {HUB}/api/llm/v1/models` (same `hubValid` check as Bearer). If Hub does not issue a viewer token from that password, paste the viewer/access token from a Hub `/app` session.
+Hub global admin tokens are validated by Hub admin middleware (`Authenticate`), **not** by `GET /api/llm/v1/models`. A models-only viewer token is not enough for `/settings`. Tenant-scoped admins are rejected at login. There is no captcha on Hub admin login.
 
 Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/settings`, `/settings/login`, Cookie, and Set-Cookie the same way as `/settings/config`. Hub can open `https://hub.maclaw.top/searchproxy/settings` if nginx already prefixes `/searchproxy/` to the proxy. Do not bind the search process to `0.0.0.0`.
 
-本地打开 `http://127.0.0.1:18765/settings`。公网路径在反代已转发 `/searchproxy/` 时为 `https://hub.maclaw.top/searchproxy/settings`。未登录的浏览器看到登录页；`/settings/config` 仍是 JSON 401，不会泄露 key。
+本地打开 `http://127.0.0.1:18765/settings`。公网路径在反代已转发 `/searchproxy/` 时为 `https://hub.maclaw.top/searchproxy/settings`。未登录的浏览器看到 **Hub 全局管理员账号密码** 登录页（无 token 粘贴）；`/settings/config` 仍是 JSON 401，不会泄露 key。
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
 
@@ -69,7 +69,7 @@ Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, 
 
 Google is **omitted** on auto unless you enable it in a saved priority list. If enabled, the captcha breaker still skips / fail-fasts when open. After you save a custom order, auto uses that enabled list (disabled engines and keyed engines without a key are skipped).
 
-**Auth:** `/settings` and `/settings/config` accept `Authorization: Bearer …`, `?token=`, or the `rs_settings` HttpOnly cookie — `SEARCH_TOKEN` (or `./proxy.token`) **or** a Hub token accepted by `GET {HUB}/api/llm/v1/models`. The login form only stores a Hub-validated token in the cookie. Local `/search` on `127.0.0.1` stays open; the public proxy still authenticates `/search` with Bearer/`?token=` only (cookie is ignored).
+**Auth:** `/settings` and `/settings/config` accept `Authorization: Bearer …`, `?token=`, or the `rs_settings` HttpOnly cookie. The cookie must be a Hub **global admin** token (`GET {HUB}/api/admin/users` 2xx). Operator `SEARCH_TOKEN` / `./proxy.token` Bearer still works for non-browser `/settings/config`. Viewer/models tokens are not enough for settings. Local `/search` on `127.0.0.1` stays open; the public proxy still authenticates `/search` with Bearer/`?token=` only (Hub viewer or `SEARCH_TOKEN`; settings cookie is ignored).
 
 `GET /search?q=<query>&engine=auto|google|bing|baidu|duckduckgo|duckduckgo_html|sogou|360|serper|brave&n=10&content=1&fallback=1`
 
@@ -269,9 +269,9 @@ Public HTTP `/health`, `/search`, and `/download` accept **either**:
 1. `SEARCH_TOKEN` as `Authorization: Bearer …` or `?token=` (ops / internal)
 2. a valid MaClaw Hub viewer, session, or machine token (the signed-in Hub credential). The proxy checks it with `GET {HUB_AUTH_BASE}/api/llm/v1/models` and `Authorization: Bearer <token>`. HTTP 2xx means valid. Timeout is about 5s. Positive results are cached about 5 minutes, keyed by SHA-256 of the token.
 
-`/settings` and `/settings/*` are forwarded without a proxy-side Bearer check so the browser login page can render. The search process still requires a Hub-validated cookie, Bearer, or `?token=` for the settings HTML and for `/settings/config`. `/search` does **not** accept the settings cookie.
+`/settings` and `/settings/*` are forwarded without a proxy-side Bearer check so the browser login page can render. The search process requires a Hub **global admin** cookie, an admin Bearer, or operator `SEARCH_TOKEN` for the settings HTML and for `/settings/config`. `/search` does **not** accept the settings cookie and does **not** require an admin cookie (agents keep using Hub viewer / `SEARCH_TOKEN`).
 
-Hub login is enough; users never configure a RapidSearch API key. Tokens are never logged.
+Hub global admin login is enough; users never paste a RapidSearch or Hub viewer token. Tokens are never logged.
 
 **nginx:** the existing `location /searchproxy/` snippet already `proxy_pass`es to the proxy root and sets `Authorization`. Cookie and `Set-Cookie` pass through with default `proxy_pass` (no extra `proxy_set_header Cookie` is required for a new deploy). Cookie `Path=/` covers both `/settings` and `/searchproxy/settings`.
 

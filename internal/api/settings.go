@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	_ "embed"
@@ -21,7 +23,7 @@ var loginPageHTML []byte
 const settingsCookieMaxAge = 12 * 60 * 60
 
 func (s *Server) authorizeSettings(w http.ResponseWriter, r *http.Request) bool {
-	if s == nil || s.auth == nil || !s.auth.Authorized(proxyauth.RequestToken(r)) {
+	if !s.settingsAuthed(r) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized", search.CodeUnauthorized, nil, "")
 		return false
 	}
@@ -29,7 +31,15 @@ func (s *Server) authorizeSettings(w http.ResponseWriter, r *http.Request) bool 
 }
 
 func (s *Server) settingsAuthed(r *http.Request) bool {
-	return s != nil && s.auth != nil && s.auth.Authorized(proxyauth.RequestToken(r))
+	if s == nil || s.auth == nil {
+		return false
+	}
+	// Operator Bearer / ?token= may still be SEARCH_TOKEN. The browser
+	// cookie is admin-only (GET {HUB}/api/admin/users), never models.
+	if tok := proxyauth.BearerToken(r); tok != "" {
+		return s.auth.SettingsAuthorized(tok)
+	}
+	return s.auth.AdminValid(proxyauth.CookieToken(r))
 }
 
 func (s *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +74,11 @@ func (s *Server) handleSettingsLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
-	user, pass, token := parseSettingsLogin(r)
-	got := s.loginHubToken(user, pass, token)
+	user, pass := parseSettingsLogin(r)
+	got := s.loginHubToken(user, pass)
 	if got == "" {
 		if wantsJSON(r) {
-			writeErr(w, http.StatusUnauthorized, "invalid Hub account or viewer token", search.CodeUnauthorized, nil, "")
+			writeErr(w, http.StatusUnauthorized, "invalid Hub global admin account", search.CodeUnauthorized, nil, "")
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -98,20 +108,14 @@ func (s *Server) handleSettingsLogout(w http.ResponseWriter, r *http.Request) {
 	writeSettingsHTML(w, r, loginPageHTML)
 }
 
-func (s *Server) loginHubToken(user, pass, token string) string {
+func (s *Server) loginHubToken(user, pass string) string {
 	if s == nil || s.auth == nil {
 		return ""
 	}
-	token = strings.TrimSpace(token)
-	if token != "" && s.auth.HubValid(token) {
-		return token
+	if user == "" || pass == "" {
+		return ""
 	}
-	if user != "" && pass != "" {
-		if got := s.auth.HubPasswordLogin(user, pass); got != "" {
-			return got
-		}
-	}
-	return ""
+	return s.auth.HubPasswordLogin(user, pass)
 }
 
 func (s *Server) handleSettingsConfig(w http.ResponseWriter, r *http.Request) {
@@ -169,13 +173,61 @@ func writeSettingsHTML(w http.ResponseWriter, r *http.Request, page []byte) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	if r == nil || r.Method != http.MethodHead {
-		_, _ = w.Write(page)
+		_, _ = w.Write(applyHTMLLang(page, acceptLang(r)))
 	}
 }
 
-func parseSettingsLogin(r *http.Request) (user, pass, token string) {
+func acceptLang(r *http.Request) string {
 	if r == nil {
-		return "", "", ""
+		return "en"
+	}
+	bestZh, bestOther := -1.0, -1.0
+	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		q := 1.0
+		bits := strings.Split(part, ";")
+		tag := strings.ToLower(strings.TrimSpace(bits[0]))
+		for _, b := range bits[1:] {
+			b = strings.TrimSpace(strings.ToLower(b))
+			if strings.HasPrefix(b, "q=") {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(b[2:]), 64); err == nil {
+					q = v
+				}
+			}
+		}
+		if strings.HasPrefix(tag, "zh") {
+			if q > bestZh {
+				bestZh = q
+			}
+			continue
+		}
+		if q > bestOther {
+			bestOther = q
+		}
+	}
+	if bestZh >= 0 && bestZh >= bestOther {
+		return "zh"
+	}
+	return "en"
+}
+
+func applyHTMLLang(page []byte, lang string) []byte {
+	if lang != "zh" {
+		lang = "en"
+	}
+	page = bytes.Replace(page, []byte(`data-accept-lang="en"`), []byte(`data-accept-lang="`+lang+`"`), 1)
+	if lang == "zh" {
+		page = bytes.Replace(page, []byte(`<html lang="en"`), []byte(`<html lang="zh-CN"`), 1)
+	}
+	return page
+}
+
+func parseSettingsLogin(r *http.Request) (user, pass string) {
+	if r == nil {
+		return "", ""
 	}
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.Contains(ct, "application/json") {
@@ -184,19 +236,16 @@ func parseSettingsLogin(r *http.Request) (user, pass, token string) {
 			Username string `json:"username"`
 			Email    string `json:"email"`
 			Password string `json:"password"`
-			Token    string `json:"token"`
 		}
 		_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
 		user = strings.TrimSpace(firstNonEmpty(body.Username, body.Email))
 		pass = body.Password
-		token = strings.TrimSpace(body.Token)
-		return user, pass, token
+		return user, pass
 	}
 	_ = r.ParseForm()
 	user = strings.TrimSpace(firstNonEmpty(r.FormValue("username"), r.FormValue("email")))
 	pass = r.FormValue("password")
-	token = strings.TrimSpace(r.FormValue("token"))
-	return user, pass, token
+	return user, pass
 }
 
 func firstNonEmpty(vals ...string) string {

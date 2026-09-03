@@ -75,23 +75,86 @@ func TestHubValidRejectsSearchToken(t *testing.T) {
 	}
 }
 
-func TestHubPasswordLoginThenHubValid(t *testing.T) {
+func TestHubPasswordLoginRequiresGlobalAdminAndUsers(t *testing.T) {
+	var loginHits, usersHits, modelsHits atomic.Int32
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/admin/login":
+			loginHits.Add(1)
 			var in struct {
 				Username string `json:"username"`
 				Password string `json:"password"`
+				Tenant   string `json:"tenant"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in.Tenant != "" && in.Tenant != "__global__" {
+				t.Errorf("login tenant=%q, want __global__ or empty", in.Tenant)
+			}
 			if in.Username == "ada@hub.example" && in.Password == "correct-horse" {
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"access_token":"viewer-from-password"}`))
+				_, _ = w.Write([]byte(`{"access_token":"admin-from-password","admin":{"username":"ada","scope":"global"}}`))
+				return
+			}
+			if in.Username == "tenant-ada" && in.Password == "tenant-pass" {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"tenant-from-password","admin":{"username":"tenant-ada","scope":"tenant","tenant_id":"tenant_default"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/admin/users":
+			usersHits.Add(1)
+			if r.Header.Get("Authorization") == "Bearer admin-from-password" {
+				w.WriteHeader(http.StatusOK)
 				return
 			}
 			w.WriteHeader(http.StatusUnauthorized)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/llm/v1/models":
-			if r.Header.Get("Authorization") == "Bearer viewer-from-password" {
+			modelsHits.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer hub.Close()
+
+	c := New("search-secret", []string{hub.URL})
+	if tok := c.HubPasswordLogin("ada@hub.example", "correct-horse"); tok != "admin-from-password" {
+		t.Fatalf("password login token=%q", tok)
+	}
+	if loginHits.Load() < 1 || usersHits.Load() < 1 {
+		t.Fatalf("loginHits=%d usersHits=%d", loginHits.Load(), usersHits.Load())
+	}
+	if modelsHits.Load() != 0 {
+		t.Fatalf("password login must not call models, hits=%d", modelsHits.Load())
+	}
+	if tok := c.HubPasswordLogin("ada@hub.example", "wrong"); tok != "" {
+		t.Fatalf("bad password returned %q", tok)
+	}
+	if tok := c.HubPasswordLogin("tenant-ada", "tenant-pass"); tok != "" {
+		t.Fatalf("tenant admin returned %q", tok)
+	}
+	if !c.AdminValid("admin-from-password") {
+		t.Fatal("issued token should pass AdminValid")
+	}
+	if c.HubValid("admin-from-password") {
+		t.Fatal("admin token must not pass models HubValid")
+	}
+}
+
+func TestAdminValidUsesUsersNotModels(t *testing.T) {
+	var usersHits, modelsHits atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/admin/users":
+			usersHits.Add(1)
+			if r.Header.Get("Authorization") == "Bearer admin-tok" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+		case r.URL.Path == "/api/llm/v1/models":
+			modelsHits.Add(1)
+			if r.Header.Get("Authorization") == "Bearer viewer-tok" {
 				w.WriteHeader(http.StatusOK)
 				return
 			}
@@ -103,14 +166,62 @@ func TestHubPasswordLoginThenHubValid(t *testing.T) {
 	defer hub.Close()
 
 	c := New("search-secret", []string{hub.URL})
-	if tok := c.HubPasswordLogin("ada@hub.example", "correct-horse"); tok != "viewer-from-password" {
-		t.Fatalf("password login token=%q", tok)
+	if !c.AdminValid("admin-tok") {
+		t.Fatal("admin token should pass AdminValid")
 	}
-	if tok := c.HubPasswordLogin("ada@hub.example", "wrong"); tok != "" {
-		t.Fatalf("bad password returned %q", tok)
+	if c.AdminValid("viewer-tok") {
+		t.Fatal("viewer token must not pass AdminValid")
 	}
-	if !c.HubValid("viewer-from-password") {
-		t.Fatal("issued token should pass HubValid")
+	if !c.HubValid("viewer-tok") {
+		t.Fatal("viewer token should pass HubValid")
+	}
+	if c.HubValid("admin-tok") {
+		t.Fatal("admin token must not pass HubValid")
+	}
+	if !c.SettingsAuthorized("search-secret") {
+		t.Fatal("SEARCH_TOKEN should pass SettingsAuthorized")
+	}
+	if !c.SettingsAuthorized("admin-tok") {
+		t.Fatal("admin token should pass SettingsAuthorized")
+	}
+	if c.SettingsAuthorized("viewer-tok") {
+		t.Fatal("models-only token must not pass SettingsAuthorized")
+	}
+	if !c.Authorized("viewer-tok") {
+		t.Fatal("/search Authorized should still accept viewer token")
+	}
+	if usersHits.Load() < 2 {
+		t.Fatalf("usersHits=%d", usersHits.Load())
+	}
+	if modelsHits.Load() < 2 {
+		t.Fatalf("modelsHits=%d", modelsHits.Load())
+	}
+}
+
+func TestIsGlobalHubAdmin(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{``, false},
+		{`null`, false},
+		{`{}`, true},
+		{`{"scope":"global"}`, true},
+		{`{"scope":"GLOBAL"}`, true},
+		{`{"scope":"__global__"}`, true},
+		{`{"is_global":true}`, true},
+		{`{"global":true}`, true},
+		{`{"scope":"tenant","tenant_id":"tenant_default"}`, false},
+		{`{"scope":"tenant"}`, false},
+		{`{"is_global":false,"scope":"global"}`, false},
+		{`{"tenant_id":"tenant_default"}`, false},
+		{`{"role":"tenant_admin"}`, false},
+		{`{"scope":"global","tenant_id":"tenant_default"}`, true},
+	}
+	for _, tc := range cases {
+		if got := isGlobalHubAdmin([]byte(tc.raw)); got != tc.want {
+			t.Fatalf("isGlobalHubAdmin(%s)=%v want %v", tc.raw, got, tc.want)
+		}
 	}
 }
 
