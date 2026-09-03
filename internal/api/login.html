@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en" data-accept-lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RapidSearch 登录</title>
+  <title>RapidSearch</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -16,6 +16,7 @@
       --bad: #f07178;
       --btn: #243044;
     }
+    html:not([data-i18n-ready]) body { visibility: hidden; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -23,7 +24,16 @@
       background: var(--bg);
       color: var(--ink);
     }
-    main { max-width: 480px; margin: 0 auto; padding: 28px 18px 48px; }
+    .top {
+      display: flex;
+      justify-content: flex-end;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px 18px 0;
+    }
+    .lang-switch { display: flex; gap: 4px; }
+    .lang-switch button.active { background: #1d4e89; border-color: #2d6cb5; }
+    main { max-width: 480px; margin: 0 auto; padding: 12px 18px 48px; }
     h1 { font-size: 1.4rem; margin: 0 0 6px; }
     p.lead { color: var(--muted); margin: 0 0 22px; }
     section {
@@ -61,24 +71,44 @@
     #status.err { color: var(--bad); }
     #status.ok { color: var(--ok); }
   </style>
+  <script>
+  (function () {
+    var KEY = "rs_settings_lang";
+    var lang = "";
+    try { lang = localStorage.getItem(KEY) || ""; } catch (e) {}
+    if (lang !== "zh" && lang !== "en") {
+      var nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+      var acc = document.documentElement.getAttribute("data-accept-lang") || "";
+      lang = (nav.indexOf("zh") === 0 || acc.indexOf("zh") === 0) ? "zh" : "en";
+    }
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+  })();
+  </script>
 </head>
 <body>
+<div class="top">
+  <div class="lang-switch" role="group" aria-label="Language">
+    <button type="button" id="lang-zh" data-lang="zh">中文</button>
+    <button type="button" id="lang-en" data-lang="en">EN</button>
+  </div>
+</div>
 <main>
-  <h1>RapidSearch 设置</h1>
-  <p class="lead">Hub 全局管理员账号密码登录。<br>Sign in with Hub global admin username and password.</p>
+  <h1 data-i18n="heading">RapidSearch settings</h1>
+  <p class="lead" data-i18n="lead">Sign in with Hub global admin username and password.</p>
 
   <section>
-    <h2>Hub 全局管理员 / Global admin</h2>
-    <p class="hint">仅支持 Hub 全局管理员账号密码，不接受租户管理员或粘贴 token。</p>
+    <h2 data-i18n="section">Hub global admin</h2>
+    <p class="hint" data-i18n="hint">Hub global admin username and password only. Tenant admins and pasted tokens are not accepted.</p>
     <form id="login" method="post" action="" autocomplete="on">
-      <label class="field">用户名 / Username
+      <label class="field"><span data-i18n="username">Username</span>
         <input id="username" name="username" type="text" autocomplete="username" spellcheck="false">
       </label>
-      <label class="field">密码 / Password
+      <label class="field"><span data-i18n="password">Password</span>
         <input id="password" name="password" type="password" autocomplete="current-password">
       </label>
       <div class="actions">
-        <button class="primary" type="submit">登录 / Sign in</button>
+        <button class="primary" type="submit" data-i18n="submit">Sign in</button>
       </div>
       <p id="status"></p>
     </form>
@@ -86,6 +116,79 @@
 </main>
 <script>
 (function () {
+  const KEY = "rs_settings_lang";
+  const I18N = {
+    en: {
+      title: "RapidSearch sign in",
+      heading: "RapidSearch settings",
+      lead: "Sign in with Hub global admin username and password.",
+      section: "Hub global admin",
+      hint: "Hub global admin username and password only. Tenant admins and pasted tokens are not accepted.",
+      username: "Username",
+      password: "Password",
+      submit: "Sign in",
+      signingIn: "Signing in…",
+      signedIn: "Signed in.",
+      loginFailed: "Sign-in failed.",
+      invalidAdmin: "Invalid Hub global admin account."
+    },
+    zh: {
+      title: "RapidSearch 登录",
+      heading: "RapidSearch 设置",
+      lead: "Hub 全局管理员账号密码登录。",
+      section: "Hub 全局管理员",
+      hint: "仅支持 Hub 全局管理员账号密码，不接受租户管理员或粘贴 token。",
+      username: "用户名",
+      password: "密码",
+      submit: "登录",
+      signingIn: "正在登录…",
+      signedIn: "已登录。",
+      loginFailed: "登录失败。",
+      invalidAdmin: "Hub 全局管理员账号无效。"
+    }
+  };
+
+  function detectLang() {
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved === "zh" || saved === "en") return saved;
+    } catch (e) {}
+    const nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+    if (nav.indexOf("zh") === 0) return "zh";
+    const acc = document.documentElement.getAttribute("data-accept-lang") || "";
+    if (acc.indexOf("zh") === 0) return "zh";
+    return "en";
+  }
+
+  let lang = detectLang();
+
+  function t(key) {
+    const pack = I18N[lang] || I18N.en;
+    return pack[key] || I18N.en[key] || key;
+  }
+
+  function applyI18n() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+    document.title = t("title");
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
+    document.getElementById("lang-en").classList.toggle("active", lang === "en");
+    document.documentElement.setAttribute("data-i18n-ready", "1");
+  }
+
+  function setLang(next) {
+    lang = next === "zh" ? "zh" : "en";
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    applyI18n();
+  }
+
+  document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
+  document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
+  applyI18n();
+
   const form = document.getElementById("login");
   const status = document.getElementById("status");
 
@@ -98,7 +201,7 @@
 
   form.addEventListener("submit", async function (ev) {
     ev.preventDefault();
-    status.textContent = "Signing in…";
+    status.textContent = t("signingIn");
     status.className = "";
     const body = {
       username: document.getElementById("username").value,
@@ -112,16 +215,20 @@
         body: JSON.stringify(body)
       });
       if (!res.ok) {
-        let msg = "Sign-in failed.";
+        let msg = t("loginFailed");
         try {
           const err = await res.json();
-          if (err && err.error) msg = err.error;
+          if (err && (err.code === "unauthorized" || err.error === "invalid Hub global admin account")) {
+            msg = t("invalidAdmin");
+          } else if (err && err.error) {
+            msg = err.error;
+          }
         } catch (e) {}
         status.textContent = msg;
         status.className = "err";
         return;
       }
-      status.textContent = "Signed in.";
+      status.textContent = t("signedIn");
       status.className = "ok";
       location.reload();
     } catch (e) {

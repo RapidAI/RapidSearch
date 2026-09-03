@@ -48,8 +48,11 @@ func TestSettingsUnauthenticatedLoginHTML(t *testing.T) {
 		if strings.Contains(body, "email link") || strings.Contains(body, "magic") {
 			t.Fatal("login page still mentions email magic link")
 		}
-		if !strings.Contains(body, "Hub 全局管理员账号密码登录") {
-			t.Fatal("login page missing global-admin copy")
+		if !strings.Contains(body, "Hub 全局管理员账号密码登录") || !strings.Contains(body, "Sign in with Hub global admin") {
+			t.Fatal("login page missing ZH/EN global-admin copy")
+		}
+		if !strings.Contains(body, `rs_settings_lang`) || !strings.Contains(body, `data-lang="zh"`) || !strings.Contains(body, `data-lang="en"`) {
+			t.Fatal("login page missing language toggle")
 		}
 		if !strings.Contains(body, `id="username"`) || !strings.Contains(body, `id="password"`) {
 			t.Fatal("login page missing username/password")
@@ -171,6 +174,40 @@ func TestSettingsPageHTMLAuthenticated(t *testing.T) {
 	body, _ := io.ReadAll(rr.Body)
 	if !strings.Contains(string(body), "Serper") || !strings.Contains(string(body), "Brave") {
 		t.Fatal("html missing key fields")
+	}
+	if !strings.Contains(string(body), `rs_settings_lang`) || !strings.Contains(string(body), "退出登录") || !strings.Contains(string(body), "Log out") {
+		t.Fatal("settings page missing ZH/EN strings or language toggle")
+	}
+}
+
+func TestSettingsAcceptLanguageZh(t *testing.T) {
+	h, _ := settingsHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `lang="zh-CN"`) || !strings.Contains(body, `data-accept-lang="zh"`) {
+		t.Fatalf("expected zh accept-lang, got prefix=%q", body[:min(200, len(body))])
+	}
+}
+
+func TestAcceptLang(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.8")
+	if got := acceptLang(req); got != "en" {
+		t.Fatalf("en = %s", got)
+	}
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	if got := acceptLang(req); got != "zh" {
+		t.Fatalf("zh = %s", got)
+	}
+	req.Header.Set("Accept-Language", "en;q=0.9,zh-CN;q=0.4")
+	if got := acceptLang(req); got != "en" {
+		t.Fatalf("en preferred = %s", got)
 	}
 }
 

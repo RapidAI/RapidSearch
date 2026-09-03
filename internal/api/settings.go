@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	_ "embed"
@@ -171,8 +173,56 @@ func writeSettingsHTML(w http.ResponseWriter, r *http.Request, page []byte) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	if r == nil || r.Method != http.MethodHead {
-		_, _ = w.Write(page)
+		_, _ = w.Write(applyHTMLLang(page, acceptLang(r)))
 	}
+}
+
+func acceptLang(r *http.Request) string {
+	if r == nil {
+		return "en"
+	}
+	bestZh, bestOther := -1.0, -1.0
+	for _, part := range strings.Split(r.Header.Get("Accept-Language"), ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		q := 1.0
+		bits := strings.Split(part, ";")
+		tag := strings.ToLower(strings.TrimSpace(bits[0]))
+		for _, b := range bits[1:] {
+			b = strings.TrimSpace(strings.ToLower(b))
+			if strings.HasPrefix(b, "q=") {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(b[2:]), 64); err == nil {
+					q = v
+				}
+			}
+		}
+		if strings.HasPrefix(tag, "zh") {
+			if q > bestZh {
+				bestZh = q
+			}
+			continue
+		}
+		if q > bestOther {
+			bestOther = q
+		}
+	}
+	if bestZh >= 0 && bestZh >= bestOther {
+		return "zh"
+	}
+	return "en"
+}
+
+func applyHTMLLang(page []byte, lang string) []byte {
+	if lang != "zh" {
+		lang = "en"
+	}
+	page = bytes.Replace(page, []byte(`data-accept-lang="en"`), []byte(`data-accept-lang="`+lang+`"`), 1)
+	if lang == "zh" {
+		page = bytes.Replace(page, []byte(`<html lang="en"`), []byte(`<html lang="zh-CN"`), 1)
+	}
+	return page
 }
 
 func parseSettingsLogin(r *http.Request) (user, pass string) {

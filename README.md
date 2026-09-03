@@ -46,7 +46,7 @@ Environment / 环境变量:
 
 HTML + JSON on the search process. Open `https://hub.maclaw.top/searchproxy/settings` in a browser and sign in — no `Authorization` header required after login.
 
-- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority). If not signed in: **HTML login page** (HTTP 200), not JSON 401.
+- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
 - `POST /settings/login` (also `POST /settings`) — Hub **global admin** username + password only (`POST {HUB}/api/admin/login` with `tenant` omitted or `"__global__"`). Parses `access_token` and rejects the login unless the returned `admin` is a **global** admin (not tenant-scoped). Then checks `GET {HUB}/api/admin/users` (2xx). Sets HttpOnly cookie `rs_settings` (`Path=/`, `SameSite=Lax`, `Secure` when HTTPS). No token paste field. Login never accepts or displays the operator `SEARCH_TOKEN` / `proxy.token`.
 - `POST /settings/logout` — clears the cookie.
 - `GET /settings/config` — masked JSON (`configured` yes/no, optional `last4`). Never returns raw keys. Unauthenticated → **JSON 401** (API stays machine-readable).

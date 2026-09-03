@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-accept-lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -17,6 +17,7 @@
       --bad: #f07178;
       --btn: #243044;
     }
+    html:not([data-i18n-ready]) body { visibility: hidden; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -24,7 +25,16 @@
       background: var(--bg);
       color: var(--ink);
     }
-    main { max-width: 720px; margin: 0 auto; padding: 28px 18px 48px; }
+    .top {
+      display: flex;
+      justify-content: flex-end;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 18px 0;
+    }
+    .lang-switch { display: flex; gap: 4px; }
+    .lang-switch button.active { background: #1d4e89; border-color: #2d6cb5; }
+    main { max-width: 720px; margin: 0 auto; padding: 12px 18px 48px; }
     h1 { font-size: 1.4rem; margin: 0 0 6px; }
     p.lead { color: var(--muted); margin: 0 0 22px; }
     section {
@@ -87,48 +97,185 @@
     .check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
     code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
   </style>
+  <script>
+  (function () {
+    var KEY = "rs_settings_lang";
+    var lang = "";
+    try { lang = localStorage.getItem(KEY) || ""; } catch (e) {}
+    if (lang !== "zh" && lang !== "en") {
+      var nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+      var acc = document.documentElement.getAttribute("data-accept-lang") || "";
+      lang = (nav.indexOf("zh") === 0 || acc.indexOf("zh") === 0) ? "zh" : "en";
+    }
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+  })();
+  </script>
 </head>
 <body>
+<div class="top">
+  <div class="lang-switch" role="group" aria-label="Language">
+    <button type="button" id="lang-zh" data-lang="zh">中文</button>
+    <button type="button" id="lang-en" data-lang="en">EN</button>
+  </div>
+</div>
 <main>
-  <h1>RapidSearch settings</h1>
-  <p class="lead">Optional Serper and Brave API keys, plus the auto-search priority of every engine. Signed in with a Hub session cookie, Hub token, or operator bearer.</p>
+  <h1 data-i18n="heading">RapidSearch settings</h1>
+  <p class="lead" data-i18n="lead">Optional Serper and Brave API keys, plus the auto-search priority of every engine. Signed in as a Hub global admin.</p>
 
   <section>
-    <h2>API keys</h2>
-    <p class="hint">Leave a field empty to keep the stored key. Check “Clear” to wipe it. Keys are stored in <code id="cfgpath">search-config.json</code> (mode 0600) and never returned in full.</p>
-    <label class="field">Serper API key
-      <input id="serper" type="password" autocomplete="off" spellcheck="false" placeholder="Paste key to replace">
+    <h2 data-i18n="apiKeys">API keys</h2>
+    <p class="hint"><span data-i18n="apiHint">Leave a field empty to keep the stored key. Check “Clear” to wipe it. Keys are stored in</span> <code id="cfgpath">search-config.json</code> <span data-i18n="apiHintAfter">(mode 0600) and never returned in full.</span></p>
+    <label class="field"><span data-i18n="serperKey">Serper API key</span>
+      <input id="serper" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
     </label>
     <div class="row">
       <span id="serper-state" class="badge">not configured</span>
-      <label class="check"><input type="checkbox" id="clear-serper"> Clear saved Serper key</label>
+      <label class="check"><input type="checkbox" id="clear-serper"> <span data-i18n="clearSerper">Clear saved Serper key</span></label>
     </div>
-    <label class="field">Brave Search API key
-      <input id="brave" type="password" autocomplete="off" spellcheck="false" placeholder="Paste key to replace">
+    <label class="field"><span data-i18n="braveKey">Brave Search API key</span>
+      <input id="brave" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
     </label>
     <div class="row">
       <span id="brave-state" class="badge">not configured</span>
-      <label class="check"><input type="checkbox" id="clear-brave"> Clear saved Brave key</label>
+      <label class="check"><input type="checkbox" id="clear-brave"> <span data-i18n="clearBrave">Clear saved Brave key</span></label>
     </div>
   </section>
 
   <section>
-    <h2>Engine priority</h2>
-    <p class="hint">Auto uses this enabled order. Disabled engines and keyed APIs without a key are skipped. Drag a row or use the arrows. Google stays off auto unless you enable it (captcha breaker still applies).</p>
+    <h2 data-i18n="enginePriority">Engine priority</h2>
+    <p class="hint" data-i18n="engineHint">Auto uses this enabled order. Disabled engines and keyed APIs without a key are skipped. Drag a row or use the arrows. Google stays off auto unless you enable it (captcha breaker still applies).</p>
     <div id="engines"></div>
   </section>
 
   <div class="actions">
-    <button class="primary" id="save" type="button">Save</button>
-    <button id="logout" type="button">Log out</button>
+    <button class="primary" id="save" type="button" data-i18n="save">Save</button>
+    <button id="logout" type="button" data-i18n="logout">Log out</button>
     <span id="status"></span>
   </div>
 </main>
 <script>
 (function () {
+  const KEY = "rs_settings_lang";
+  const I18N = {
+    en: {
+      title: "RapidSearch settings",
+      heading: "RapidSearch settings",
+      lead: "Optional Serper and Brave API keys, plus the auto-search priority of every engine. Signed in as a Hub global admin.",
+      apiKeys: "API keys",
+      apiHint: "Leave a field empty to keep the stored key. Check “Clear” to wipe it. Keys are stored in",
+      apiHintAfter: "(mode 0600) and never returned in full.",
+      serperKey: "Serper API key",
+      braveKey: "Brave Search API key",
+      pasteKey: "Paste key to replace",
+      notConfigured: "not configured",
+      configured: "configured",
+      configuredLast4: "configured · last4 {last4}",
+      clearSerper: "Clear saved Serper key",
+      clearBrave: "Clear saved Brave key",
+      enginePriority: "Engine priority",
+      engineHint: "Auto uses this enabled order. Disabled engines and keyed APIs without a key are skipped. Drag a row or use the arrows. Google stays off auto unless you enable it (captcha breaker still applies).",
+      save: "Save",
+      logout: "Log out",
+      loading: "Loading…",
+      sessionExpired: "Session expired. Reload this page to sign in.",
+      loadFailed: "Failed to load settings ({status}).",
+      saving: "Saving…",
+      unauthorized: "Unauthorized — not saved.",
+      saveFailed: "Save failed ({status}).",
+      saved: "Saved.",
+      signingOut: "Signing out…",
+      keySet: "key set",
+      noKey: "no key (skipped on auto)"
+    },
+    zh: {
+      title: "RapidSearch 设置",
+      heading: "RapidSearch 设置",
+      lead: "可选配置 Serper / Brave API key，以及各引擎的自动搜索优先级。已使用 Hub 全局管理员登录。",
+      apiKeys: "API 密钥",
+      apiHint: "留空则保留已保存的 key。勾选“清除”才会删除。密钥保存在",
+      apiHintAfter: "（权限 0600），接口不会返回完整 key。",
+      serperKey: "Serper API key",
+      braveKey: "Brave Search API key",
+      pasteKey: "粘贴新 key 以替换",
+      notConfigured: "未配置",
+      configured: "已配置",
+      configuredLast4: "已配置 · 末四位 {last4}",
+      clearSerper: "清除已保存的 Serper key",
+      clearBrave: "清除已保存的 Brave key",
+      enginePriority: "引擎优先级",
+      engineHint: "自动搜索按此已启用顺序。关闭的引擎、以及没有 key 的付费 API 会被跳过。可拖动或用箭头调整。除非你启用 Google，否则自动搜索不会使用它（验证码熔断仍然生效）。",
+      save: "保存",
+      logout: "退出登录",
+      loading: "加载中…",
+      sessionExpired: "会话已过期。请刷新页面重新登录。",
+      loadFailed: "加载设置失败（{status}）。",
+      saving: "保存中…",
+      unauthorized: "未授权 — 未保存。",
+      saveFailed: "保存失败（{status}）。",
+      saved: "已保存。",
+      signingOut: "正在退出…",
+      keySet: "已配置 key",
+      noKey: "无 key（自动跳过）"
+    }
+  };
+
+  function detectLang() {
+    try {
+      const saved = localStorage.getItem(KEY);
+      if (saved === "zh" || saved === "en") return saved;
+    } catch (e) {}
+    const nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+    if (nav.indexOf("zh") === 0) return "zh";
+    const acc = document.documentElement.getAttribute("data-accept-lang") || "";
+    if (acc.indexOf("zh") === 0) return "zh";
+    return "en";
+  }
+
+  let lang = detectLang();
   const params = new URLSearchParams(location.search);
   const token = params.get("token") || "";
   let engines = [];
+  let lastSerper = null;
+  let lastBrave = null;
+
+  function t(key, vars) {
+    const pack = I18N[lang] || I18N.en;
+    let s = pack[key] || I18N.en[key] || key;
+    if (vars) {
+      Object.keys(vars).forEach(function (k) {
+        s = s.replace("{" + k + "}", String(vars[k]));
+      });
+    }
+    return s;
+  }
+
+  function applyI18n() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+    document.title = t("title");
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      el.textContent = t(el.getAttribute("data-i18n"));
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
+      el.setAttribute("placeholder", t(el.getAttribute("data-i18n-placeholder")));
+    });
+    document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
+    document.getElementById("lang-en").classList.toggle("active", lang === "en");
+    keyBadge(document.getElementById("serper-state"), lastSerper);
+    keyBadge(document.getElementById("brave-state"), lastBrave);
+    render();
+    document.documentElement.setAttribute("data-i18n-ready", "1");
+  }
+
+  function setLang(next) {
+    lang = next === "zh" ? "zh" : "en";
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    applyI18n();
+  }
+
+  document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
+  document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
 
   function settingsBase() {
     let p = location.pathname || "/settings";
@@ -155,11 +302,12 @@
   }
 
   function keyBadge(el, info) {
+    if (!el) return;
     if (info && info.configured) {
-      el.textContent = info.last4 ? ("configured · last4 " + info.last4) : "configured";
+      el.textContent = info.last4 ? t("configuredLast4", { last4: info.last4 }) : t("configured");
       el.className = "badge ok";
     } else {
-      el.textContent = "not configured";
+      el.textContent = t("notConfigured");
       el.className = "badge";
     }
   }
@@ -188,7 +336,7 @@
       const meta = document.createElement("div");
       meta.className = "meta";
       let extra = e.kind || "";
-      if (e.kind === "keyed") extra += e.available ? " · key set" : " · no key (skipped on auto)";
+      if (e.kind === "keyed") extra += e.available ? " · " + t("keySet") : " · " + t("noKey");
       if (e.hint) extra += (extra ? " · " : "") + e.hint;
       meta.textContent = extra;
       mid.appendChild(name);
@@ -237,27 +385,29 @@
   }
 
   async function load() {
-    status("Loading…");
+    status(t("loading"));
     const res = await fetch(configURL(), { headers: headers(false), credentials: "same-origin" });
     if (res.status === 401) {
-      status("Session expired. Reload this page to sign in.", "err");
+      status(t("sessionExpired"), "err");
       return;
     }
     if (!res.ok) {
-      status("Failed to load settings (" + res.status + ").", "err");
+      status(t("loadFailed", { status: res.status }), "err");
       return;
     }
     const data = await res.json();
     document.getElementById("cfgpath").textContent = data.config_path || "search-config.json";
-    keyBadge(document.getElementById("serper-state"), data.serper);
-    keyBadge(document.getElementById("brave-state"), data.brave);
+    lastSerper = data.serper;
+    lastBrave = data.brave;
+    keyBadge(document.getElementById("serper-state"), lastSerper);
+    keyBadge(document.getElementById("brave-state"), lastBrave);
     engines = Array.isArray(data.priority) ? data.priority : [];
     render();
     status("");
   }
 
   document.getElementById("save").addEventListener("click", async function () {
-    status("Saving…");
+    status(t("saving"));
     const body = {
       serper_api_key: document.getElementById("serper").value,
       brave_api_key: document.getElementById("brave").value,
@@ -272,11 +422,11 @@
       body: JSON.stringify(body)
     });
     if (res.status === 401) {
-      status("Unauthorized — not saved.", "err");
+      status(t("unauthorized"), "err");
       return;
     }
     if (!res.ok) {
-      let msg = "Save failed (" + res.status + ").";
+      let msg = t("saveFailed", { status: res.status });
       try {
         const err = await res.json();
         if (err && err.error) msg = err.error;
@@ -288,19 +438,20 @@
     document.getElementById("brave").value = "";
     document.getElementById("clear-serper").checked = false;
     document.getElementById("clear-brave").checked = false;
-    status("Saved.", "ok");
+    status(t("saved"), "ok");
     await load();
-    status("Saved.", "ok");
+    status(t("saved"), "ok");
   });
 
   document.getElementById("logout").addEventListener("click", async function () {
-    status("Signing out…");
+    status(t("signingOut"));
     try {
       await fetch(settingsBase() + "/logout", { method: "POST", credentials: "same-origin" });
     } catch (e) {}
     location.reload();
   });
 
+  applyI18n();
   load().catch(function (e) { status(String(e), "err"); });
 })();
 </script>
