@@ -176,7 +176,7 @@ func runOnce(ctx context.Context, addr, token, backend string, client *http.Clie
 			// keepalive
 		case tunnel.TypeReq:
 			go func(f tunnel.Frame) {
-				if tunnel.PathIsDownload(f.Path) {
+				if tunnel.PathNeedsStream(f.Path) {
 					if err := streamBackend(ctx, client, backend, f, write); err != nil {
 						log.Printf("stream download id=%s: %v", f.ID, err)
 						_ = c.Close()
@@ -220,7 +220,7 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 		if lk == "host" || lk == "content-length" {
 			continue
 		}
-		if lk == "authorization" && !tunnel.PathIsSettings(path) {
+		if lk == "authorization" && !tunnel.PathPassthroughAuth(path) {
 			continue
 		}
 		// Cookie / Set-Cookie travel with other headers so POST /settings/login
@@ -276,7 +276,7 @@ func streamBackend(ctx context.Context, client *http.Client, backend string, f t
 		if lk == "host" || lk == "content-length" {
 			continue
 		}
-		if lk == "authorization" && !tunnel.PathIsSettings(path) {
+		if lk == "authorization" && !tunnel.PathPassthroughAuth(path) {
 			continue
 		}
 		req.Header.Set(k, v)

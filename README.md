@@ -58,6 +58,19 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 本地打开 `http://127.0.0.1:18765/settings`。公网路径在反代已转发 `/searchproxy/` 时为 `https://hub.maclaw.top/searchproxy/settings`。未登录的浏览器看到 **Hub 全局管理员账号密码** 登录页（无 token 粘贴）；`/settings/config` 仍是 JSON 401，不会泄露 key。
 
+### Agent papers / 论文库
+
+Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). Same auth as settings (Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`).
+
+- `GET /papers` — HTML list (ZH/EN), with filter/search
+- `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json`
+- `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
+
+Scripts live in-repo under `agent-papers/` (Python). Runtime PDFs/DB are **not** in git — set `PAPERS_DIR` to the data directory. Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires deploying an updated `search-proxy` that forwards `/papers`).
+
+本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。
+
+
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
 
 **Default auto priority** (no saved file):
@@ -269,7 +282,7 @@ Public HTTP `/health`, `/search`, and `/download` accept **either**:
 1. `SEARCH_TOKEN` as `Authorization: Bearer …` or `?token=` (ops / internal)
 2. a valid MaClaw Hub viewer, session, or machine token (the signed-in Hub credential). The proxy checks it with `GET {HUB_AUTH_BASE}/api/llm/v1/models` and `Authorization: Bearer <token>`. HTTP 2xx means valid. Timeout is about 5s. Positive results are cached about 5 minutes, keyed by SHA-256 of the token.
 
-`/settings` and `/settings/*` are forwarded without a proxy-side Bearer check so the browser login page can render. The search process requires a Hub **global admin** cookie, an admin Bearer, or operator `SEARCH_TOKEN` for the settings HTML and for `/settings/config`. `/search` does **not** accept the settings cookie and does **not** require an admin cookie (agents keep using Hub viewer / `SEARCH_TOKEN`).
+`/settings`, `/settings/*`, `/papers`, and `/papers/*` are forwarded without a proxy-side Bearer check so the browser login page can render. The search process requires a Hub **global admin** cookie, an admin Bearer, or operator `SEARCH_TOKEN` for the settings HTML and for `/settings/config`. `/search` does **not** accept the settings cookie and does **not** require an admin cookie (agents keep using Hub viewer / `SEARCH_TOKEN`).
 
 Hub global admin login is enough; users never paste a RapidSearch or Hub viewer token. Tokens are never logged.
 

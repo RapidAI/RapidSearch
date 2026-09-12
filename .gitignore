@@ -21,3 +21,19 @@ search-relay
 # Local API keys + engine priority (mode 0600). Never commit.
 search-config.json
 **/search-config.json
+
+# Agent papers runtime data (keep scripts; ignore heavy artifacts)
+agent-papers/pdfs/
+agent-papers/cache/
+agent-papers/__pycache__/
+agent-papers/*.db
+agent-papers/manifest.json
+agent-papers/index.md
+agent-papers/sync_report.json
+agent-papers/sync_latest.md
+agent-papers/expand_*.md
+agent-papers/expand_*.log
+agent-papers/email_digest_body.txt
+agent-papers/test_digest_email.txt
+agent-papers/*_digest_*.txt
+!agent-papers/build_email_digest.py

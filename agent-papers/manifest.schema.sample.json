@@ -1,0 +1,27 @@
+{
+  "generated_at": "1970-01-01T00:00:00+00:00",
+  "stats": {
+    "kept": 0,
+    "downloaded": 0,
+    "note": "schema sample only — runtime data lives in PAPERS_DIR"
+  },
+  "papers": [
+    {
+      "title": "Example paper title",
+      "authors": [
+        "A. Author"
+      ],
+      "abstract": "Short abstract for schema documentation.",
+      "year": 2026,
+      "source_url": "https://arxiv.org/abs/0000.00000",
+      "pdf_url": "https://arxiv.org/pdf/0000.00000",
+      "arxiv_id": "0000.00000",
+      "topic_tags": [
+        "survey"
+      ],
+      "score": 1.0,
+      "pdf_path": "pdfs/0000.00000_example.pdf",
+      "download_status": "ok"
+    }
+  ]
+}

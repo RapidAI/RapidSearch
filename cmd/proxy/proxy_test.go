@@ -56,3 +56,18 @@ func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyPapersSkipsBearerSoLoginCanRender(t *testing.T) {
+	h := testProxy(t)
+	for _, path := range []string{"/papers", "/papers/", "/papers/api", "/papers/pdf/x.pdf"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.serveHTTP(rr, req)
+		if rr.Code == http.StatusUnauthorized {
+			t.Fatalf("%s should not 401 at the proxy (want forward/offline), body=%s", path, rr.Body.String())
+		}
+		if rr.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s status=%d body=%s (no tunnel → 503)", path, rr.Code, rr.Body.String())
+		}
+	}
+}

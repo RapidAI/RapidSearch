@@ -81,6 +81,30 @@ func PathIsDownload(p string) bool {
 	return pathOnly(p) == "/download"
 }
 
+// PathIsPapers reports /papers or /papers/* (catalog UI + local PDFs).
+func PathIsPapers(p string) bool {
+	p = pathOnly(p)
+	return p == "/papers" || strings.HasPrefix(p, "/papers/")
+}
+
+// PathIsPapersPDF reports /papers/pdf/... (streamed local PDF bytes).
+func PathIsPapersPDF(p string) bool {
+	return strings.HasPrefix(pathOnly(p), "/papers/pdf/")
+}
+
+// PathNeedsStream reports paths that must use resp-head/chunk/end framing
+// instead of a single JSON response body (large binary downloads).
+func PathNeedsStream(p string) bool {
+	return PathIsDownload(p) || PathIsPapersPDF(p)
+}
+
+// PathPassthroughAuth reports paths where the public proxy skips Bearer
+// checks and forwards Cookie/Authorization to the search process (browser
+// UIs that enforce Hub login themselves).
+func PathPassthroughAuth(p string) bool {
+	return PathIsSettings(p) || PathIsPapers(p)
+}
+
 // PathIsSettings reports /settings or /settings/* (config UI).
 func PathIsSettings(p string) bool {
 	p = pathOnly(p)

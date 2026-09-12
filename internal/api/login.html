@@ -201,6 +201,13 @@
     let p = location.pathname || "/settings";
     if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
     if (p.endsWith("/settings")) return p + "/login";
+    // When login HTML is shown under /papers (or other UI), keep the same
+    // public prefix (e.g. /searchproxy) and post to /settings/login.
+    const markers = ["/papers", "/settings", "/search", "/download"];
+    for (let i = 0; i < markers.length; i++) {
+      const idx = p.indexOf(markers[i]);
+      if (idx >= 0) return p.slice(0, idx) + "/settings/login";
+    }
     return "/settings/login";
   }
 
