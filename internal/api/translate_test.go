@@ -662,6 +662,10 @@ func TestTranslateConcurrencyStartsMultiple(t *testing.T) {
 	if svc.concurrency != 3 {
 		t.Fatalf("concurrency=%d", svc.concurrency)
 	}
+	svc.mu.Lock()
+	svc.cfg.APIKey = "not-a-real-key-zzzz"
+	svc.cfg.Model = "demo"
+	svc.mu.Unlock()
 	started := make(chan string, 8)
 	release := make(chan struct{})
 	var live atomic.Int32
