@@ -263,7 +263,7 @@
   <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
 
   <p class="hint-line">
-    <span data-i18n="llmSettingsHint">Translation LLM — configure in </span><a id="llm-settings-link" href="/settings" data-i18n="llmSettingsLink">Settings</a><span data-i18n="llmSettingsHintAfter"></span>
+    <span data-i18n="llmSettingsHint">Configure the translation LLM in </span><a id="llm-settings-link" href="/settings" data-i18n="llmSettingsLink">Settings</a><span data-i18n="llmSettingsHintAfter">.</span>
   </p>
 
   <div class="toolbar">
@@ -332,9 +332,9 @@
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
       unauthorized: "Unauthorized — sign in via Settings first.",
-      llmSettingsHint: "Translation LLM — configure in ",
+      llmSettingsHint: "Configure the translation LLM in ",
       llmSettingsLink: "Settings",
-      llmSettingsHintAfter: "",
+      llmSettingsHintAfter: ".",
       zh: "中文版",
       dual: "中英对照",
       queued: "Queued",
@@ -370,9 +370,9 @@
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
       unauthorized: "未授权 — 请先在设置页登录。",
-      llmSettingsHint: "翻译 LLM 请到「",
+      llmSettingsHint: "在",
       llmSettingsLink: "设置",
-      llmSettingsHintAfter: "」配置",
+      llmSettingsHintAfter: "中配置翻译 LLM",
       zh: "中文版",
       dual: "中英对照",
       queued: "排队中",
@@ -393,7 +393,10 @@
   }
   function t(k) {
     const lang = currentLang();
-    return (I18N[lang] && I18N[lang][k]) || (I18N.en[k] || k);
+    const table = I18N[lang] || I18N.en;
+    if (Object.prototype.hasOwnProperty.call(table, k)) return table[k];
+    if (Object.prototype.hasOwnProperty.call(I18N.en, k)) return I18N.en[k];
+    return k;
   }
   function applyI18n() {
     const lang = currentLang();

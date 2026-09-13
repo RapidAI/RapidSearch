@@ -76,11 +76,20 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "--bg: #f5f6f8") && !strings.Contains(body, "--bg:#f5f6f8") {
 		t.Fatal("missing light background token")
 	}
-	if strings.Contains(body, "id=\"base-url\"") || strings.Contains(body, "id=\"test-cfg\"") || strings.Contains(body, "id=\"save-cfg\"") {
+	if strings.Contains(body, `id="base-url"`) || strings.Contains(body, `id="api-key"`) ||
+		strings.Contains(body, `id="test-cfg"`) || strings.Contains(body, `id="save-cfg"`) ||
+		strings.Contains(body, `id="save-xlate"`) || strings.Contains(body, `id="test-xlate"`) ||
+		strings.Contains(body, `id="auto-xlate"`) || strings.Contains(body, `id="qps"`) {
 		t.Fatal("LLM settings panel should have moved to /settings")
 	}
-	if !strings.Contains(body, "id=\"llm-settings-link\"") || !strings.Contains(body, "翻译 LLM 请到「") {
+	if !strings.Contains(body, `id="llm-settings-link"`) || !strings.Contains(body, `href="/settings"`) {
 		t.Fatal("papers page should link Translation LLM settings to /settings")
+	}
+	if !strings.Contains(body, "Configure the translation LLM in") || !strings.Contains(body, "中配置翻译 LLM") {
+		t.Fatal("papers page missing EN/ZH note pointing at Settings")
+	}
+	if !strings.Contains(body, "hasOwnProperty.call(table, k)") {
+		t.Fatal("i18n lookup must treat empty strings as valid (EN hintAfter must not leak the key name)")
 	}
 	if !strings.Contains(body, "中文版") || !strings.Contains(body, "中英对照") {
 		t.Fatal("missing translated download labels")
