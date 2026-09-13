@@ -577,32 +577,40 @@
   function progressFromCatalog(cat) {
     const p = (cat && cat.translate_progress) || null;
     if (p && typeof p === "object") {
+      const titles = Array.isArray(p.running_titles) ? p.running_titles.filter(Boolean) : [];
+      const ids = Array.isArray(p.running_ids) ? p.running_ids.filter(Boolean) : [];
+      if (!titles.length && p.running_title) titles.push(p.running_title);
+      if (!ids.length && p.running_id) ids.push(p.running_id);
       return {
         queued: Number(p.queued) || 0,
         running: Number(p.running) || 0,
         active: !!p.active,
-        running_id: p.running_id || "",
-        running_title: p.running_title || ""
+        running_id: p.running_id || ids[0] || "",
+        running_title: p.running_title || titles[0] || "",
+        running_ids: ids,
+        running_titles: titles
       };
     }
-    let queued = 0, running = 0, runningTitle = "", runningId = "";
+    let queued = 0, running = 0;
+    const titles = [], ids = [];
     ((cat && cat.papers) || []).forEach(function (paper) {
       const st = paper.translate_status || "";
       if (st === "queued") queued++;
       if (st === "running") {
         running++;
-        if (!runningId) {
-          runningId = paper.id || "";
-          runningTitle = paper.title || "";
-        }
+        if (paper.id) ids.push(paper.id);
+        if (paper.title) titles.push(paper.title);
+        else if (paper.id) titles.push(paper.id);
       }
     });
     return {
       queued: queued,
       running: running,
       active: queued > 0 || running > 0,
-      running_id: runningId,
-      running_title: runningTitle
+      running_id: ids[0] || "",
+      running_title: titles[0] || "",
+      running_ids: ids,
+      running_titles: titles
     };
   }
 
@@ -625,11 +633,17 @@
     titleEl.textContent = t("xlateBanner")
       .replace("{queued}", String(prog.queued))
       .replace("{running}", String(prog.running));
-    if (prog.running_title) {
-      detailEl.textContent = t("xlateBannerTitle") + "：" + prog.running_title;
+    const titles = (prog.running_titles && prog.running_titles.length)
+      ? prog.running_titles
+      : (prog.running_title ? [prog.running_title] : []);
+    const ids = (prog.running_ids && prog.running_ids.length)
+      ? prog.running_ids
+      : (prog.running_id ? [prog.running_id] : []);
+    if (titles.length) {
+      detailEl.textContent = t("xlateBannerTitle") + "：" + titles.join(" · ");
       detailEl.hidden = false;
-    } else if (prog.running_id) {
-      detailEl.textContent = t("xlateBannerTitle") + "：" + prog.running_id;
+    } else if (ids.length) {
+      detailEl.textContent = t("xlateBannerTitle") + "：" + ids.join(" · ");
       detailEl.hidden = false;
     } else {
       detailEl.textContent = "";

@@ -157,11 +157,12 @@ Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`
 
 ### BabelDOC translation / 中文翻译
 
-Background worker (concurrency 1) shells out to `agent-papers/translate_worker.py` or `babeldoc` on `PATH`:
+Background worker shells out to `agent-papers/translate_worker.py` or `babeldoc` on `PATH`. Up to `PAPERS_TRANSLATE_CONCURRENCY` different papers run in parallel (default 3, clamp 1–8); the same paper id never runs twice.
 
 ```bash
 uv tool install --python 3.12 BabelDOC
 export PAPERS_DIR=/workspace/agent-papers
+export PAPERS_TRANSLATE_CONCURRENCY=3   # optional; default is already 3
 # Configure base_url / api_key / model on /settings, then:
 # POST /papers/translate  {"all":true}
 ```

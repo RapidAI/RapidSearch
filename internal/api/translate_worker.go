@@ -54,7 +54,7 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			continue
 		}
 
-		running := s.runID == id || jobProcessBusy(s.root, id)
+		running := s.running[id] || jobProcessBusy(s.root, id)
 		if jExisting, ok := s.status.Jobs[id]; ok && jExisting.Status == translateRunning {
 			running = true
 		}
@@ -164,45 +164,69 @@ func removeTranslatedOutputs(root, id string) {
 func (s *translateService) loop() {
 	for {
 		s.reconcileExternal()
-		if s.slotBusy() {
-			select {
-			case <-s.kick:
-			case <-time.After(2 * time.Second):
-			}
-			continue
+		started := s.startAvailable()
+		wait := 3 * time.Second
+		if started > 0 || s.occupiedSlots() > 0 {
+			wait = 2 * time.Second
 		}
-		id := s.pop()
-		if id == "" {
-			select {
-			case <-s.kick:
-			case <-time.After(3 * time.Second):
-			}
-			continue
+		select {
+		case <-s.kick:
+		case <-time.After(wait):
 		}
-		s.runOne(id)
 	}
 }
 
-// slotBusy is true while this service (or an orphaned OS worker) already holds
-// the single global translation slot.
-func (s *translateService) slotBusy() bool {
+// startAvailable pops and launches jobs until the concurrency limit is reached
+// or the queue is empty. Each job runs in its own goroutine.
+func (s *translateService) startAvailable() int {
+	started := 0
+	for {
+		if s.occupiedSlots() >= s.concurrencyLimit() {
+			return started
+		}
+		id := s.tryPop()
+		if id == "" {
+			return started
+		}
+		go s.runOne(id)
+		started++
+	}
+}
+
+// occupiedSlots is the number of distinct paper ids already using a translate
+// slot: in-process runOne goroutines plus orphan BabelDOC / translate_worker
+// processes for this papers root.
+func (s *translateService) occupiedSlots() int {
 	if s == nil {
-		return false
+		return 0
 	}
 	s.mu.Lock()
-	runID := s.runID
+	owned := make(map[string]bool, len(s.running))
+	for id := range s.running {
+		if id != "" {
+			owned[id] = true
+		}
+	}
 	root := s.root
 	s.mu.Unlock()
-	if runID != "" {
-		return true
+	n := len(owned)
+	ids, unknown := scanTranslateOSBusy(root)
+	for _, id := range ids {
+		if id == "" {
+			n++
+			continue
+		}
+		if !owned[id] {
+			owned[id] = true
+			n++
+		}
 	}
-	busy, _ := anyTranslateOSBusy(root)
-	return busy
+	return n + unknown
 }
 
 // reconcileExternal keeps status in sync with orphaned babeldoc processes left
-// behind by a previous search-service instance, and claims the global slot so
-// we never start a second job while one is still running.
+// behind by a previous search-service instance. Live orphans occupy slots via
+// occupiedSlots(); we never start a second worker for the same paper id.
 func (s *translateService) reconcileExternal() {
 	if s == nil {
 		return
@@ -212,8 +236,11 @@ func (s *translateService) reconcileExternal() {
 	now := time.Now().UTC().Format(time.RFC3339)
 	dirty := false
 
-	// Adopt live OS workers into status=running and hold the slot.
-	if busy, id := anyTranslateOSBusy(s.root); busy && id != "" {
+	// Adopt every live OS worker into status=running (they count toward the limit).
+	for _, id := range listTranslateOSBusy(s.root) {
+		if id == "" {
+			continue
+		}
 		j := s.status.Jobs[id]
 		j.ID = id
 		if j.Status != translateRunning {
@@ -229,9 +256,6 @@ func (s *translateService) reconcileExternal() {
 			s.status.Jobs[id] = j
 			dirty = true
 		}
-		if s.runID == "" {
-			s.runID = id
-		}
 	}
 
 	for id, j := range s.status.Jobs {
@@ -239,20 +263,13 @@ func (s *translateService) reconcileExternal() {
 			continue
 		}
 		// Our in-process runner owns this id — do not treat it as a dead orphan.
-		if s.runID == id {
+		if s.running[id] {
 			continue
 		}
-		alive := jobProcessBusy(s.root, id)
-		if alive {
-			if s.runID == "" {
-				s.runID = id
-			}
+		if jobProcessBusy(s.root, id) {
 			continue
 		}
 		// Process gone: promote outputs or mark interrupted.
-		if s.runID == id {
-			s.runID = ""
-		}
 		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
 			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
 				j.Status = translateDone
@@ -298,26 +315,37 @@ func (s *translateService) reconcileExternal() {
 	}
 }
 
-func (s *translateService) pop() string {
+func (s *translateService) tryPop() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.queue) == 0 {
+	if len(s.running) >= s.concurrencyLimit() {
 		return ""
 	}
-	id := s.queue[0]
-	s.queue = s.queue[1:]
-	delete(s.inQ, id)
-	s.runID = id
-	return id
+	for len(s.queue) > 0 {
+		id := s.queue[0]
+		s.queue = s.queue[1:]
+		delete(s.inQ, id)
+		if id == "" || s.running[id] {
+			continue
+		}
+		if s.running == nil {
+			s.running = map[string]bool{}
+		}
+		s.running[id] = true
+		return id
+	}
+	return ""
 }
 
 func (s *translateService) runOne(id string) {
 	defer func() {
 		s.mu.Lock()
-		if s.runID == id {
-			s.runID = ""
-		}
+		delete(s.running, id)
 		s.mu.Unlock()
+		select {
+		case s.kick <- struct{}{}:
+		default:
+		}
 	}()
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -392,24 +420,6 @@ func (s *translateService) runOne(id string) {
 		return
 	}
 
-	unlock, lockErr := acquireTranslateLock(s.root)
-	defer unlock()
-	if lockErr != nil {
-		j.Status = translateFailed
-		j.Error = "could not acquire translate lock: " + sanitizeUserError(lockErr.Error())
-		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
-		return
-	}
-	// Re-check after lock: another instance may have started meanwhile.
-	if jobProcessBusy(s.root, id) || func() bool { b, other := anyTranslateOSBusy(s.root); return b && other != "" && other != id }() {
-		j.Status = translateFailed
-		j.Error = "skipped: another translate process is already running"
-		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), translateJobTimeout)
 	defer cancel()
 	runner := s.runner
@@ -455,7 +465,6 @@ func (s *translateService) runOne(id string) {
 	j.Finished = time.Now().UTC().Format(time.RFC3339)
 	s.putJob(j)
 }
-
 
 func (s *translateService) waitForProcess(id string) {
 	deadline := time.Now().Add(translateJobTimeout)
@@ -571,9 +580,9 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 		return "", "", fmt.Errorf("translate worker: %s", sanitizeUserError(msg))
 	}
 	var out struct {
-		OK   bool   `json:"ok"`
-		Zh   string `json:"zh"`
-		Dual string `json:"dual"`
+		OK    bool   `json:"ok"`
+		Zh    string `json:"zh"`
+		Dual  string `json:"dual"`
 		Error string `json:"error"`
 	}
 	line := lastJSONLine(stdout.Bytes())

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -469,7 +470,6 @@ func TestTranslateEnqueueFakeRunner(t *testing.T) {
 	}
 }
 
-
 func TestSummarizeTranslateProgress(t *testing.T) {
 	papers := []paperEntry{
 		{ID: "a", Title: "Alpha", TranslateStatus: translateQueued},
@@ -477,13 +477,20 @@ func TestSummarizeTranslateProgress(t *testing.T) {
 		{ID: "c", Title: "Gamma", TranslateStatus: translateDone},
 		{ID: "d", Title: "Delta", TranslateStatus: translateQueued},
 		{ID: "e", Title: "Epsilon", TranslateStatus: translateFailed},
+		{ID: "f", Title: "Zeta Also", TranslateStatus: translateRunning},
 	}
 	p := summarizeTranslateProgress(papers)
-	if p == nil || !p.Active || p.Queued != 2 || p.Running != 1 {
+	if p == nil || !p.Active || p.Queued != 2 || p.Running != 2 {
 		t.Fatalf("%+v", p)
 	}
 	if p.RunningID != "b" || p.RunningTitle != "Beta Running" {
 		t.Fatalf("running title %+v", p)
+	}
+	if len(p.RunningIDs) != 2 || p.RunningIDs[0] != "b" || p.RunningIDs[1] != "f" {
+		t.Fatalf("running_ids %+v", p.RunningIDs)
+	}
+	if len(p.RunningTitles) != 2 || p.RunningTitles[0] != "Beta Running" || p.RunningTitles[1] != "Zeta Also" {
+		t.Fatalf("running_titles %+v", p.RunningTitles)
 	}
 	idle := summarizeTranslateProgress([]paperEntry{{ID: "x", TranslateStatus: translateDone}})
 	if idle == nil || idle.Active || idle.Queued != 0 || idle.Running != 0 {
@@ -501,7 +508,7 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 	svc.putJob(translateJob{ID: "2401.05459", Status: translateRunning})
 	svc.putJob(translateJob{ID: "queued-other", Status: translateQueued})
 	svc.mu.Lock()
-	svc.runID = "2401.05459" // prevent reconcileExternal from clearing synthetic running
+	svc.running["2401.05459"] = true // prevent reconcileExternal from clearing synthetic running
 	svc.mu.Unlock()
 
 	rr := httptest.NewRecorder()
@@ -525,7 +532,6 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 		t.Fatalf("expected running identity %+v", cat.TranslateProgress)
 	}
 }
-
 
 func TestEnqueueSkipsDoneUnlessForce(t *testing.T) {
 	dir := t.TempDir()
@@ -569,7 +575,7 @@ func TestEnqueueRejectsWhileRunning(t *testing.T) {
 	svc := newTranslateService(dir)
 	svc.mu.Lock()
 	svc.started = true // do not start background loop
-	svc.runID = "demo"
+	svc.running["demo"] = true
 	svc.status.Jobs["demo"] = translateJob{ID: "demo", Status: translateRunning}
 	svc.mu.Unlock()
 
@@ -611,6 +617,132 @@ func TestEnqueueSkipsDuplicateQueued(t *testing.T) {
 	svc.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("queue copies=%d", n)
+	}
+}
+
+func TestParseTranslateConcurrency(t *testing.T) {
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "")
+	if got := parseTranslateConcurrency(); got != 3 {
+		t.Fatalf("default=%d", got)
+	}
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "2")
+	if got := parseTranslateConcurrency(); got != 2 {
+		t.Fatalf("2=%d", got)
+	}
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "0")
+	if got := parseTranslateConcurrency(); got != 1 {
+		t.Fatalf("min=%d", got)
+	}
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "99")
+	if got := parseTranslateConcurrency(); got != 8 {
+		t.Fatalf("max=%d", got)
+	}
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "bogus")
+	if got := parseTranslateConcurrency(); got != 3 {
+		t.Fatalf("invalid=%d", got)
+	}
+}
+
+func TestTranslateConcurrencyStartsMultiple(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PAPERS_TRANSLATE_CONCURRENCY", "3")
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{"p1", "p2", "p3", "p4"}
+	var papers []paperEntry
+	for _, id := range ids {
+		if err := os.WriteFile(filepath.Join(dir, "pdfs", id+".pdf"), []byte("%PDF "+id), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		papers = append(papers, paperEntry{ID: id, HasLocal: true, Filename: id + ".pdf"})
+	}
+
+	svc := newTranslateService(dir)
+	if svc.concurrency != 3 {
+		t.Fatalf("concurrency=%d", svc.concurrency)
+	}
+	started := make(chan string, 8)
+	release := make(chan struct{})
+	var live atomic.Int32
+	var maxLive atomic.Int32
+	svc.runner = func(ctx context.Context, job translateRun) (string, string, error) {
+		n := live.Add(1)
+		for {
+			old := maxLive.Load()
+			if n <= old || maxLive.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		started <- job.ID
+		<-release
+		live.Add(-1)
+		return installTranslatedPDFs(job.Root, job.ID, job.InputPDF, job.InputPDF)
+	}
+	svc.start()
+
+	res := svc.enqueue(ids, papers, false)
+	if len(res.Queued) != 4 {
+		t.Fatalf("queued %+v", res)
+	}
+
+	got := map[string]bool{}
+	deadline := time.After(3 * time.Second)
+	for i := 0; i < 3; i++ {
+		select {
+		case id := <-started:
+			got[id] = true
+		case <-deadline:
+			t.Fatalf("only started %d: %v", len(got), got)
+		}
+	}
+	select {
+	case id := <-started:
+		t.Fatalf("4th started too early: %s", id)
+	case <-time.After(250 * time.Millisecond):
+	}
+	if maxLive.Load() != 3 {
+		t.Fatalf("maxLive=%d", maxLive.Load())
+	}
+	pub := svc.queuePublic()
+	if n, _ := pub["concurrency"].(int); n != 3 {
+		t.Fatalf("queue concurrency %+v", pub["concurrency"])
+	}
+	runningIDs, _ := pub["running_ids"].([]string)
+	if len(runningIDs) != 3 {
+		t.Fatalf("running_ids=%v", runningIDs)
+	}
+	if first, _ := pub["running"].(string); first == "" {
+		t.Fatal("backward-compat running empty")
+	}
+
+	same := svc.enqueue([]string{"p1"}, papers, true)
+	if same.Rejected["p1"] != "正在翻译中" {
+		t.Fatalf("same-id %+v", same)
+	}
+
+	close(release)
+	select {
+	case id := <-started:
+		got[id] = true
+	case <-time.After(3 * time.Second):
+		t.Fatal("4th never started")
+	}
+	if len(got) != 4 {
+		t.Fatalf("started set %v", got)
+	}
+	deadline2 := time.Now().Add(3 * time.Second)
+	for _, id := range ids {
+		for {
+			j, ok := svc.job(id)
+			if ok && j.Status == translateDone {
+				break
+			}
+			if time.Now().After(deadline2) {
+				t.Fatalf("%s status %+v ok=%v", id, j, ok)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
 }
 

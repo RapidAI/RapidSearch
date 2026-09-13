@@ -73,11 +73,13 @@ type papersCatalog struct {
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
 type translateProgress struct {
-	Queued       int    `json:"queued"`
-	Running      int    `json:"running"`
-	Active       bool   `json:"active"`
-	RunningID    string `json:"running_id,omitempty"`
-	RunningTitle string `json:"running_title,omitempty"`
+	Queued        int      `json:"queued"`
+	Running       int      `json:"running"`
+	Active        bool     `json:"active"`
+	RunningID     string   `json:"running_id,omitempty"`
+	RunningTitle  string   `json:"running_title,omitempty"`
+	RunningIDs    []string `json:"running_ids,omitempty"`
+	RunningTitles []string `json:"running_titles,omitempty"`
 }
 
 type papersStore struct {

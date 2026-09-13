@@ -37,6 +37,8 @@ Environment / 环境变量:
 - `SEARCH_CONFIG_PATH` (optional, default `./search-config.json`): API keys + engine priority. Created with mode `0600`, gitignored. Never commit this file.
 - `SEARCH_TOKEN` (optional on the search process): same secret as the public proxy. Operator Bearer / `?token=` can still open `/settings/config` for non-browser use. Browser settings login is Hub **global admin** username + password only. If unset, `./proxy.token` is read when present.
 - `HUB_AUTH_BASES` (optional): comma-separated Hub origins used to validate Hub tokens. Default `https://hub.mypapers.top,https://hub.maclaw.top`. `/search` checks viewer tokens with `GET {HUB}/api/llm/v1/models`. Settings cookie/admin Bearer is checked with `GET {HUB}/api/admin/users` (not models).
+- `PAPERS_DIR` (optional, default `/workspace/agent-papers`): papers catalog / PDF root.
+- `PAPERS_TRANSLATE_CONCURRENCY` (optional, default `3`, clamp 1–8): max parallel BabelDOC / `translate_worker` jobs for **different** paper ids. The same paper id never runs twice. After a restart, leftover babeldoc processes for this papers root still count toward the limit.
 
 ## API
 
@@ -70,7 +72,7 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
 - `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
-- `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker (concurrency 1) runs BabelDOC; authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not).
+- `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker runs up to `PAPERS_TRANSLATE_CONCURRENCY` BabelDOC jobs in parallel (default 3, clamp 1–8) for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, and `concurrency`.
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
