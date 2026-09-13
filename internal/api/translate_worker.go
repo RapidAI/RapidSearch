@@ -15,9 +15,18 @@ import (
 
 const translateJobTimeout = 2 * time.Hour
 
-func (s *translateService) enqueue(ids []string, papers []paperEntry) (queued, skipped []string) {
+// enqueueResult carries per-id rejection reasons (e.g. already running).
+type enqueueResult struct {
+	Queued   []string
+	Skipped  []string
+	Rejected map[string]string // id -> reason
+}
+
+func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool) enqueueResult {
+	out := enqueueResult{Rejected: map[string]string{}}
 	if s == nil {
-		return nil, ids
+		out.Skipped = append([]string(nil), ids...)
+		return out
 	}
 	s.start()
 	byID := map[string]paperEntry{}
@@ -31,43 +40,88 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry) (queued, s
 	for _, raw := range ids {
 		id := sanitizePaperID(raw)
 		if id == "" {
-			skipped = append(skipped, raw)
-			continue
-		}
-		if s.inQ[id] || s.runID == id {
-			skipped = append(skipped, id)
+			out.Skipped = append(out.Skipped, raw)
 			continue
 		}
 		p, ok := byID[id]
 		if !ok {
-			// Still allow enqueue if a source PDF exists.
 			if _, err := originalPDFAbs(s.root, id); err != nil {
-				skipped = append(skipped, id)
+				out.Skipped = append(out.Skipped, id)
 				continue
 			}
 		} else if !p.HasLocal {
-			skipped = append(skipped, id)
+			out.Skipped = append(out.Skipped, id)
 			continue
 		}
-		if p.ZhPDF != "" && p.DualPDF != "" {
-			skipped = append(skipped, id)
+
+		running := s.runID == id || jobProcessBusy(s.root, id)
+		if jExisting, ok := s.status.Jobs[id]; ok && jExisting.Status == translateRunning {
+			running = true
+		}
+		if running {
+			// Never spawn a parallel BabelDOC for the same id.
+			out.Skipped = append(out.Skipped, id)
+			out.Rejected[id] = "正在翻译中"
 			continue
 		}
+
+		alreadyQueued := s.inQ[id]
+		if jExisting, ok := s.status.Jobs[id]; ok && jExisting.Status == translateQueued {
+			alreadyQueued = true
+		}
+		if alreadyQueued {
+			if force {
+				// Replace: ensure a single queue entry (no duplicate spawn).
+				if !s.inQ[id] {
+					s.queue = append(s.queue, id)
+					s.inQ[id] = true
+				}
+				j := s.status.Jobs[id]
+				j.ID = id
+				j.Status = translateQueued
+				j.Error = ""
+				j.Filename = p.Filename
+				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+				if s.status.Jobs == nil {
+					s.status.Jobs = map[string]translateJob{}
+				}
+				s.status.Jobs[id] = j
+				out.Queued = append(out.Queued, id)
+				continue
+			}
+			out.Skipped = append(out.Skipped, id)
+			continue
+		}
+
+		complete := (p.ZhPDF != "" && p.DualPDF != "") || outputsExist(s.root, id)
+		hasAny := p.ZhPDF != "" || p.DualPDF != "" || anyTranslatedOutput(s.root, id)
+		if complete && !force {
+			// Auto / normal translate must never re-queue completed papers.
+			out.Skipped = append(out.Skipped, id)
+			continue
+		}
+		if force && hasAny {
+			// 「再次翻译」: clear prior outputs so runOne does not short-circuit.
+			removeTranslatedOutputs(s.root, id)
+		}
+
 		s.queue = append(s.queue, id)
 		s.inQ[id] = true
 		j := s.status.Jobs[id]
 		j.ID = id
 		j.Status = translateQueued
 		j.Error = ""
+		j.ZhRel = ""
+		j.DualRel = ""
 		j.Filename = p.Filename
 		j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if s.status.Jobs == nil {
 			s.status.Jobs = map[string]translateJob{}
 		}
 		s.status.Jobs[id] = j
-		queued = append(queued, id)
+		out.Queued = append(out.Queued, id)
 	}
-	if len(queued) > 0 {
+	if len(out.Queued) > 0 {
 		s.status.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		s.status.Version = 1
 		if err := s.persistStatusLocked(); err != nil {
@@ -78,19 +132,169 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry) (queued, s
 		default:
 		}
 	}
-	return queued, skipped
+	return out
+}
+
+func outputsExist(root, id string) bool {
+	_, e1 := translatedPDFAbs(root, translateKindZH, id)
+	_, e2 := translatedPDFAbs(root, translateKindDual, id)
+	return e1 == nil && e2 == nil
+}
+
+func anyTranslatedOutput(root, id string) bool {
+	_, e1 := translatedPDFAbs(root, translateKindZH, id)
+	_, e2 := translatedPDFAbs(root, translateKindDual, id)
+	return e1 == nil || e2 == nil
+}
+
+func removeTranslatedOutputs(root, id string) {
+	id = sanitizePaperID(id)
+	if id == "" {
+		return
+	}
+	for _, kind := range []string{translateKindZH, translateKindDual} {
+		if abs, err := translatedPDFAbs(root, kind, id); err == nil {
+			_ = os.Remove(abs)
+		}
+		// Also remove canonical names in case Abs lookup already failed mid-replace.
+		_ = os.Remove(filepath.Join(root, "pdfs", kind, id+"."+kind+".pdf"))
+	}
 }
 
 func (s *translateService) loop() {
 	for {
+		s.reconcileExternal()
+		if s.slotBusy() {
+			select {
+			case <-s.kick:
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
 		id := s.pop()
 		if id == "" {
 			select {
 			case <-s.kick:
+			case <-time.After(3 * time.Second):
+			}
+			continue
+		}
+		s.runOne(id)
+	}
+}
+
+// slotBusy is true while this service (or an orphaned OS worker) already holds
+// the single global translation slot.
+func (s *translateService) slotBusy() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	runID := s.runID
+	root := s.root
+	s.mu.Unlock()
+	if runID != "" {
+		return true
+	}
+	busy, _ := anyTranslateOSBusy(root)
+	return busy
+}
+
+// reconcileExternal keeps status in sync with orphaned babeldoc processes left
+// behind by a previous search-service instance, and claims the global slot so
+// we never start a second job while one is still running.
+func (s *translateService) reconcileExternal() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	dirty := false
+
+	// Adopt live OS workers into status=running and hold the slot.
+	if busy, id := anyTranslateOSBusy(s.root); busy && id != "" {
+		j := s.status.Jobs[id]
+		j.ID = id
+		if j.Status != translateRunning {
+			j.Status = translateRunning
+			j.Error = ""
+			if j.StartedAt == "" {
+				j.StartedAt = now
+			}
+			j.UpdatedAt = now
+			if s.status.Jobs == nil {
+				s.status.Jobs = map[string]translateJob{}
+			}
+			s.status.Jobs[id] = j
+			dirty = true
+		}
+		if s.runID == "" {
+			s.runID = id
+		}
+	}
+
+	for id, j := range s.status.Jobs {
+		if j.Status != translateRunning {
+			continue
+		}
+		// Our in-process runner owns this id — do not treat it as a dead orphan.
+		if s.runID == id {
+			continue
+		}
+		alive := jobProcessBusy(s.root, id)
+		if alive {
+			if s.runID == "" {
+				s.runID = id
+			}
+			continue
+		}
+		// Process gone: promote outputs or mark interrupted.
+		if s.runID == id {
+			s.runID = ""
+		}
+		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
+			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
+				j.Status = translateDone
+				j.Error = ""
+				j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
+				j.DualRel = filepath.ToSlash(filepath.Join("pdfs", translateKindDual, filepath.Base(dual)))
+				j.Finished = now
+				j.UpdatedAt = now
+				s.status.Jobs[id] = j
+				dirty = true
 				continue
 			}
 		}
-		s.runOne(id)
+		// Still writing? workdir may have partial output from a just-exited worker.
+		mono, dual := collectBabelOutputs(translateWorkDir(s.root, id))
+		if mono != "" || dual != "" {
+			zhRel, dualRel, err := installTranslatedPDFs(s.root, id, mono, dual)
+			if err == nil && zhRel != "" && dualRel != "" {
+				j.Status = translateDone
+				j.Error = ""
+				j.ZhRel = zhRel
+				j.DualRel = dualRel
+				j.Finished = now
+				j.UpdatedAt = now
+				s.status.Jobs[id] = j
+				dirty = true
+				continue
+			}
+		}
+		j.Status = translateFailed
+		j.Error = "interrupted (process restarted)"
+		j.Finished = now
+		j.UpdatedAt = now
+		s.status.Jobs[id] = j
+		dirty = true
+	}
+	if dirty {
+		s.status.UpdatedAt = now
+		s.status.Version = 1
+		if err := s.persistStatusLocked(); err != nil {
+			log.Printf("papers translate-status write: %v", err)
+		}
 	}
 }
 
@@ -155,6 +359,57 @@ func (s *translateService) runOne(id string) {
 		return
 	}
 
+	// Another OS worker already owns this id (e.g. orphaned after reload).
+	if jobProcessBusy(s.root, id) {
+		log.Printf("papers translate id=%s status=adopt existing process", id)
+		s.waitForProcess(id)
+		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
+			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
+				j.Status = translateDone
+				j.Error = ""
+				j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
+				j.DualRel = filepath.ToSlash(filepath.Join("pdfs", translateKindDual, filepath.Base(dual)))
+				j.Finished = time.Now().UTC().Format(time.RFC3339)
+				s.putJob(j)
+				return
+			}
+		}
+		mono, dual := collectBabelOutputs(translateWorkDir(s.root, id))
+		zhRel, dualRel, err := installTranslatedPDFs(s.root, id, mono, dual)
+		if err == nil && zhRel != "" && dualRel != "" {
+			j.Status = translateDone
+			j.Error = ""
+			j.ZhRel = zhRel
+			j.DualRel = dualRel
+			j.Finished = time.Now().UTC().Format(time.RFC3339)
+			s.putJob(j)
+			return
+		}
+		j.Status = translateFailed
+		j.Error = "existing translate process exited without outputs"
+		j.Finished = time.Now().UTC().Format(time.RFC3339)
+		s.putJob(j)
+		return
+	}
+
+	unlock, lockErr := acquireTranslateLock(s.root)
+	defer unlock()
+	if lockErr != nil {
+		j.Status = translateFailed
+		j.Error = "could not acquire translate lock: " + sanitizeUserError(lockErr.Error())
+		j.Finished = time.Now().UTC().Format(time.RFC3339)
+		s.putJob(j)
+		return
+	}
+	// Re-check after lock: another instance may have started meanwhile.
+	if jobProcessBusy(s.root, id) || func() bool { b, other := anyTranslateOSBusy(s.root); return b && other != "" && other != id }() {
+		j.Status = translateFailed
+		j.Error = "skipped: another translate process is already running"
+		j.Finished = time.Now().UTC().Format(time.RFC3339)
+		s.putJob(j)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), translateJobTimeout)
 	defer cancel()
 	runner := s.runner
@@ -201,6 +456,16 @@ func (s *translateService) runOne(id string) {
 	s.putJob(j)
 }
 
+
+func (s *translateService) waitForProcess(id string) {
+	deadline := time.Now().Add(translateJobTimeout)
+	for time.Now().Before(deadline) {
+		if !jobProcessBusy(s.root, id) {
+			return
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
 func (s *translateService) sourcePDF(id string) (string, error) {
 	if abs, err := originalPDFAbs(s.root, id); err == nil {
 		return abs, nil
@@ -284,13 +549,21 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 	cmd := exec.CommandContext(ctx, py, args...)
 	env := os.Environ()
 	if job.Cfg.APIKey != "" {
+		// Prefer env; never put the key on argv (process list).
 		env = append(env, "OPENAI_API_KEY="+job.Cfg.APIKey)
 	}
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return "", "", fmt.Errorf("translate worker: %s", sanitizeUserError(err.Error()))
+	}
+	if cmd.Process != nil {
+		_ = writeTranslatePID(job.Root, job.ID, cmd.Process.Pid)
+	}
+	defer clearTranslatePID(job.Root, job.ID)
+	if err := cmd.Wait(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
@@ -353,12 +626,10 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 		args = append(args, "--qps", fmt.Sprintf("%d", job.Cfg.QPS))
 	}
 	run := func(a []string) error {
-		if job.Cfg.APIKey != "" {
-			a = append(append([]string{}, a...), "--openai-api-key", job.Cfg.APIKey)
-		}
 		cmd := exec.CommandContext(ctx, bin, a...)
 		env := os.Environ()
 		if job.Cfg.APIKey != "" {
+			// Prefer env over CLI so `ps` does not leak the key.
 			env = append(env, "OPENAI_API_KEY="+job.Cfg.APIKey)
 		}
 		cmd.Env = env

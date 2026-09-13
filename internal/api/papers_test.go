@@ -109,6 +109,12 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `id="sort"`) || !strings.Contains(body, "sortNewest") {
 		t.Fatal("papers page must offer publication-date sort")
 	}
+	if !strings.Contains(body, "reXlate") || !strings.Contains(body, "再次翻译") {
+		t.Fatal("papers page must offer force re-translate control")
+	}
+	if !strings.Contains(body, "xlate-err") {
+		t.Fatal("papers page must surface translate errors")
+	}
 	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
 		t.Fatal("search placeholder should cover title/authors/abstract/tags")
 	}

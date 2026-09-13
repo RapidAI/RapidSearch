@@ -148,7 +148,64 @@ func (s *translateService) start() {
 	}
 	s.started = true
 	s.mu.Unlock()
+	s.recoverJobs()
 	go s.loop()
+}
+
+// recoverJobs rehydrates queued ids into the in-memory queue after a reload,
+// and claims the global slot when an orphaned BabelDOC is still running.
+func (s *translateService) recoverJobs() {
+	if s == nil {
+		return
+	}
+	s.reconcileExternal()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	dirty := false
+	for id, j := range s.status.Jobs {
+		switch j.Status {
+		case translateRunning:
+			if jobProcessBusy(s.root, id) {
+				if s.runID == "" {
+					s.runID = id
+				}
+				continue
+			}
+			// Dead "running" jobs are finalized by reconcileExternal.
+		case translateQueued:
+			if s.inQ[id] || s.runID == id {
+				continue
+			}
+			if jobProcessBusy(s.root, id) {
+				// OS worker still running — treat as running, do not re-enqueue.
+				j.Status = translateRunning
+				j.Error = ""
+				j.UpdatedAt = now
+				s.status.Jobs[id] = j
+				if s.runID == "" {
+					s.runID = id
+				}
+				dirty = true
+				continue
+			}
+			s.queue = append(s.queue, id)
+			s.inQ[id] = true
+		}
+	}
+	if dirty {
+		s.status.UpdatedAt = now
+		s.status.Version = 1
+		if err := s.persistStatusLocked(); err != nil {
+			log.Printf("papers translate-status write: %v", err)
+		}
+	}
+	if len(s.queue) > 0 {
+		select {
+		case s.kick <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (s *Server) translate() *translateService {
@@ -230,16 +287,9 @@ func (s *translateService) loadStatus() error {
 	if st.Version == 0 {
 		st.Version = 1
 	}
-	// A previous process may have died mid-job; surface those as failed.
-	now := time.Now().UTC().Format(time.RFC3339)
-	for id, j := range st.Jobs {
-		if j.Status == translateRunning {
-			j.Status = translateFailed
-			j.Error = "interrupted (process restarted)"
-			j.UpdatedAt = now
-			st.Jobs[id] = j
-		}
-	}
+	// Do not rewrite running→failed here. start()/reconcileExternal decide
+	// based on whether an OS worker is still alive, so a service reload does
+	// not spawn a duplicate BabelDOC for the same paper.
 	s.mu.Lock()
 	s.status = st
 	s.mu.Unlock()
@@ -443,11 +493,19 @@ func overlayOne(p paperEntry, root string, jobs map[string]translateJob) paperEn
 		p.TranslateStatus = j.Status
 		if j.Status == translateFailed {
 			p.TranslateError = sanitizeUserError(j.Error)
+		} else {
+			p.TranslateError = ""
 		}
 	}
+	// On-disk outputs mean done only when not actively queued/running (force re-translate).
 	if p.ZhPDF != "" && p.DualPDF != "" {
-		p.TranslateStatus = translateDone
-		p.TranslateError = ""
+		switch p.TranslateStatus {
+		case translateQueued, translateRunning:
+			// keep in-flight status so the UI shows progress / 再次翻译 is disabled while running
+		default:
+			p.TranslateStatus = translateDone
+			p.TranslateError = ""
+		}
 	}
 	return p
 }
@@ -676,16 +734,18 @@ func (s *Server) handlePapersTranslateTest(w http.ResponseWriter, r *http.Reques
 }
 
 type translateEnqueueReq struct {
-	ID  string `json:"id"`
-	All bool   `json:"all"`
+	ID    string `json:"id"`
+	All   bool   `json:"all"`
+	Force bool   `json:"force"` // manual re-translate; ignored for auto / translate-all
 }
 
 type translateEnqueueResp struct {
-	OK      bool     `json:"ok"`
-	Queued  []string `json:"queued"`
-	Skipped []string `json:"skipped,omitempty"`
-	Running string   `json:"running,omitempty"`
-	Error   string   `json:"error,omitempty"`
+	OK       bool              `json:"ok"`
+	Queued   []string          `json:"queued"`
+	Skipped  []string          `json:"skipped,omitempty"`
+	Rejected map[string]string `json:"rejected,omitempty"`
+	Running  string            `json:"running,omitempty"`
+	Error    string            `json:"error,omitempty"`
 }
 
 func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
@@ -720,18 +780,31 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var ids []string
+		force := req.Force
 		if id := sanitizePaperID(req.ID); id != "" {
 			ids = []string{id}
 		} else {
+			// Translate-all is never a force re-translate of completed papers.
+			force = false
 			ids = pendingTranslateIDs(cat.Papers, false)
 		}
-		queued, skipped := svc.enqueue(ids, cat.Papers)
-		writeJSON(w, http.StatusOK, translateEnqueueResp{
-			OK:      true,
-			Queued:  queued,
-			Skipped: skipped,
-			Running: svc.runningID(),
-		})
+		res := svc.enqueue(ids, cat.Papers, force)
+		resp := translateEnqueueResp{
+			OK:       true,
+			Queued:   res.Queued,
+			Skipped:  res.Skipped,
+			Rejected: res.Rejected,
+			Running:  svc.runningID(),
+		}
+		if force && len(res.Queued) == 0 && len(res.Rejected) > 0 {
+			// Prefer a clear Chinese message when the only target is mid-flight.
+			for _, reason := range res.Rejected {
+				resp.OK = false
+				resp.Error = reason
+				break
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 	}
@@ -774,7 +847,8 @@ func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 		if !p.HasLocal || p.ID == "" {
 			continue
 		}
-		if p.ZhPDF != "" && p.DualPDF != "" {
+		// Already translated — never auto / bulk-enqueue again.
+		if p.TranslateStatus == translateDone || (p.ZhPDF != "" && p.DualPDF != "") {
 			continue
 		}
 		switch p.TranslateStatus {
@@ -795,7 +869,8 @@ func (s *translateService) enqueuePending(papers []paperEntry, auto bool) {
 	if len(ids) == 0 {
 		return
 	}
-	s.enqueue(ids, papers)
+	// Auto-translate never forces re-translation of done/failed papers.
+	s.enqueue(ids, papers, false)
 }
 
 func (s *Server) maybeAutoTranslate(papers []paperEntry) {

@@ -148,6 +148,13 @@
     }
     .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .xlate-err {
+      color: var(--bad);
+      font-size: 12px;
+      margin: 8px 0 0;
+      line-height: 1.4;
+      word-break: break-word;
+    }
     #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
     #xlate-banner {
       display: none;
@@ -340,6 +347,9 @@
       queued: "Queued",
       running: "Translating…",
       failed: "Failed",
+      reXlate: "Re-translate",
+      xlateBusy: "Translation already in progress",
+      xlateErrPrefix: "Error: ",
       xlate: "Translate",
       xlatePending: "Translate pending",
       queuedOk: "Queued {n} paper(s).",
@@ -378,6 +388,9 @@
       queued: "排队中",
       running: "翻译中…",
       failed: "失败",
+      reXlate: "再次翻译",
+      xlateBusy: "正在翻译中",
+      xlateErrPrefix: "错误：",
       xlate: "翻译",
       xlatePending: "翻译待处理",
       queuedOk: "已排队 {n} 篇。",
@@ -699,8 +712,18 @@
       const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
       actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
     }
-    if (p.has_local && (!p.zh_pdf || !p.dual_pdf) && st !== "queued" && st !== "running") {
-      actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+    if (p.has_local && st !== "queued" && st !== "running") {
+      // One button: 「翻译」 unless a completed translation exists → 「再次翻译」(force).
+      const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
+      if (completed) {
+        actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
+      } else {
+        actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+      }
+    }
+    let errHtml = "";
+    if (st === "failed" && p.translate_error) {
+      errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
     }
     if (p.source_url) {
       actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
@@ -715,6 +738,7 @@
         '<div class="row">' + year + tags + "</div>" +
         (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
         '<div class="actions">' + actions + "</div>" +
+        errHtml +
       "</article>"
     );
   }
@@ -731,7 +755,9 @@
       list.innerHTML = pagePapers.map(renderPaperCard).join("");
       list.querySelectorAll(".xlate-one").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          enqueue({ id: btn.getAttribute("data-id") || "" });
+          const payload = { id: btn.getAttribute("data-id") || "" };
+          if (btn.getAttribute("data-force") === "1") payload.force = true;
+          enqueue(payload);
         });
       });
     }
@@ -809,6 +835,12 @@
         body: JSON.stringify(payload || { all: true })
       });
       const data = await res.json().catch(function () { return {}; });
+      if (data && data.error) {
+        status.textContent = data.error === "正在翻译中" ? t("xlateBusy") : String(data.error);
+        status.className = "err";
+        load({ silent: true });
+        return;
+      }
       if (!res.ok || !data.ok) {
         status.textContent = t("queueFail");
         status.className = "err";

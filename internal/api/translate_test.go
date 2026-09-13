@@ -500,6 +500,9 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 	svc := srv.papers().translate()
 	svc.putJob(translateJob{ID: "2401.05459", Status: translateRunning})
 	svc.putJob(translateJob{ID: "queued-other", Status: translateQueued})
+	svc.mu.Lock()
+	svc.runID = "2401.05459" // prevent reconcileExternal from clearing synthetic running
+	svc.mu.Unlock()
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
@@ -520,5 +523,103 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 	}
 	if cat.TranslateProgress.RunningTitle == "" && cat.TranslateProgress.RunningID == "" {
 		t.Fatalf("expected running identity %+v", cat.TranslateProgress)
+	}
+}
+
+
+func TestEnqueueSkipsDoneUnlessForce(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755)
+	_ = os.MkdirAll(filepath.Join(dir, "pdfs", "dual"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "pdfs", "demo.pdf"), []byte("%PDF"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "pdfs", "zh", "demo.zh.pdf"), []byte("%PDF zh"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "pdfs", "dual", "demo.dual.pdf"), []byte("%PDF dual"), 0o644)
+
+	svc := newTranslateService(dir)
+	svc.mu.Lock()
+	svc.started = true
+	svc.mu.Unlock()
+	svc.runner = func(ctx context.Context, job translateRun) (string, string, error) {
+		return installTranslatedPDFs(job.Root, job.ID, job.InputPDF, job.InputPDF)
+	}
+	papers := []paperEntry{{
+		ID: "demo", HasLocal: true, Filename: "demo.pdf",
+		ZhPDF: "/papers/pdf/zh/demo", DualPDF: "/papers/pdf/dual/demo",
+		TranslateStatus: translateDone,
+	}}
+
+	res := svc.enqueue([]string{"demo"}, papers, false)
+	if len(res.Queued) != 0 {
+		t.Fatalf("auto/normal must skip done: %+v", res)
+	}
+
+	res = svc.enqueue([]string{"demo"}, papers, true)
+	if len(res.Queued) != 1 {
+		t.Fatalf("force must re-queue done: %+v", res)
+	}
+	if outputsExist(dir, "demo") {
+		t.Fatal("force should clear prior outputs before run")
+	}
+}
+
+func TestEnqueueRejectsWhileRunning(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "pdfs", "demo.pdf"), []byte("%PDF"), 0o644)
+	svc := newTranslateService(dir)
+	svc.mu.Lock()
+	svc.started = true // do not start background loop
+	svc.runID = "demo"
+	svc.status.Jobs["demo"] = translateJob{ID: "demo", Status: translateRunning}
+	svc.mu.Unlock()
+
+	res := svc.enqueue([]string{"demo"}, []paperEntry{{ID: "demo", HasLocal: true, Filename: "demo.pdf"}}, true)
+	if len(res.Queued) != 0 {
+		t.Fatalf("must not queue while running: %+v", res)
+	}
+	if res.Rejected["demo"] != "正在翻译中" {
+		t.Fatalf("rejected=%v", res.Rejected)
+	}
+}
+
+func TestEnqueueSkipsDuplicateQueued(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "pdfs", "demo.pdf"), []byte("%PDF"), 0o644)
+	svc := newTranslateService(dir)
+	// Prevent background loop from consuming the queue during the test.
+	svc.mu.Lock()
+	svc.started = true
+	svc.mu.Unlock()
+
+	papers := []paperEntry{{ID: "demo", HasLocal: true, Filename: "demo.pdf"}}
+	res1 := svc.enqueue([]string{"demo"}, papers, false)
+	if len(res1.Queued) != 1 {
+		t.Fatalf("first %+v", res1)
+	}
+	res2 := svc.enqueue([]string{"demo"}, papers, false)
+	if len(res2.Queued) != 0 || len(res2.Skipped) != 1 {
+		t.Fatalf("dup %+v", res2)
+	}
+	svc.mu.Lock()
+	n := 0
+	for _, id := range svc.queue {
+		if id == "demo" {
+			n++
+		}
+	}
+	svc.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("queue copies=%d", n)
+	}
+}
+
+func TestBabelDOCArgsOmitAPIKey(t *testing.T) {
+	args := []string{"--openai", "--openai-model", "auto", "--files", "x.pdf"}
+	if cmdlineHasAPIKeyFlag(append(args, "--openai-api-key", "secret")) != true {
+		t.Fatal("detector")
+	}
+	if cmdlineHasAPIKeyFlag(args) {
+		t.Fatal("clean args flagged")
 	}
 }

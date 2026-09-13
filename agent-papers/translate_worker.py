@@ -110,8 +110,8 @@ def run_babeldoc(
         cmd.extend(["--qps", str(qps)])
     env = os.environ.copy()
     if api_key:
+        # Prefer env so `ps` / process lists never leak the key.
         env["OPENAI_API_KEY"] = api_key
-        cmd.extend(["--openai-api-key", api_key])
 
     def invoke(argv: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
