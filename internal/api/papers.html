@@ -413,8 +413,19 @@
     return "";
   }
   const prefix = appPrefix();
-  document.getElementById("settings-link").href = prefix + "/settings";
+  const urlToken = new URLSearchParams(location.search).get("token") || "";
+  document.getElementById("settings-link").href = withToken(prefix + "/settings");
 
+  function withToken(u) {
+    if (!urlToken) return u;
+    return u + (u.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(urlToken);
+  }
+  function authHeaders(json) {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
+    if (urlToken) h["Authorization"] = "Bearer " + urlToken;
+    return h;
+  }
   function apiURL(q, tag) {
     let u = prefix + "/papers/api";
     const params = new URLSearchParams();
@@ -426,7 +437,7 @@
   function pdfURL(localPath, download) {
     let u = prefix + localPath;
     if (download) u += (u.indexOf("?") >= 0 ? "&" : "?") + "download=1";
-    return u;
+    return withToken(u);
   }
 
   let lastCatalog = { count: 0, papers: [], generated_at: "" };
@@ -548,7 +559,7 @@
     const q = document.getElementById("q").value.trim();
     const tag = document.getElementById("tag").value;
     try {
-      const res = await fetch(apiURL(q, tag), { credentials: "same-origin" });
+      const res = await fetch(apiURL(q, tag), { credentials: "same-origin", headers: authHeaders(false) });
       if (res.status === 401) {
         status.textContent = t("unauthorized");
         status.className = "err";
@@ -591,7 +602,7 @@
 
   async function loadCfg() {
     try {
-      const res = await fetch(prefix + "/papers/translate/config", { credentials: "same-origin" });
+      const res = await fetch(prefix + "/papers/translate/config", { credentials: "same-origin", headers: authHeaders(false) });
       if (!res.ok) return;
       const cfg = await res.json();
       document.getElementById("base-url").value = cfg.base_url || "";
@@ -626,7 +637,7 @@
       const res = await fetch(prefix + "/papers/translate/config", {
         method: "PUT",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
         body: JSON.stringify(body)
       });
       const data = await res.json().catch(function () { return {}; });
@@ -655,7 +666,7 @@
       const res = await fetch(prefix + "/papers/translate/test", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
         body: JSON.stringify(body)
       });
       const data = await res.json().catch(function () { return {}; });
@@ -675,7 +686,7 @@
       const res = await fetch(prefix + "/papers/translate", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(true),
         body: JSON.stringify(payload || { all: true })
       });
       const data = await res.json().catch(function () { return {}; });

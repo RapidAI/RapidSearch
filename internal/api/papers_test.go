@@ -82,4 +82,7 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "中文版") || !strings.Contains(body, "中英对照") {
 		t.Fatal("missing translated download labels")
 	}
+	if !strings.Contains(body, `Authorization`) || !strings.Contains(body, "withToken") {
+		t.Fatal("page must forward operator ?token= to API and PDF links")
+	}
 }
