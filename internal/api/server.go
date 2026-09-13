@@ -89,7 +89,12 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/papers", s.handlePapersPage)
 	s.mux.HandleFunc("/papers/{$}", s.handlePapersPage)
 	s.mux.HandleFunc("/papers/api", s.handlePapersAPI)
+	s.mux.HandleFunc("/papers/translate", s.handlePapersTranslate)
+	s.mux.HandleFunc("/papers/translate/config", s.handlePapersTranslateConfig)
+	s.mux.HandleFunc("/papers/translate/test", s.handlePapersTranslateTest)
 	s.mux.HandleFunc("/papers/pdf/{name...}", s.handlePapersPDF)
+	s.mux.HandleFunc("/papers/pdf/zh/{name...}", s.handlePapersPDF)
+	s.mux.HandleFunc("/papers/pdf/dual/{name...}", s.handlePapersPDF)
 	return s
 }
 

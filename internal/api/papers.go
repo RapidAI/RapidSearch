@@ -39,10 +39,15 @@ type paperEntry struct {
 	Updated        string   `json:"updated,omitempty"`
 
 	// Filled for API/HTML consumers.
-	Filename  string `json:"filename,omitempty"`
-	HasLocal  bool   `json:"has_local"`
-	LocalPDF  string `json:"local_pdf,omitempty"` // relative download path
-	Brief     string `json:"brief,omitempty"`
+	Filename        string `json:"filename,omitempty"`
+	HasLocal        bool   `json:"has_local"`
+	LocalPDF        string `json:"local_pdf,omitempty"` // relative download path
+	Brief           string `json:"brief,omitempty"`
+	ID              string `json:"id,omitempty"`
+	ZhPDF           string `json:"zh_pdf,omitempty"`
+	DualPDF         string `json:"dual_pdf,omitempty"`
+	TranslateStatus string `json:"translate_status,omitempty"`
+	TranslateError  string `json:"translate_error,omitempty"`
 }
 
 type papersManifest struct {
@@ -64,6 +69,7 @@ type papersStore struct {
 	loaded  time.Time
 	modTime time.Time
 	cat     papersCatalog
+	xlate   *translateService
 }
 
 func papersRoot() string {
@@ -73,17 +79,45 @@ func papersRoot() string {
 	return defaultPapersDir
 }
 
+func newPapersStore(root string) *papersStore {
+	if root == "" {
+		root = papersRoot()
+	}
+	ps := &papersStore{root: root, xlate: newTranslateService(root)}
+	ps.xlate.start()
+	return ps
+}
+
 func (s *Server) papers() *papersStore {
 	if s == nil {
 		return nil
 	}
 	if s.papersStore == nil {
-		s.papersStore = &papersStore{root: papersRoot()}
+		s.papersStore = newPapersStore(papersRoot())
 	}
 	return s.papersStore
 }
 
 func (ps *papersStore) catalog() (papersCatalog, error) {
+	base, err := ps.catalogBase()
+	if err != nil {
+		return papersCatalog{}, err
+	}
+	out := papersCatalog{
+		GeneratedAt: base.GeneratedAt,
+		Stats:       base.Stats,
+		Count:       base.Count,
+		Papers:      append([]paperEntry(nil), base.Papers...),
+	}
+	var jobs map[string]translateJob
+	if ps != nil && ps.xlate != nil {
+		jobs = ps.xlate.jobsCopy()
+	}
+	overlayTranslations(out.Papers, ps.root, jobs)
+	return out, nil
+}
+
+func (ps *papersStore) catalogBase() (papersCatalog, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	root := ps.root
@@ -151,6 +185,7 @@ func enrichPaper(p paperEntry, pdfDir string) paperEntry {
 			p.LocalPDF = "/papers/pdf/" + name
 		}
 	}
+	p.ID = paperTranslateID(p)
 	p.Brief = briefText(p.Abstract, 280)
 	// Do not leak absolute host paths in API responses.
 	p.PDFPath = ""
@@ -251,6 +286,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
+	s.maybeAutoTranslate(cat.Papers)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -276,6 +312,7 @@ func filterPapers(in []paperEntry, q, tag string) []paperEntry {
 				p.Title,
 				p.Abstract,
 				p.ArxivID,
+				p.ID,
 				p.Filename,
 				strings.Join(p.Authors, " "),
 				strings.Join(p.TopicTags, " "),
@@ -303,36 +340,31 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// URL path may encode spaces etc.; Go already decodes Path.
-	name, err := resolveLocalPDFName(s.papers().root, raw)
-	if err != nil || name == "" {
-		http.NotFound(w, r)
-		return
-	}
 	root := s.papers().root
 	if root == "" {
 		root = papersRoot()
 	}
-	full := filepath.Join(root, "pdfs", name)
-	full, err = filepath.Abs(full)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	pdfRoot, err := filepath.Abs(filepath.Join(root, "pdfs"))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	rel, err := filepath.Rel(pdfRoot, full)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		http.NotFound(w, r)
-		return
-	}
-	st, err := os.Stat(full)
-	if err != nil || st.IsDir() {
-		http.NotFound(w, r)
-		return
+	kind, rest, isXlate := splitTranslatePDFPath(raw)
+	var full, serveName string
+	var err error
+	if isXlate {
+		full, serveName, err = resolveTranslatedPDFName(root, kind, rest)
+		if err != nil || full == "" {
+			http.NotFound(w, r)
+			return
+		}
+	} else {
+		name, err := resolveLocalPDFName(root, raw)
+		if err != nil || name == "" {
+			http.NotFound(w, r)
+			return
+		}
+		full, err = originalPDFAbs(root, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		serveName = name
 	}
 	disp := "inline"
 	if strings.EqualFold(r.URL.Query().Get("download"), "1") ||
@@ -340,9 +372,20 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 		disp = "attachment"
 	}
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", disp+`; filename="`+sanitizeDisposition(name)+`"`)
+	w.Header().Set("Content-Disposition", disp+`; filename="`+sanitizeDisposition(serveName)+`"`)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	http.ServeFile(w, r, full)
+}
+
+func splitTranslatePDFPath(raw string) (kind, rest string, ok bool) {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/")
+	if strings.HasPrefix(raw, "zh/") {
+		return translateKindZH, strings.TrimPrefix(raw, "zh/"), true
+	}
+	if strings.HasPrefix(raw, "dual/") {
+		return translateKindDual, strings.TrimPrefix(raw, "dual/"), true
+	}
+	return "", raw, false
 }
 
 // resolveLocalPDFName maps an arxiv id or filename to a basename under pdfs/.

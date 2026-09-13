@@ -37,3 +37,7 @@ agent-papers/email_digest_body.txt
 agent-papers/test_digest_email.txt
 agent-papers/*_digest_*.txt
 !agent-papers/build_email_digest.py
+agent-papers/translate-config.json
+agent-papers/translate_status.json
+agent-papers/translate-work/
+**/translate-config.json

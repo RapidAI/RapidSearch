@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,5 +57,29 @@ func TestBriefText(t *testing.T) {
 	s := briefText("one two three four five six seven eight nine ten eleven twelve thirteen", 40)
 	if len([]rune(s)) < 10 || !strings.HasSuffix(s, "…") {
 		t.Fatalf("brief=%q", s)
+	}
+}
+
+func TestPapersPageLightTheme(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `data-theme="light"`) {
+		t.Fatal("default theme is not light")
+	}
+	if !strings.Contains(body, "--bg: #f5f6f8") && !strings.Contains(body, "--bg:#f5f6f8") {
+		t.Fatal("missing light background token")
+	}
+	if !strings.Contains(body, "id=\"base-url\"") || !strings.Contains(body, "id=\"test-cfg\"") {
+		t.Fatal("missing LLM settings controls")
+	}
+	if !strings.Contains(body, "中文版") || !strings.Contains(body, "中英对照") {
+		t.Fatal("missing translated download labels")
 	}
 }

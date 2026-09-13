@@ -90,10 +90,13 @@ func TestPathNeedsStreamAndPassthrough(t *testing.T) {
 	if !PathNeedsStream("/download") || !PathNeedsStream("/papers/pdf/a.pdf") {
 		t.Fatal("need stream")
 	}
-	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api") {
+	if !PathNeedsStream("/papers/pdf/zh/2401.05459") || !PathNeedsStream("/papers/pdf/dual/2401.05459") {
+		t.Fatal("translated pdfs must stream")
+	}
+	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api") || PathNeedsStream("/papers/translate/config") {
 		t.Fatal("html/api should not stream")
 	}
-	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") {
+	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") || !PathPassthroughAuth("/papers/translate/test") {
 		t.Fatal("passthrough")
 	}
 	if PathPassthroughAuth("/search") {

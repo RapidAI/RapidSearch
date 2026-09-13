@@ -59,7 +59,11 @@ func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 
 func TestProxyPapersSkipsBearerSoLoginCanRender(t *testing.T) {
 	h := testProxy(t)
-	for _, path := range []string{"/papers", "/papers/", "/papers/api", "/papers/pdf/x.pdf"} {
+	for _, path := range []string{
+		"/papers", "/papers/", "/papers/api", "/papers/pdf/x.pdf",
+		"/papers/pdf/zh/2401.05459", "/papers/pdf/dual/2401.05459",
+		"/papers/translate", "/papers/translate/config",
+	} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		h.serveHTTP(rr, req)

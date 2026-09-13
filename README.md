@@ -60,15 +60,29 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 ### Agent papers / 论文库
 
-Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). Same auth as settings (Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`).
+Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). Same auth as settings (Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`). The `/papers` page defaults to a **light (white)** theme.
 
-- `GET /papers` — HTML list (ZH/EN), with filter/search
-- `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json`
-- `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
+- `GET /papers` — HTML list (ZH/EN), with filter/search, LLM settings, and translation links
+- `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json` (includes `zh_pdf`, `dual_pdf`, `translate_status`)
+- `GET /papers/pdf/{arxiv_id_or_filename}` — stream original local PDF (`?download=1` for attachment)
+- `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
+- `GET` / `PUT /papers/translate/config` — OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
+- `POST /papers/translate/test` — ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
+- `POST /papers/translate` — enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker (concurrency 1) runs BabelDOC; listing the catalog also auto-enqueues when `auto_translate` is on.
 
-Scripts live in-repo under `agent-papers/` (Python). Runtime PDFs/DB are **not** in git — set `PAPERS_DIR` to the data directory. Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires deploying an updated `search-proxy` that forwards `/papers`).
+**BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
-本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。
+```
+pdfs/*.pdf                 # originals
+pdfs/zh/{id}.zh.pdf        # Chinese-only (mono)
+pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
+translate-config.json      # LLM settings (secrets; not in git)
+translate_status.json      # queue/job status
+```
+
+Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
+
+本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。翻译在后台排队，不阻塞页面。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.

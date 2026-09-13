@@ -1,0 +1,429 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"search-service/internal/search"
+)
+
+func papersHandler(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("PAPERS_DIR", dir)
+	t.Setenv("SEARCH_TOKEN", "papers-secret")
+	t.Setenv("HUB_AUTH_BASES", "http://127.0.0.1:1")
+	t.Setenv("SEARCH_CONFIG_PATH", filepath.Join(dir, "search-config.json"))
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	man := papersManifest{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Papers: []paperEntry{
+			{
+				Title:     "Personal LLM Agents",
+				Abstract:  "A survey of personal agents.",
+				Year:      2024,
+				ArxivID:   "2401.05459",
+				TopicTags: []string{"survey"},
+				PDFPath:   "pdfs/2401.05459_personal_llm_agents.pdf",
+			},
+		},
+	}
+	raw, _ := json.Marshal(man)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "2401.05459_personal_llm_agents.pdf"), []byte("%PDF-1.4 orig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := New(nil, "", nil, nil)
+	t.Cleanup(func() { search.ActivateStore(nil) })
+	return h, dir
+}
+
+func papersAuth(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer papers-secret")
+}
+
+func TestMaskTranslateKey(t *testing.T) {
+	m := maskAPIKey("abcdXYZQ")
+	if !m.Configured || m.Last4 != "XYZQ" {
+		t.Fatalf("%+v", m)
+	}
+	if maskAPIKey("").Configured {
+		t.Fatal("empty")
+	}
+	raw, _ := json.Marshal(TranslatePublicView{OK: true, APIKey: maskAPIKey("super-secret-key-9999")})
+	if strings.Contains(string(raw), "super-secret-key-9999") {
+		t.Fatal("public view leaked key")
+	}
+}
+
+func TestTranslateConfigEmptyPUTDoesNotWipe(t *testing.T) {
+	h, dir := papersHandler(t)
+	put := func(body string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/papers/translate/config", strings.NewReader(body))
+		papersAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		return rr
+	}
+	rr := put(`{"base_url":"https://example.test/v1","model":"demo-model","api_key":"keep-this-key-4242"}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("set status=%d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "keep-this-key-4242") {
+		t.Fatal("PUT response leaked raw key")
+	}
+	rr = put(`{}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("empty status=%d %s", rr.Code, rr.Body.String())
+	}
+	rr = put(`{"api_key":""}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("blank status=%d %s", rr.Code, rr.Body.String())
+	}
+	onDisk, err := os.ReadFile(filepath.Join(dir, "translate-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), "keep-this-key-4242") {
+		t.Fatalf("key wiped: %s", onDisk)
+	}
+	if strings.Contains(rr.Body.String(), "keep-this-key-4242") {
+		t.Fatal("GET-after-PUT leaked raw key")
+	}
+	var view TranslatePublicView
+	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.APIKey.Configured || view.APIKey.Last4 != "4242" {
+		t.Fatalf("%+v", view.APIKey)
+	}
+	if view.BaseURL != "https://example.test/v1" || view.Model != "demo-model" {
+		t.Fatalf("%+v", view)
+	}
+}
+
+func TestTranslateConfigClearKey(t *testing.T) {
+	h, dir := papersHandler(t)
+	put := func(body string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/papers/translate/config", strings.NewReader(body))
+		papersAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := put(`{"api_key":"wipe-me-soon"}`); rr.Code != http.StatusOK {
+		t.Fatalf("%s", rr.Body.String())
+	}
+	rr := put(`{"clear_api_key":true}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("%s", rr.Body.String())
+	}
+	var view TranslatePublicView
+	_ = json.Unmarshal(rr.Body.Bytes(), &view)
+	if view.APIKey.Configured {
+		t.Fatal("clear should wipe")
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "translate-config.json"))
+	if strings.Contains(string(raw), "wipe-me-soon") {
+		t.Fatal("file still has key")
+	}
+}
+
+func TestTranslateConfigUnauthenticated401(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/translate/config", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestTranslateStatusJSON(t *testing.T) {
+	dir := t.TempDir()
+	svc := newTranslateService(dir)
+	svc.putJob(translateJob{ID: "2401.05459", Status: translateQueued})
+	raw, err := os.ReadFile(filepath.Join(dir, "translate_status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"status": "queued"`) {
+		t.Fatalf("%s", raw)
+	}
+	svc2 := newTranslateService(dir)
+	j, ok := svc2.job("2401.05459")
+	if !ok || j.Status != translateQueued {
+		t.Fatalf("reload %+v %v", j, ok)
+	}
+}
+
+func TestResolveTranslatedPDFName(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "pdfs", "dual"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zh := filepath.Join(root, "pdfs", "zh", "2401.05459.zh.pdf")
+	dual := filepath.Join(root, "pdfs", "dual", "2401.05459.dual.pdf")
+	if err := os.WriteFile(zh, []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dual, []byte("%PDF-1.4 dual"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, name, err := resolveTranslatedPDFName(root, "zh", "2401.05459")
+	if err != nil || name != "2401.05459.zh.pdf" || !strings.HasSuffix(got, name) {
+		t.Fatalf("zh: %q %q %v", got, name, err)
+	}
+	got, name, err = resolveTranslatedPDFName(root, "dual", "2401.05459.dual.pdf")
+	if err != nil || name != "2401.05459.dual.pdf" {
+		t.Fatalf("dual: %q %q %v", got, name, err)
+	}
+	if _, _, err := resolveTranslatedPDFName(root, "zh", "../etc/passwd"); err == nil {
+		t.Fatal("expected traversal reject")
+	}
+	if _, _, err := resolveTranslatedPDFName(root, "zh", "missing-id"); err == nil {
+		t.Fatal("expected missing")
+	}
+}
+
+func TestCollectBabelOutputsPrefersNoWatermark(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "paper.zh-CN.mono.pdf"), []byte("m"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "paper.no_watermark.zh-CN.mono.pdf"), []byte("mnw"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "paper.zh-CN.dual.pdf"), []byte("d"), 0o644)
+	mono, dual := collectBabelOutputs(dir)
+	if !strings.Contains(mono, "no_watermark") {
+		t.Fatalf("mono=%s", mono)
+	}
+	if !strings.Contains(dual, "dual") {
+		t.Fatalf("dual=%s", dual)
+	}
+}
+
+func TestPaperTranslateID(t *testing.T) {
+	if got := paperTranslateID(paperEntry{ArxivID: "arXiv:2401.05459"}); got != "2401.05459" {
+		t.Fatalf("%s", got)
+	}
+	if got := paperTranslateID(paperEntry{ArxivID: "hep-th/9901001"}); got != "hep-th_9901001" {
+		t.Fatalf("%s", got)
+	}
+	if got := paperTranslateID(paperEntry{Filename: "foo_bar.pdf"}); got != "foo_bar" {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestSanitizeUserErrorRedactsKey(t *testing.T) {
+	got := sanitizeUserError("boom sk-abcDEF1234567890 extra")
+	if strings.Contains(got, "sk-abcDEF1234567890") {
+		t.Fatalf("%s", got)
+	}
+	if !strings.Contains(got, "[redacted]") {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestPapersAPIIncludesTranslateFields(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Papers) != 1 {
+		t.Fatalf("%+v", cat)
+	}
+	p := cat.Papers[0]
+	if p.ID != "2401.05459" || p.ZhPDF != "/papers/pdf/zh/2401.05459" {
+		t.Fatalf("%+v", p)
+	}
+	if p.DualPDF != "" {
+		t.Fatalf("unexpected dual %s", p.DualPDF)
+	}
+}
+
+func TestPapersPDFServesTranslated(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "dual"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "dual", "2401.05459.dual.pdf"), []byte("%PDF-1.4 dual-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/pdf/2401.05459", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "orig") {
+		t.Fatalf("original status=%d body=%q", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/pdf/dual/2401.05459", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Header().Get("Content-Type"), "pdf") {
+		t.Fatalf("ct=%s", rr.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rr.Body.String(), "dual-bytes") {
+		t.Fatalf("body=%q", rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/pdf/zh/missing-id", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestTranslateTestDoesNotLeakKey(t *testing.T) {
+	h, _ := papersHandler(t)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" && r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer super-secret-test-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"bad key super-secret-test-key"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[{"id":"demo-model"}]}`)
+	}))
+	defer hub.Close()
+
+	body := `{"base_url":"` + hub.URL + `","api_key":"super-secret-test-key","model":"demo-model"}`
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/translate/test", strings.NewReader(body))
+	papersAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "super-secret-test-key") {
+		t.Fatal("test response leaked key")
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["ok"] != true || out["via"] != "models" {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestTranslateEnqueueFakeRunner(t *testing.T) {
+	h, dir := papersHandler(t)
+	s, ok := h.(*Server)
+	if !ok {
+		t.Fatal("handler type")
+	}
+	// Need a configured key so the worker will invoke the runner.
+	rr := httptest.NewRecorder()
+	preq := httptest.NewRequest(http.MethodPut, "/papers/translate/config", strings.NewReader(
+		`{"model":"demo","api_key":"not-a-real-key-zzzz"}`))
+	papersAuth(preq)
+	preq.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, preq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("config %d %s", rr.Code, rr.Body.String())
+	}
+
+	svc := s.translate()
+	done := make(chan struct{})
+	svc.runner = func(ctx context.Context, job translateRun) (string, string, error) {
+		_ = ctx
+		if job.Cfg.APIKey != "" && strings.Contains(job.Cfg.APIKey, "not-a-real") {
+			// key is available to the runner but must not appear in HTTP responses.
+		}
+		zh, dual, err := installTranslatedPDFs(job.Root, job.ID, job.InputPDF, job.InputPDF)
+		close(done)
+		return zh, dual, err
+	}
+
+	rr = httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/translate", strings.NewReader(`{"id":"2401.05459"}`))
+	papersAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enqueue %d %s", rr.Code, rr.Body.String())
+	}
+	var enq translateEnqueueResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &enq); err != nil {
+		t.Fatal(err)
+	}
+	if !enq.OK || len(enq.Queued) != 1 {
+		t.Fatalf("%+v", enq)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runner did not run")
+	}
+	// Status file + outputs should settle shortly after the runner returns.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		j, ok := svc.job("2401.05459")
+		if ok && j.Status == translateDone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status %+v ok=%v", j, ok)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "pdfs", "dual", "2401.05459.dual.pdf")); err != nil {
+		t.Fatal(err)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if strings.Contains(rr.Body.String(), "not-a-real-key-zzzz") {
+		t.Fatal("catalog leaked key")
+	}
+	if !strings.Contains(rr.Body.String(), `"zh_pdf":"/papers/pdf/zh/2401.05459"`) {
+		t.Fatalf("missing zh link: %s", rr.Body.String())
+	}
+}

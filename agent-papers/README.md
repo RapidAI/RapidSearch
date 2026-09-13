@@ -130,16 +130,48 @@ Expected layout under `PAPERS_DIR`:
 ```
 manifest.json
 papers.db          # optional for scripts
-pdfs/*.pdf
+pdfs/*.pdf         # original English PDFs
+pdfs/zh/{id}.zh.pdf
+pdfs/dual/{id}.dual.pdf
+translate-config.json   # OpenAI-compatible LLM settings (0600, not in git)
+translate_status.json   # BabelDOC job status
+translate-work/         # temporary BabelDOC output
 cache/             # optional script cache
 ```
+
+`{id}` is the sanitized arXiv id (`/` → `_`) or the original PDF stem.
 
 ### HTTP (search-service / public proxy)
 
 After login (same Hub global admin cookie as `/settings`) or with Bearer `SEARCH_TOKEN`:
 
-- `GET /papers` — HTML catalog (ZH/EN)
-- `GET /papers/api?q=&tag=` — JSON catalog
-- `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
+- `GET /papers` — HTML catalog (ZH/EN), **light theme by default**, LLM settings + Test
+- `GET /papers/api?q=&tag=` — JSON catalog (`zh_pdf`, `dual_pdf`, `translate_status`)
+- `GET /papers/pdf/{arxiv_id_or_filename}` — stream original PDF (`?download=1` for attachment)
+- `GET /papers/pdf/zh/{id}` / `/papers/pdf/dual/{id}` — translated PDFs
+- `GET`/`PUT /papers/translate/config` — masked LLM settings
+- `POST /papers/translate/test` — models / chat ping (key never returned)
+- `POST /papers/translate` — enqueue one id or all pending (non-blocking)
 
 Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`
+
+### BabelDOC translation / 中文翻译
+
+Background worker (concurrency 1) shells out to `agent-papers/translate_worker.py` or `babeldoc` on `PATH`:
+
+```bash
+uv tool install --python 3.12 BabelDOC
+export PAPERS_DIR=/workspace/agent-papers
+# Configure base_url / api_key / model on /papers, then:
+# POST /papers/translate  {"all":true}
+```
+
+CLI equivalent:
+
+```
+babeldoc --openai --openai-model MODEL --openai-base-url URL --openai-api-key KEY \
+  --files in.pdf --lang-in en --lang-out zh-CN --output OUTDIR \
+  --watermark-output-mode=no_watermark
+```
+
+Produces mono (Chinese-only) + dual (bilingual) by default. RapidSearch copies them to `pdfs/zh/` and `pdfs/dual/`. Do not commit PDFs or API keys. Deploy an updated `search-proxy` so public hub streams `/papers/pdf/zh/…` and `/papers/pdf/dual/…`.

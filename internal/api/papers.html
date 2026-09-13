@@ -1,11 +1,28 @@
 <!DOCTYPE html>
-<html lang="en" data-accept-lang="en">
+<html lang="en" data-accept-lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Agent Papers</title>
   <style>
-    :root {
+    :root, html[data-theme="light"] {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --ink: #1b2430;
+      --muted: #536270;
+      --line: #d5dde6;
+      --accent: #0b63ce;
+      --ok: #157a42;
+      --bad: #b42318;
+      --warn: #9a6700;
+      --btn: #eef2f6;
+      --tag: #e7f3ea;
+      --tag-ink: #1b6b3a;
+      --input: #ffffff;
+      --focus: #0b63ce;
+      --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    }
+    html[data-theme="dark"] {
       --bg: #0f1419;
       --card: #1a2332;
       --ink: #e8eef6;
@@ -14,15 +31,19 @@
       --accent: #4ea1ff;
       --ok: #3dcc8a;
       --bad: #f07178;
+      --warn: #f0b429;
       --btn: #243044;
       --tag: #243a28;
       --tag-ink: #9ad4a0;
+      --input: #0d1218;
+      --focus: #4ea1ff;
+      --shadow: none;
     }
     html:not([data-i18n-ready]) body { visibility: hidden; }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
       background: var(--bg);
       color: var(--ink);
     }
@@ -36,10 +57,19 @@
       padding: 16px 18px 0;
       flex-wrap: wrap;
     }
-    .lang-switch { display: flex; gap: 4px; }
-    .lang-switch button.active { background: #1d4e89; border-color: #2d6cb5; }
+    .lang-switch, .theme-switch { display: flex; gap: 4px; }
+    .lang-switch button.active, .theme-switch button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    html[data-theme="light"] .lang-switch button.active,
+    html[data-theme="light"] .theme-switch button.active {
+      background: #0b63ce;
+    }
     main { max-width: 960px; margin: 0 auto; padding: 12px 18px 48px; }
     h1 { font-size: 1.45rem; margin: 0 0 6px; }
+    h2 { font-size: 1.05rem; margin: 0 0 10px; }
     p.lead { color: var(--muted); margin: 0 0 18px; }
     .toolbar {
       display: flex;
@@ -48,23 +78,18 @@
       margin-bottom: 16px;
       align-items: center;
     }
-    input[type="search"] {
-      flex: 1 1 220px;
-      min-width: 180px;
+    input[type="search"], input[type="text"], input[type="password"], input[type="number"], select {
       padding: 9px 12px;
       border-radius: 8px;
       border: 1px solid var(--line);
-      background: #0d1218;
+      background: var(--input);
       color: var(--ink);
       font: inherit;
     }
-    select {
-      padding: 9px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      background: #0d1218;
-      color: var(--ink);
-      font: inherit;
+    input[type="search"] { flex: 1 1 220px; min-width: 180px; }
+    input:focus, select:focus, button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
     }
     button {
       background: var(--btn);
@@ -75,7 +100,9 @@
       cursor: pointer;
       font: inherit;
     }
-    button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button.primary { background: #0b63ce; border-color: #0b63ce; color: #fff; }
+    html[data-theme="dark"] button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button:disabled { opacity: 0.45; cursor: default; }
     a.btn {
       display: inline-block;
       background: var(--btn);
@@ -86,30 +113,31 @@
       text-decoration: none;
       font-size: 13px;
     }
-    a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
-    a.btn:hover { filter: brightness(1.08); }
+    a.btn.primary { background: #0b63ce; border-color: #0b63ce; color: #fff; }
+    html[data-theme="dark"] a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
+    a.btn:hover { filter: brightness(0.97); }
     .meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-    .meta strong { color: var(--ink); }
     article.paper {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 16px 18px 14px;
       margin-bottom: 12px;
+      box-shadow: var(--shadow);
     }
-    article.paper h2 {
-      font-size: 1.05rem;
-      margin: 0 0 8px;
-      line-height: 1.35;
-    }
+    article.paper h2 { font-size: 1.05rem; margin: 0 0 8px; line-height: 1.35; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-    .year {
+    .year, .status-pill {
       font-size: 12px;
       color: var(--muted);
       border: 1px solid var(--line);
       border-radius: 999px;
       padding: 2px 8px;
     }
+    .status-pill.queued { color: var(--warn); border-color: var(--warn); }
+    .status-pill.running { color: var(--accent); border-color: var(--accent); }
+    .status-pill.failed { color: var(--bad); border-color: var(--bad); }
+    .status-pill.done { color: var(--ok); border-color: var(--ok); }
     .tag {
       font-size: 12px;
       background: var(--tag);
@@ -119,16 +147,35 @@
     }
     .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
-    #status.err { color: var(--bad); }
+    #status, #cfg-status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    #status.err, #cfg-status.err { color: var(--bad); }
+    #status.ok, #cfg-status.ok { color: var(--ok); }
     .empty { color: var(--muted); padding: 24px 0; }
     .nav a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    section.panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px 14px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    label.field { display: block; margin-bottom: 10px; color: var(--muted); font-size: 13px; }
+    label.field input { width: 100%; margin-top: 4px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+    .check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; margin: 8px 0 12px; }
+    .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--btn); color: var(--muted); }
+    .badge.ok { color: var(--ok); }
+    code { font-size: 12px; background: var(--btn); padding: 1px 5px; border-radius: 4px; }
   </style>
   <script>
   (function () {
-    var KEY = "rs_settings_lang";
+    var LANG_KEY = "rs_settings_lang";
+    var THEME_KEY = "rs_papers_theme";
     var lang = "";
-    try { lang = localStorage.getItem(KEY) || ""; } catch (e) {}
+    try { lang = localStorage.getItem(LANG_KEY) || ""; } catch (e) {}
     if (lang !== "zh" && lang !== "en") {
       var nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
       var acc = document.documentElement.getAttribute("data-accept-lang") || "";
@@ -136,6 +183,10 @@
     }
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
+    var theme = "light";
+    try { theme = localStorage.getItem(THEME_KEY) || "light"; } catch (e) {}
+    if (theme !== "dark") theme = "light";
+    document.documentElement.setAttribute("data-theme", theme);
   })();
   </script>
 </head>
@@ -144,14 +195,52 @@
   <div class="nav">
     <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
   </div>
-  <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
-    <button type="button" id="lang-zh" data-lang="zh">中文</button>
-    <button type="button" id="lang-en" data-lang="en">EN</button>
+  <div class="row" style="margin:0">
+    <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
+      <button type="button" id="theme-light" data-theme="light">Aa</button>
+      <button type="button" id="theme-dark" data-theme="dark">◐</button>
+    </div>
+    <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
+      <button type="button" id="lang-zh" data-lang="zh">中文</button>
+      <button type="button" id="lang-en" data-lang="en">EN</button>
+    </div>
   </div>
 </div>
 <main>
   <h1 data-i18n="heading">Agent papers</h1>
-  <p class="lead" data-i18n="lead">Browse the local catalog and download already-cached PDFs.</p>
+  <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
+
+  <section class="panel" aria-labelledby="llm-heading">
+    <h2 id="llm-heading" data-i18n="llmHeading">Translation LLM</h2>
+    <p class="hint"><span data-i18n="llmHint">OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.</span>
+      <code id="cfgpath">translate-config.json</code>
+      <span id="babel-badge" class="badge" hidden></span>
+    </p>
+    <div class="grid2">
+      <label class="field"><span data-i18n="baseUrl">Base URL</span>
+        <input id="base-url" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1">
+      </label>
+      <label class="field"><span data-i18n="model">Model</span>
+        <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini">
+      </label>
+    </div>
+    <label class="field"><span data-i18n="apiKey">API key</span>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
+    </label>
+    <div class="row">
+      <span id="key-state" class="badge">not configured</span>
+      <label class="check"><input type="checkbox" id="clear-key"> <span data-i18n="clearKey">Clear saved key</span></label>
+      <label class="field" style="margin:0;min-width:90px"><span data-i18n="qps">QPS</span>
+        <input id="qps" type="number" min="1" max="64" value="4" style="width:90px">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" id="auto-xlate"> <span data-i18n="autoXlate">Auto-translate new papers when the catalog is listed</span></label>
+    <div class="actions">
+      <button type="button" class="primary" id="save-cfg" data-i18n="save">Save</button>
+      <button type="button" id="test-cfg" data-i18n="test">Test</button>
+      <span id="cfg-status"></span>
+    </div>
+  </section>
 
   <div class="toolbar">
     <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, arXiv id…" autocomplete="off">
@@ -159,6 +248,7 @@
       <option value="" data-i18n="tagAll">All tags</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+    <button type="button" id="xlate-pending" data-i18n="xlatePending">Translate pending</button>
   </div>
   <p class="meta" id="meta"></p>
   <p id="status"></p>
@@ -166,12 +256,14 @@
 </main>
 <script>
 (function () {
-  const KEY = "rs_settings_lang";
+  const LANG_KEY = "rs_settings_lang";
+  const THEME_KEY = "rs_papers_theme";
   const I18N = {
     en: {
       langLabel: "Language",
+      themeLabel: "Theme",
       heading: "Agent papers",
-      lead: "Browse the local catalog and download already-cached PDFs.",
+      lead: "Browse the local catalog, download cached PDFs, and queue Chinese translations.",
       settingsLink: "Settings",
       searchPh: "Search title, authors, arXiv id…",
       tagAll: "All tags",
@@ -183,12 +275,43 @@
       arxiv: "arXiv",
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
-      unauthorized: "Unauthorized — sign in via Settings first."
+      unauthorized: "Unauthorized — sign in via Settings first.",
+      llmHeading: "Translation LLM",
+      llmHint: "OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.",
+      baseUrl: "Base URL",
+      model: "Model",
+      apiKey: "API key",
+      pasteKey: "Paste key to replace",
+      clearKey: "Clear saved key",
+      qps: "QPS",
+      autoXlate: "Auto-translate new papers when the catalog is listed",
+      save: "Save",
+      test: "Test",
+      saving: "Saving…",
+      saved: "Saved.",
+      testing: "Testing…",
+      testOk: "LLM test succeeded ({via}).",
+      testFail: "LLM test failed: {err}",
+      notConfigured: "not configured",
+      configured: "configured",
+      configuredLast4: "configured · last4 {last4}",
+      babelOk: "babeldoc on PATH",
+      babelMissing: "babeldoc missing",
+      zh: "中文版",
+      dual: "中英对照",
+      queued: "Queued",
+      running: "Translating…",
+      failed: "Failed",
+      xlate: "Translate",
+      xlatePending: "Translate pending",
+      queuedOk: "Queued {n} paper(s).",
+      queueFail: "Could not queue translation."
     },
     zh: {
       langLabel: "语言",
+      themeLabel: "主题",
       heading: "Agent 论文库",
-      lead: "浏览本地目录并下载已缓存的 PDF（不重新从 ArXiv 拉取）。",
+      lead: "浏览本地目录、下载已缓存 PDF，并排队生成中文翻译。",
       settingsLink: "设置",
       searchPh: "搜索标题、作者、arXiv 编号…",
       tagAll: "全部标签",
@@ -200,7 +323,37 @@
       arxiv: "arXiv",
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
-      unauthorized: "未授权 — 请先在设置页登录。"
+      unauthorized: "未授权 — 请先在设置页登录。",
+      llmHeading: "翻译模型",
+      llmHint: "供 BabelDOC 使用的 OpenAI 兼容接口。API key 留空则保留已保存值；接口不会返回完整密钥。",
+      baseUrl: "接口地址",
+      model: "模型",
+      apiKey: "API key",
+      pasteKey: "粘贴新 key 以替换",
+      clearKey: "清除已保存的 key",
+      qps: "QPS",
+      autoXlate: "列出目录时自动翻译尚未完成的论文",
+      save: "保存",
+      test: "测试",
+      saving: "保存中…",
+      saved: "已保存。",
+      testing: "测试中…",
+      testOk: "LLM 测试成功（{via}）。",
+      testFail: "LLM 测试失败：{err}",
+      notConfigured: "未配置",
+      configured: "已配置",
+      configuredLast4: "已配置 · 末四位 {last4}",
+      babelOk: "已检测到 babeldoc",
+      babelMissing: "未安装 babeldoc",
+      zh: "中文版",
+      dual: "中英对照",
+      queued: "排队中",
+      running: "翻译中…",
+      failed: "失败",
+      xlate: "翻译",
+      xlatePending: "翻译待处理",
+      queuedOk: "已排队 {n} 篇。",
+      queueFail: "无法加入翻译队列。"
     }
   };
 
@@ -227,16 +380,26 @@
     });
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
+    const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    document.getElementById("theme-light").classList.toggle("active", theme === "light");
+    document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
     document.documentElement.setAttribute("data-i18n-ready", "1");
   }
   function setLang(lang) {
     if (lang !== "zh" && lang !== "en") lang = "en";
-    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
     applyI18n();
+    renderKeyState(lastCfg);
     renderMeta();
     renderList();
+  }
+  function setTheme(theme) {
+    if (theme !== "dark") theme = "light";
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+    document.documentElement.setAttribute("data-theme", theme);
+    applyI18n();
   }
 
   function appPrefix() {
@@ -268,6 +431,8 @@
 
   let lastCatalog = { count: 0, papers: [], generated_at: "" };
   let lastShown = 0;
+  let lastCfg = { api_key: {} };
+  let pollTimer = 0;
 
   function renderMeta() {
     const when = lastCatalog.generated_at || "—";
@@ -287,6 +452,13 @@
       .replace(/"/g, "&quot;");
   }
 
+  function statusLabel(st) {
+    if (st === "queued") return t("queued");
+    if (st === "running") return t("running");
+    if (st === "failed") return t("failed");
+    return "";
+  }
+
   function renderList() {
     const list = document.getElementById("list");
     const papers = lastCatalog.papers || [];
@@ -296,6 +468,7 @@
       list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
       return;
     }
+    let inflight = false;
     list.innerHTML = papers.map(function (p) {
       const tags = (p.topic_tags || []).map(function (tg) {
         return '<span class="tag">' + esc(tg) + "</span>";
@@ -307,6 +480,21 @@
         actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
       } else {
         actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+      }
+      if (p.zh_pdf) {
+        actions += '<a class="btn" href="' + esc(pdfURL(p.zh_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("zh")) + "</a>";
+      }
+      if (p.dual_pdf) {
+        actions += '<a class="btn" href="' + esc(pdfURL(p.dual_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("dual")) + "</a>";
+      }
+      const st = p.translate_status || "";
+      if (st === "queued" || st === "running") inflight = true;
+      if (st && st !== "done") {
+        const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
+        actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
+      }
+      if (p.has_local && (!p.zh_pdf || !p.dual_pdf) && st !== "queued" && st !== "running") {
+        actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
       }
       if (p.source_url) {
         actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
@@ -323,6 +511,17 @@
         "</article>"
       );
     }).join("");
+    list.querySelectorAll(".xlate-one").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        enqueue({ id: btn.getAttribute("data-id") || "" });
+      });
+    });
+    if (inflight && !pollTimer) {
+      pollTimer = setInterval(load, 8000);
+    } else if (!inflight && pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = 0;
+    }
   }
 
   function fillTags(papers) {
@@ -362,7 +561,6 @@
         return;
       }
       const data = await res.json();
-      // Keep full tag list from unfiltered load when filtering.
       if (!q && !tag) fillTags(data.papers || []);
       lastCatalog = data;
       renderList();
@@ -372,14 +570,144 @@
     }
   }
 
+  function renderKeyState(cfg) {
+    lastCfg = cfg || lastCfg;
+    const el = document.getElementById("key-state");
+    const key = (lastCfg && lastCfg.api_key) || {};
+    if (key.configured) {
+      el.textContent = key.last4 ? t("configuredLast4").replace("{last4}", key.last4) : t("configured");
+      el.className = "badge ok";
+    } else {
+      el.textContent = t("notConfigured");
+      el.className = "badge";
+    }
+    const badge = document.getElementById("babel-badge");
+    if (lastCfg && typeof lastCfg.babeldoc === "boolean") {
+      badge.hidden = false;
+      badge.textContent = lastCfg.babeldoc ? t("babelOk") : t("babelMissing");
+      badge.className = "badge" + (lastCfg.babeldoc ? " ok" : "");
+    }
+  }
+
+  async function loadCfg() {
+    try {
+      const res = await fetch(prefix + "/papers/translate/config", { credentials: "same-origin" });
+      if (!res.ok) return;
+      const cfg = await res.json();
+      document.getElementById("base-url").value = cfg.base_url || "";
+      document.getElementById("model").value = cfg.model || "";
+      document.getElementById("qps").value = cfg.qps || 4;
+      document.getElementById("auto-xlate").checked = !!cfg.auto_translate;
+      if (cfg.config_path) document.getElementById("cfgpath").textContent = cfg.config_path;
+      document.getElementById("api-key").value = "";
+      document.getElementById("clear-key").checked = false;
+      renderKeyState(cfg);
+    } catch (e) {}
+  }
+
+  function setCfgStatus(kind, text) {
+    const el = document.getElementById("cfg-status");
+    el.className = kind || "";
+    el.textContent = text || "";
+  }
+
+  async function saveCfg() {
+    setCfgStatus("", t("saving"));
+    const body = {
+      base_url: document.getElementById("base-url").value.trim(),
+      model: document.getElementById("model").value.trim(),
+      qps: parseInt(document.getElementById("qps").value, 10) || 4,
+      auto_translate: document.getElementById("auto-xlate").checked,
+      clear_api_key: document.getElementById("clear-key").checked
+    };
+    const key = document.getElementById("api-key").value.trim();
+    if (key) body.api_key = key;
+    try {
+      const res = await fetch(prefix + "/papers/translate/config", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) {
+        setCfgStatus("err", data.error || t("loadErr"));
+        return;
+      }
+      document.getElementById("api-key").value = "";
+      document.getElementById("clear-key").checked = false;
+      renderKeyState(data);
+      setCfgStatus("ok", t("saved"));
+    } catch (e) {
+      setCfgStatus("err", String(e));
+    }
+  }
+
+  async function testCfg() {
+    setCfgStatus("", t("testing"));
+    const body = {
+      base_url: document.getElementById("base-url").value.trim(),
+      model: document.getElementById("model").value.trim()
+    };
+    const key = document.getElementById("api-key").value.trim();
+    if (key) body.api_key = key;
+    try {
+      const res = await fetch(prefix + "/papers/translate/test", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (data.ok) {
+        setCfgStatus("ok", t("testOk").replace("{via}", data.via || "ok"));
+      } else {
+        setCfgStatus("err", t("testFail").replace("{err}", data.error || ("HTTP " + res.status)));
+      }
+    } catch (e) {
+      setCfgStatus("err", t("testFail").replace("{err}", String(e)));
+    }
+  }
+
+  async function enqueue(payload) {
+    const status = document.getElementById("status");
+    try {
+      const res = await fetch(prefix + "/papers/translate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || { all: true })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        status.textContent = t("queueFail");
+        status.className = "err";
+        return;
+      }
+      const n = (data.queued || []).length;
+      status.textContent = t("queuedOk").replace("{n}", String(n));
+      status.className = n ? "ok" : "";
+      load();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    }
+  }
+
   document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
   document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
+  document.getElementById("theme-light").addEventListener("click", function () { setTheme("light"); });
+  document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
   document.getElementById("apply").addEventListener("click", load);
+  document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
+  document.getElementById("save-cfg").addEventListener("click", saveCfg);
+  document.getElementById("test-cfg").addEventListener("click", testCfg);
   document.getElementById("q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); load(); }
   });
   document.getElementById("tag").addEventListener("change", load);
   applyI18n();
+  loadCfg();
   load();
 })();
 </script>
