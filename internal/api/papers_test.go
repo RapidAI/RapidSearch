@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -97,6 +98,15 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `Authorization`) || !strings.Contains(body, "withToken") {
 		t.Fatal("page must forward operator ?token= to API and PDF links")
 	}
+	if !strings.Contains(body, `id="settings-link"`) {
+		t.Fatal("settings link must always be present on papers page")
+	}
+	if !strings.Contains(body, "canManage") || !strings.Contains(body, "can_manage") {
+		t.Fatal("papers page must gate translate UI on can_manage")
+	}
+	if !strings.Contains(body, "canManage && p.has_local") {
+		t.Fatal("translate / re-translate buttons must require canManage")
+	}
 	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
 		t.Fatal("papers page must show page-level translation progress banner")
 	}
@@ -117,5 +127,143 @@ func TestPapersPageLightTheme(t *testing.T) {
 	}
 	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
 		t.Fatal("search placeholder should cover title/authors/abstract/tags")
+	}
+}
+
+
+func TestPapersPageAnonymousOK(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="settings-link"`) || !strings.Contains(body, `href="/settings"`) {
+		t.Fatal("anonymous papers page must still show Settings link")
+	}
+	if strings.Contains(body, `id="username"`) && strings.Contains(body, `id="password"`) && !strings.Contains(body, `id="list"`) {
+		t.Fatal("anonymous /papers must not redirect to login HTML")
+	}
+	if !strings.Contains(body, `id="xlate-pending"`) || !strings.Contains(body, "hidden") {
+		t.Fatal("translate-pending should start hidden until can_manage")
+	}
+}
+
+func TestPapersAPIAnonymousPublic(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("anonymous /papers/api status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if cat.CanManage {
+		t.Fatal("anonymous can_manage must be false")
+	}
+	if len(cat.Papers) != 1 {
+		t.Fatalf("%+v", cat)
+	}
+	p := cat.Papers[0]
+	if p.ZhPDF != "/papers/pdf/zh/2401.05459" {
+		t.Fatalf("anonymous must still see zh_pdf: %+v", p)
+	}
+	raw := rr.Body.String()
+	if strings.Contains(raw, "api_key") || strings.Contains(raw, "APIKey") || strings.Contains(raw, "api-key") {
+		t.Fatal("anonymous papers API must not expose translate API keys")
+	}
+}
+
+func TestPapersAPIAdminCanManage(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if !cat.CanManage {
+		t.Fatal("authed admin can_manage must be true")
+	}
+}
+
+func TestPapersPDFAnonymousOK(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "dual"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "dual", "2401.05459.dual.pdf"), []byte("%PDF-1.4 dual-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/papers/pdf/2401.05459",
+		"/papers/pdf/zh/2401.05459",
+		"/papers/pdf/dual/2401.05459",
+	} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Header().Get("Content-Type"), "pdf") {
+			t.Fatalf("%s ct=%s", path, rr.Header().Get("Content-Type"))
+		}
+	}
+}
+
+func TestPapersTranslatePostAnonymous401(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/translate", strings.NewReader(`{"id":"2401.05459"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /papers/translate status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSettingsStillGatedFromPapersFlow(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="username"`) || !strings.Contains(body, `id="password"`) {
+		t.Fatal("unauthenticated /settings must show login UI")
+	}
+	if strings.Contains(body, `id="serper"`) || strings.Contains(body, "serper_api_key") {
+		t.Fatal("unauthenticated /settings must not show settings form")
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/settings/config", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("/settings/config status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

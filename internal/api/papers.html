@@ -283,7 +283,7 @@
       <option value="date-asc" data-i18n="sortOldest">Oldest first</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
-    <button type="button" id="xlate-pending" data-i18n="xlatePending">Translate pending</button>
+    <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
   </div>
   <p class="meta" id="meta"></p>
   <div id="xlate-banner" role="status" aria-live="polite" hidden>
@@ -489,7 +489,8 @@
     return withToken(u);
   }
 
-  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null };
+  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false };
+  let canManage = false;
   let filteredPapers = [];
   let pageIndex = 1; // 1-based
   let pollTimer = 0;
@@ -686,6 +687,11 @@
     document.getElementById("pager-bottom-info").textContent = show ? info : "";
   }
 
+  function applyManageUI() {
+    const pending = document.getElementById("xlate-pending");
+    if (pending) pending.hidden = !canManage;
+  }
+
   function renderPaperCard(p) {
     const tags = (p.topic_tags || []).map(function (tg) {
       return '<span class="tag">' + esc(tg) + "</span>";
@@ -712,8 +718,9 @@
       const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
       actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
     }
-    if (p.has_local && st !== "queued" && st !== "running") {
+    if (canManage && p.has_local && st !== "queued" && st !== "running") {
       // One button: 「翻译」 unless a completed translation exists → 「再次翻译」(force).
+      // Hidden for anonymous visitors; 中文版 / 中英对照 links above stay public.
       const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
       if (completed) {
         actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
@@ -802,18 +809,14 @@
       // Always fetch the full catalog so client search/sort/pagination and
       // page-level translate_progress stay accurate while jobs run.
       const res = await fetch(apiURL(), { credentials: "same-origin", headers: authHeaders(false) });
-      if (res.status === 401) {
-        status.textContent = t("unauthorized");
-        status.className = "err";
-        location.href = withToken(prefix + "/settings");
-        return;
-      }
       if (!res.ok) {
         status.textContent = t("loadErr") + " (" + res.status + ")";
         status.className = "err";
         return;
       }
       const data = await res.json();
+      canManage = !!data.can_manage;
+      applyManageUI();
       fillTags(data.papers || []);
       lastCatalog = data;
       renderAll(false);
@@ -885,6 +888,7 @@
     btn.addEventListener("click", function () { goPage(1); });
   });
   applyI18n();
+  applyManageUI();
   load();
 })();
 </script>

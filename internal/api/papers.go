@@ -62,6 +62,9 @@ type papersCatalog struct {
 	Count             int                    `json:"count"`
 	Papers            []paperEntry           `json:"papers"`
 	TranslateProgress *translateProgress     `json:"translate_progress,omitempty"`
+	// CanManage is true when the caller may enqueue translations / open admin UI.
+	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
+	CanManage bool `json:"can_manage"`
 }
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
@@ -264,10 +267,9 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		if !s.settingsAuthed(r) {
-			writeSettingsHTML(w, r, loginPageHTML)
-			return
-		}
+		// Catalog page is public; Settings link always shown. Translate actions
+		// are gated in the UI via /papers/api can_manage, and mutations still
+		// require authorizeSettings. Unauthenticated /settings shows login.
 		writeSettingsHTML(w, r, papersPageHTML)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
@@ -279,27 +281,31 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
-	if !s.authorizeSettings(w, r) {
-		return
-	}
+	// Public catalog listing. can_manage reflects Hub admin / SEARCH_TOKEN.
+	// Do not expose translate LLM config or API keys here.
 	cat, err := s.papers().catalog()
 	if err != nil {
 		log.Printf("papers catalog: %v", err)
 		writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
 		return
 	}
+	canManage := s.settingsAuthed(r)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	// Progress is always from the full catalog so filters cannot hide in-flight work.
 	progress := summarizeTranslateProgress(cat.Papers)
 	out := cat
+	out.CanManage = canManage
 	out.TranslateProgress = progress
 	if q != "" || tag != "" {
 		filtered := filterPapers(cat.Papers, q, tag)
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
-	s.maybeAutoTranslate(cat.Papers)
+	// Auto-enqueue is an admin side effect — never trigger from anonymous GETs.
+	if canManage {
+		s.maybeAutoTranslate(cat.Papers)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -344,9 +350,7 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
-	if !s.authorizeSettings(w, r) {
-		return
-	}
+	// Existing local / zh / dual PDFs are publicly downloadable.
 	raw := strings.TrimPrefix(r.URL.Path, "/papers/pdf/")
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == r.URL.Path {

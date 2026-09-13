@@ -62,15 +62,15 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 ### Agent papers / 论文库
 
-Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). Same auth as settings (Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`). The `/papers` page defaults to a **light (white)** theme.
+Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). **Catalog + existing PDFs are public** (no login). Translate enqueue, translate config/test, and `/settings*` still require Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`. The `/papers` page always shows a **Settings** link (anonymous users get the Hub login page there). Translate / Re-translate buttons appear only when `/papers/api` returns `can_manage: true`. Defaults to a **light (white)** theme.
 
-- `GET /papers` — HTML list (ZH/EN), with filter/search and translation links (light theme). Configure the LLM on `/settings`.
-- `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json` (includes `zh_pdf`, `dual_pdf`, `translate_status`)
-- `GET /papers/pdf/{arxiv_id_or_filename}` — stream original local PDF (`?download=1` for attachment)
-- `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
-- `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
-- `POST /settings/translate/test` (also `/papers/translate/test`) — ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
-- `POST /papers/translate` — enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker (concurrency 1) runs BabelDOC; listing the catalog also auto-enqueues when `auto_translate` is on.
+- `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible.
+- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`). No API keys / translate-config.
+- `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
+- `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
+- `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
+- `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
+- `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker (concurrency 1) runs BabelDOC; authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not).
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
@@ -84,7 +84,7 @@ translate_status.json      # queue/job status
 
 Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
 
-本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。翻译在后台排队，不阻塞页面。
+本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
@@ -298,7 +298,7 @@ Public HTTP `/health`, `/search`, and `/download` accept **either**:
 1. `SEARCH_TOKEN` as `Authorization: Bearer …` or `?token=` (ops / internal)
 2. a valid MaClaw Hub viewer, session, or machine token (the signed-in Hub credential). The proxy checks it with `GET {HUB_AUTH_BASE}/api/llm/v1/models` and `Authorization: Bearer <token>`. HTTP 2xx means valid. Timeout is about 5s. Positive results are cached about 5 minutes, keyed by SHA-256 of the token.
 
-`/settings`, `/settings/*`, `/papers`, and `/papers/*` are forwarded without a proxy-side Bearer check so the browser login page can render. The search process requires a Hub **global admin** cookie, an admin Bearer, or operator `SEARCH_TOKEN` for the settings HTML and for `/settings/config`. `/search` does **not** accept the settings cookie and does **not** require an admin cookie (agents keep using Hub viewer / `SEARCH_TOKEN`).
+`/settings`, `/settings/*`, `/papers`, and `/papers/*` are forwarded without a proxy-side Bearer check (settings login HTML and public papers catalog/PDFs must reach the search process). The search process requires a Hub **global admin** cookie, an admin Bearer, or operator `SEARCH_TOKEN` for settings HTML/`/settings/config`, translate config/test, and `POST /papers/translate`. `GET /papers`, `GET /papers/api`, and `GET /papers/pdf/...` are public. `/search` does **not** accept the settings cookie and does **not** require an admin cookie (agents keep using Hub viewer / `SEARCH_TOKEN`).
 
 Hub global admin login is enough; users never paste a RapidSearch or Hub viewer token. Tokens are never logged.
 
