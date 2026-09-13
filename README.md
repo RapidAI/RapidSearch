@@ -46,11 +46,13 @@ Environment / 环境变量:
 
 HTML + JSON on the search process. Open `https://hub.maclaw.top/searchproxy/settings` in a browser and sign in — no `Authorization` header required after login.
 
-- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
+- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority, plus BabelDOC / OpenAI-compatible translation LLM). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
 - `POST /settings/login` (also `POST /settings`) — Hub **global admin** username + password only (`POST {HUB}/api/admin/login` with `tenant` omitted or `"__global__"`). Parses `access_token` and rejects the login unless the returned `admin` is a **global** admin (not tenant-scoped). Then checks `GET {HUB}/api/admin/users` (2xx). Sets HttpOnly cookie `rs_settings` (`Path=/`, `SameSite=Lax`, `Secure` when HTTPS). No token paste field. Login never accepts or displays the operator `SEARCH_TOKEN` / `proxy.token`.
 - `POST /settings/logout` — clears the cookie.
 - `GET /settings/config` — masked JSON (`configured` yes/no, optional `last4`). Never returns raw keys. Unauthenticated → **JSON 401** (API stays machine-readable).
 - `PUT /settings/config` — update keys and/or priority. An empty key string **does not wipe** a stored key; send `"clear_serper": true` / `"clear_brave": true` to delete.
+- `GET` / `PUT /settings/translate` — BabelDOC LLM (`base_url`, masked `api_key`, `model`, `qps`, `auto_translate`). Separate from Serper/Brave; empty `api_key` does not wipe.
+- `POST /settings/translate/test` — models / chat ping. Never returns the raw key.
 
 Hub global admin tokens are validated by Hub admin middleware (`Authenticate`), **not** by `GET /api/llm/v1/models`. A models-only viewer token is not enough for `/settings`. Tenant-scoped admins are rejected at login. There is no captcha on Hub admin login.
 
@@ -62,12 +64,12 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). Same auth as settings (Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`). The `/papers` page defaults to a **light (white)** theme.
 
-- `GET /papers` — HTML list (ZH/EN), with filter/search, LLM settings, and translation links
+- `GET /papers` — HTML list (ZH/EN), with filter/search and translation links (light theme). Configure the LLM on `/settings`.
 - `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json` (includes `zh_pdf`, `dual_pdf`, `translate_status`)
 - `GET /papers/pdf/{arxiv_id_or_filename}` — stream original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
-- `GET` / `PUT /papers/translate/config` — OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
-- `POST /papers/translate/test` — ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
+- `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
+- `POST /settings/translate/test` (also `/papers/translate/test`) — ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
 - `POST /papers/translate` — enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker (concurrency 1) runs BabelDOC; listing the catalog also auto-enqueues when `auto_translate` is on.
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:

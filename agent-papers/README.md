@@ -145,12 +145,12 @@ cache/             # optional script cache
 
 After login (same Hub global admin cookie as `/settings`) or with Bearer `SEARCH_TOKEN`:
 
-- `GET /papers` — HTML catalog (ZH/EN), **light theme by default**, LLM settings + Test
+- `GET /papers` — HTML catalog (ZH/EN), **light theme by default**; configure the translation LLM on `/settings`
 - `GET /papers/api?q=&tag=` — JSON catalog (`zh_pdf`, `dual_pdf`, `translate_status`)
 - `GET /papers/pdf/{arxiv_id_or_filename}` — stream original PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `/papers/pdf/dual/{id}` — translated PDFs
-- `GET`/`PUT /papers/translate/config` — masked LLM settings
-- `POST /papers/translate/test` — models / chat ping (key never returned)
+- `GET`/`PUT /settings/translate` (alias `/papers/translate/config`) — masked LLM settings
+- `POST /settings/translate/test` (alias `/papers/translate/test`) — models / chat ping (key never returned)
 - `POST /papers/translate` — enqueue one id or all pending (non-blocking)
 
 Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`
@@ -162,7 +162,7 @@ Background worker (concurrency 1) shells out to `agent-papers/translate_worker.p
 ```bash
 uv tool install --python 3.12 BabelDOC
 export PAPERS_DIR=/workspace/agent-papers
-# Configure base_url / api_key / model on /papers, then:
+# Configure base_url / api_key / model on /settings, then:
 # POST /papers/translate  {"all":true}
 ```
 

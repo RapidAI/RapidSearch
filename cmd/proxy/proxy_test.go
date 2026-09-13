@@ -44,7 +44,7 @@ func TestProxySearch401IgnoresSettingsCookie(t *testing.T) {
 
 func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 	h := testProxy(t)
-	for _, path := range []string{"/settings", "/settings/", "/settings/login"} {
+	for _, path := range []string{"/settings", "/settings/", "/settings/login", "/settings/translate"} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		h.serveHTTP(rr, req)

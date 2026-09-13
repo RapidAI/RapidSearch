@@ -145,11 +145,50 @@ func TestTranslateConfigClearKey(t *testing.T) {
 
 func TestTranslateConfigUnauthenticated401(t *testing.T) {
 	h, _ := papersHandler(t)
+	for _, path := range []string{"/papers/translate/config", "/settings/translate"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status=%d %s", path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestSettingsTranslateConfigAlias(t *testing.T) {
+	h, dir := papersHandler(t)
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/papers/translate/config", nil)
+	req := httptest.NewRequest(http.MethodPut, "/settings/translate", strings.NewReader(
+		`{"base_url":"https://example.test/v1","model":"demo-model","api_key":"settings-path-key-8888"}`))
+	papersAuth(req)
+	req.Header.Set("Content-Type", "application/json")
 	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("put status=%d %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "settings-path-key-8888") {
+		t.Fatal("settings translate leaked raw key")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "translate-config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "settings-path-key-8888") {
+		t.Fatalf("not persisted: %s", raw)
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/settings/translate", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("get status=%d %s", rr.Code, rr.Body.String())
+	}
+	var view TranslatePublicView
+	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.APIKey.Configured || view.APIKey.Last4 != "8888" || view.Model != "demo-model" {
+		t.Fatalf("%+v", view)
 	}
 }
 
@@ -327,23 +366,25 @@ func TestTranslateTestDoesNotLeakKey(t *testing.T) {
 	defer hub.Close()
 
 	body := `{"base_url":"` + hub.URL + `","api_key":"super-secret-test-key","model":"demo-model"}`
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/papers/translate/test", strings.NewReader(body))
-	papersAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), "super-secret-test-key") {
-		t.Fatal("test response leaked key")
-	}
-	var out map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out["ok"] != true || out["via"] != "models" {
-		t.Fatalf("%+v", out)
+	for _, path := range []string{"/papers/translate/test", "/settings/translate/test"} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		papersAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d %s", path, rr.Code, rr.Body.String())
+		}
+		if strings.Contains(rr.Body.String(), "super-secret-test-key") {
+			t.Fatalf("%s leaked key", path)
+		}
+		var out map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out["ok"] != true || out["via"] != "models" {
+			t.Fatalf("%s %+v", path, out)
+		}
 	}
 }
 
