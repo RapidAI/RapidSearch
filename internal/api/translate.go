@@ -396,6 +396,28 @@ func (s *translateService) persistStatusLocked() error {
 	return atomicWriteFile(translateStatusPath(s.root), append(b, '\n'), 0o644)
 }
 
+
+func summarizeTranslateProgress(papers []paperEntry) *translateProgress {
+	p := &translateProgress{}
+	for _, paper := range papers {
+		switch paper.TranslateStatus {
+		case translateQueued:
+			p.Queued++
+		case translateRunning:
+			p.Running++
+			if p.RunningID == "" {
+				p.RunningID = paper.ID
+				p.RunningTitle = strings.TrimSpace(paper.Title)
+			}
+		}
+	}
+	p.Active = p.Queued > 0 || p.Running > 0
+	if !p.Active {
+		return p
+	}
+	return p
+}
+
 func overlayTranslations(papers []paperEntry, root string, jobs map[string]translateJob) {
 	for i := range papers {
 		papers[i] = overlayOne(papers[i], root, jobs)

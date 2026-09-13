@@ -88,4 +88,19 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `Authorization`) || !strings.Contains(body, "withToken") {
 		t.Fatal("page must forward operator ?token= to API and PDF links")
 	}
+	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
+		t.Fatal("papers page must show page-level translation progress banner")
+	}
+	if !strings.Contains(body, "POLL_ACTIVE_MS") && !strings.Contains(body, "4000") {
+		t.Fatal("expected active polling while translations run")
+	}
+	if !strings.Contains(body, "PAGE_SIZE") || !strings.Contains(body, "pager-top") || !strings.Contains(body, "pager-bottom") {
+		t.Fatal("papers page must paginate with top/bottom controls")
+	}
+	if !strings.Contains(body, `id="sort"`) || !strings.Contains(body, "sortNewest") {
+		t.Fatal("papers page must offer publication-date sort")
+	}
+	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
+		t.Fatal("search placeholder should cover title/authors/abstract/tags")
+	}
 }

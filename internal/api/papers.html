@@ -86,7 +86,8 @@
       color: var(--ink);
       font: inherit;
     }
-    input[type="search"] { flex: 1 1 220px; min-width: 180px; }
+    input[type="search"] { flex: 1 1 260px; min-width: 180px; }
+    select#sort { flex: 0 1 auto; }
     input:focus, select:focus, button:focus-visible {
       outline: 2px solid var(--focus);
       outline-offset: 2px;
@@ -148,12 +149,78 @@
     .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
     #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    #xlate-banner {
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #b6d4fe;
+      background: #eef5ff;
+      color: #0b3d7a;
+      font-size: 14px;
+      box-shadow: var(--shadow);
+    }
+    html[data-theme="dark"] #xlate-banner {
+      border-color: #2d6cb5;
+      background: #1a2a40;
+      color: #cfe3ff;
+    }
+    #xlate-banner.active { display: flex; }
+    #xlate-banner .pulse {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(11, 99, 206, 0.45);
+      animation: xlate-pulse 1.4s ease-out infinite;
+    }
+    @keyframes xlate-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(11, 99, 206, 0.45); }
+      70% { box-shadow: 0 0 0 8px rgba(11, 99, 206, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(11, 99, 206, 0); }
+    }
+    #xlate-banner .banner-body { flex: 1 1 auto; min-width: 0; }
+    #xlate-banner .banner-title { font-weight: 600; margin: 0 0 2px; }
+    #xlate-banner .banner-detail {
+      margin: 0;
+      color: inherit;
+      opacity: 0.88;
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #xlate-banner .banner-meta {
+      flex: 0 0 auto;
+      font-size: 12px;
+      opacity: 0.75;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
     #status.err { color: var(--bad); }
     #status.ok { color: var(--ok); }
     .empty { color: var(--muted); padding: 24px 0; }
     .nav a, .hint-line a { color: var(--accent); text-decoration: none; font-size: 13px; }
     .hint-line { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
     .hint-line a { font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .pager {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 14px;
+      padding: 8px 0;
+    }
+    .pager.visible { display: flex; }
+    .pager.bottom { margin: 16px 0 0; }
+    .pager-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .pager-info { color: var(--muted); font-size: 13px; }
+    .authors { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
   </style>
   <script>
   (function () {
@@ -200,21 +267,48 @@
   </p>
 
   <div class="toolbar">
-    <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, arXiv id…" autocomplete="off">
+    <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, abstract, tags…" autocomplete="off">
     <select id="tag">
       <option value="" data-i18n="tagAll">All tags</option>
+    </select>
+    <select id="sort" aria-label="Sort">
+      <option value="date-desc" data-i18n="sortNewest">Newest first</option>
+      <option value="date-asc" data-i18n="sortOldest">Oldest first</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
     <button type="button" id="xlate-pending" data-i18n="xlatePending">Translate pending</button>
   </div>
   <p class="meta" id="meta"></p>
+  <div id="xlate-banner" role="status" aria-live="polite" hidden>
+    <span class="pulse" aria-hidden="true"></span>
+    <div class="banner-body">
+      <p class="banner-title" id="xlate-banner-title"></p>
+      <p class="banner-detail" id="xlate-banner-detail"></p>
+    </div>
+    <span class="banner-meta" id="xlate-banner-meta"></span>
+  </div>
   <p id="status"></p>
+  <div class="pager" id="pager-top">
+    <span class="pager-info" id="pager-top-info"></span>
+    <div class="pager-controls">
+      <button type="button" class="pager-prev" data-i18n="prev">Previous</button>
+      <button type="button" class="pager-next" data-i18n="next">Next</button>
+    </div>
+  </div>
   <div id="list"></div>
+  <div class="pager bottom" id="pager-bottom">
+    <span class="pager-info" id="pager-bottom-info"></span>
+    <div class="pager-controls">
+      <button type="button" class="pager-prev" data-i18n="prev">Previous</button>
+      <button type="button" class="pager-next" data-i18n="next">Next</button>
+    </div>
+  </div>
 </main>
 <script>
 (function () {
   const LANG_KEY = "rs_settings_lang";
   const THEME_KEY = "rs_papers_theme";
+  const PAGE_SIZE = 25;
   const I18N = {
     en: {
       langLabel: "Language",
@@ -222,10 +316,15 @@
       heading: "Agent papers",
       lead: "Browse the local catalog, download cached PDFs, and queue Chinese translations.",
       settingsLink: "Settings",
-      searchPh: "Search title, authors, arXiv id…",
+      searchPh: "Search title, authors, abstract, tags…",
       tagAll: "All tags",
       apply: "Filter",
-      meta: "{shown} shown · {total} in catalog · generated {when}",
+      sortNewest: "Newest first",
+      sortOldest: "Oldest first",
+      meta: "{matched} match · {total} in catalog · page {page}/{pages} · generated {when}",
+      pageInfo: "Showing {from}–{to} of {matched}",
+      prev: "Previous",
+      next: "Next",
       empty: "No papers match.",
       download: "Download PDF",
       view: "Open PDF",
@@ -244,7 +343,10 @@
       xlate: "Translate",
       xlatePending: "Translate pending",
       queuedOk: "Queued {n} paper(s).",
-      queueFail: "Could not queue translation."
+      queueFail: "Could not queue translation.",
+      xlateBanner: "Translation in progress: {queued} queued / {running} translating",
+      xlateBannerTitle: "Currently translating",
+      xlatePolling: "Auto-refreshing…"
     },
     zh: {
       langLabel: "语言",
@@ -252,10 +354,15 @@
       heading: "Agent 论文库",
       lead: "浏览本地目录、下载已缓存 PDF，并排队生成中文翻译。",
       settingsLink: "设置",
-      searchPh: "搜索标题、作者、arXiv 编号…",
+      searchPh: "搜索标题、作者、摘要、标签…",
       tagAll: "全部标签",
       apply: "筛选",
-      meta: "显示 {shown} 篇 · 目录共 {total} 篇 · 生成于 {when}",
+      sortNewest: "最新优先",
+      sortOldest: "最早优先",
+      meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 第 {page}/{pages} 页 · 生成于 {when}",
+      pageInfo: "显示第 {from}–{to} 篇，共 {matched} 篇",
+      prev: "上一页",
+      next: "下一页",
       empty: "没有匹配的论文。",
       download: "下载 PDF",
       view: "打开 PDF",
@@ -274,7 +381,10 @@
       xlate: "翻译",
       xlatePending: "翻译待处理",
       queuedOk: "已排队 {n} 篇。",
-      queueFail: "无法加入翻译队列。"
+      queueFail: "无法加入翻译队列。",
+      xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
+      xlateBannerTitle: "正在翻译",
+      xlatePolling: "自动刷新中…"
     }
   };
 
@@ -299,6 +409,14 @@
       const k = el.getAttribute("data-i18n-aria");
       if (k) el.setAttribute("aria-label", t(k));
     });
+    // Re-apply sort option labels (select options use data-i18n).
+    const sort = document.getElementById("sort");
+    if (sort) {
+      Array.prototype.forEach.call(sort.options, function (opt) {
+        const k = opt.getAttribute("data-i18n");
+        if (k) opt.textContent = t(k);
+      });
+    }
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
     const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
@@ -312,8 +430,7 @@
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
     applyI18n();
-    renderMeta();
-    renderList();
+    renderAll();
   }
   function setTheme(theme) {
     if (theme !== "dark") theme = "light";
@@ -347,13 +464,8 @@
     if (urlToken) h["Authorization"] = "Bearer " + urlToken;
     return h;
   }
-  function apiURL(q, tag) {
-    let u = prefix + "/papers/api";
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (tag) params.set("tag", tag);
-    const s = params.toString();
-    return s ? u + "?" + s : u;
+  function apiURL() {
+    return prefix + "/papers/api";
   }
   function pdfURL(localPath, download) {
     let u = prefix + localPath;
@@ -361,19 +473,14 @@
     return withToken(u);
   }
 
-  let lastCatalog = { count: 0, papers: [], generated_at: "" };
-  let lastShown = 0;
+  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null };
+  let filteredPapers = [];
+  let pageIndex = 1; // 1-based
   let pollTimer = 0;
-
-  function renderMeta() {
-    const when = lastCatalog.generated_at || "—";
-    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
-    const text = t("meta")
-      .replace("{shown}", String(lastShown))
-      .replace("{total}", String(total))
-      .replace("{when}", when);
-    document.getElementById("meta").innerHTML = text;
-  }
+  const POLL_ACTIVE_MS = 4000;
+  const POLL_IDLE_MS = 30000;
+  let idlePoll = false;
+  let searchTimer = 0;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -383,6 +490,142 @@
       .replace(/"/g, "&quot;");
   }
 
+  function paperDateKey(p) {
+    const pub = String(p.published || "").trim();
+    if (pub) return pub;
+    const y = Number(p.year) || 0;
+    if (y > 0) return String(y).padStart(4, "0") + "-01-01T00:00:00Z";
+    return "";
+  }
+
+  function matchesQuery(p, q) {
+    if (!q) return true;
+    const blob = [
+      p.title,
+      p.brief,
+      p.abstract,
+      p.arxiv_id,
+      p.id,
+      p.filename,
+      (p.authors || []).join(" "),
+      (p.topic_tags || []).join(" ")
+    ].join(" ").toLowerCase();
+    return blob.indexOf(q) >= 0;
+  }
+
+  function applyFilters(resetPage) {
+    const q = document.getElementById("q").value.trim().toLowerCase();
+    const tag = document.getElementById("tag").value;
+    const sort = document.getElementById("sort").value || "date-desc";
+    let list = (lastCatalog.papers || []).slice();
+    if (tag) {
+      const tagL = tag.toLowerCase();
+      list = list.filter(function (p) {
+        return (p.topic_tags || []).some(function (tg) {
+          return String(tg).toLowerCase() === tagL;
+        });
+      });
+    }
+    if (q) {
+      list = list.filter(function (p) { return matchesQuery(p, q); });
+    }
+    list.sort(function (a, b) {
+      const ka = paperDateKey(a);
+      const kb = paperDateKey(b);
+      if (ka !== kb) {
+        if (sort === "date-asc") return ka < kb ? -1 : 1;
+        return ka > kb ? -1 : 1;
+      }
+      const ta = String(a.title || "").toLowerCase();
+      const tb = String(b.title || "").toLowerCase();
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    filteredPapers = list;
+    const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE) || 1);
+    if (resetPage) pageIndex = 1;
+    if (pageIndex > pages) pageIndex = pages;
+    if (pageIndex < 1) pageIndex = 1;
+  }
+
+  function progressFromCatalog(cat) {
+    const p = (cat && cat.translate_progress) || null;
+    if (p && typeof p === "object") {
+      return {
+        queued: Number(p.queued) || 0,
+        running: Number(p.running) || 0,
+        active: !!p.active,
+        running_id: p.running_id || "",
+        running_title: p.running_title || ""
+      };
+    }
+    let queued = 0, running = 0, runningTitle = "", runningId = "";
+    ((cat && cat.papers) || []).forEach(function (paper) {
+      const st = paper.translate_status || "";
+      if (st === "queued") queued++;
+      if (st === "running") {
+        running++;
+        if (!runningId) {
+          runningId = paper.id || "";
+          runningTitle = paper.title || "";
+        }
+      }
+    });
+    return {
+      queued: queued,
+      running: running,
+      active: queued > 0 || running > 0,
+      running_id: runningId,
+      running_title: runningTitle
+    };
+  }
+
+  function renderTranslateBanner() {
+    const banner = document.getElementById("xlate-banner");
+    const titleEl = document.getElementById("xlate-banner-title");
+    const detailEl = document.getElementById("xlate-banner-detail");
+    const metaEl = document.getElementById("xlate-banner-meta");
+    const prog = progressFromCatalog(lastCatalog);
+    if (!prog.active) {
+      banner.classList.remove("active");
+      banner.hidden = true;
+      titleEl.textContent = "";
+      detailEl.textContent = "";
+      metaEl.textContent = "";
+      return prog;
+    }
+    banner.hidden = false;
+    banner.classList.add("active");
+    titleEl.textContent = t("xlateBanner")
+      .replace("{queued}", String(prog.queued))
+      .replace("{running}", String(prog.running));
+    if (prog.running_title) {
+      detailEl.textContent = t("xlateBannerTitle") + "：" + prog.running_title;
+      detailEl.hidden = false;
+    } else if (prog.running_id) {
+      detailEl.textContent = t("xlateBannerTitle") + "：" + prog.running_id;
+      detailEl.hidden = false;
+    } else {
+      detailEl.textContent = "";
+      detailEl.hidden = true;
+    }
+    metaEl.textContent = t("xlatePolling");
+    return prog;
+  }
+
+  function syncPolling(active) {
+    if (active) {
+      if (pollTimer && !idlePoll) return;
+      if (pollTimer) clearInterval(pollTimer);
+      idlePoll = false;
+      pollTimer = setInterval(function () { load({ silent: true }); }, POLL_ACTIVE_MS);
+      return;
+    }
+    if (pollTimer && idlePoll) return;
+    if (pollTimer) clearInterval(pollTimer);
+    idlePoll = true;
+    pollTimer = setInterval(function () { load({ silent: true }); }, POLL_IDLE_MS);
+  }
+
   function statusLabel(st) {
     if (st === "queued") return t("queued");
     if (st === "running") return t("running");
@@ -390,69 +633,116 @@
     return "";
   }
 
+  function renderMeta() {
+    const when = lastCatalog.generated_at || "—";
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
+    const matched = filteredPapers.length;
+    const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
+    const text = t("meta")
+      .replace("{matched}", String(matched))
+      .replace("{shown}", String(matched))
+      .replace("{total}", String(total))
+      .replace("{page}", String(pageIndex))
+      .replace("{pages}", String(pages))
+      .replace("{when}", when);
+    document.getElementById("meta").textContent = text;
+  }
+
+  function renderPagers() {
+    const matched = filteredPapers.length;
+    const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
+    const show = matched > PAGE_SIZE;
+    ["pager-top", "pager-bottom"].forEach(function (id) {
+      const el = document.getElementById(id);
+      el.classList.toggle("visible", show);
+      const prev = el.querySelector(".pager-prev");
+      const next = el.querySelector(".pager-next");
+      prev.disabled = pageIndex <= 1;
+      next.disabled = pageIndex >= pages;
+    });
+    const from = matched === 0 ? 0 : (pageIndex - 1) * PAGE_SIZE + 1;
+    const to = Math.min(matched, pageIndex * PAGE_SIZE);
+    const info = t("pageInfo")
+      .replace("{from}", String(from))
+      .replace("{to}", String(to))
+      .replace("{matched}", String(matched));
+    document.getElementById("pager-top-info").textContent = show ? info : "";
+    document.getElementById("pager-bottom-info").textContent = show ? info : "";
+  }
+
+  function renderPaperCard(p) {
+    const tags = (p.topic_tags || []).map(function (tg) {
+      return '<span class="tag">' + esc(tg) + "</span>";
+    }).join("");
+    const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
+    const authors = (p.authors || []).length
+      ? '<p class="authors">' + esc((p.authors || []).join(", ")) + "</p>"
+      : "";
+    let actions = "";
+    if (p.has_local && p.local_pdf) {
+      actions += '<a class="btn primary" href="' + esc(pdfURL(p.local_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("view")) + "</a>";
+      actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
+    } else {
+      actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+    }
+    if (p.zh_pdf) {
+      actions += '<a class="btn" href="' + esc(pdfURL(p.zh_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("zh")) + "</a>";
+    }
+    if (p.dual_pdf) {
+      actions += '<a class="btn" href="' + esc(pdfURL(p.dual_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("dual")) + "</a>";
+    }
+    const st = p.translate_status || "";
+    if (st && st !== "done") {
+      const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
+      actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
+    }
+    if (p.has_local && (!p.zh_pdf || !p.dual_pdf) && st !== "queued" && st !== "running") {
+      actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+    }
+    if (p.source_url) {
+      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+    } else if (p.arxiv_id) {
+      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+    }
+    const brief = p.brief || "";
+    return (
+      '<article class="paper">' +
+        "<h2>" + esc(p.title || "") + "</h2>" +
+        authors +
+        '<div class="row">' + year + tags + "</div>" +
+        (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
+        '<div class="actions">' + actions + "</div>" +
+      "</article>"
+    );
+  }
+
   function renderList() {
     const list = document.getElementById("list");
-    const papers = lastCatalog.papers || [];
-    lastShown = papers.length;
+    const start = (pageIndex - 1) * PAGE_SIZE;
+    const pagePapers = filteredPapers.slice(start, start + PAGE_SIZE);
     renderMeta();
-    if (!papers.length) {
+    renderPagers();
+    if (!filteredPapers.length) {
       list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
-      return;
-    }
-    let inflight = false;
-    list.innerHTML = papers.map(function (p) {
-      const tags = (p.topic_tags || []).map(function (tg) {
-        return '<span class="tag">' + esc(tg) + "</span>";
-      }).join("");
-      const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
-      let actions = "";
-      if (p.has_local && p.local_pdf) {
-        actions += '<a class="btn primary" href="' + esc(pdfURL(p.local_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("view")) + "</a>";
-        actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
-      } else {
-        actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
-      }
-      if (p.zh_pdf) {
-        actions += '<a class="btn" href="' + esc(pdfURL(p.zh_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("zh")) + "</a>";
-      }
-      if (p.dual_pdf) {
-        actions += '<a class="btn" href="' + esc(pdfURL(p.dual_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("dual")) + "</a>";
-      }
-      const st = p.translate_status || "";
-      if (st === "queued" || st === "running") inflight = true;
-      if (st && st !== "done") {
-        const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
-        actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
-      }
-      if (p.has_local && (!p.zh_pdf || !p.dual_pdf) && st !== "queued" && st !== "running") {
-        actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
-      }
-      if (p.source_url) {
-        actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
-      } else if (p.arxiv_id) {
-        actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
-      }
-      const brief = p.brief || "";
-      return (
-        '<article class="paper">' +
-          "<h2>" + esc(p.title || "") + "</h2>" +
-          '<div class="row">' + year + tags + "</div>" +
-          (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
-          '<div class="actions">' + actions + "</div>" +
-        "</article>"
-      );
-    }).join("");
-    list.querySelectorAll(".xlate-one").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        enqueue({ id: btn.getAttribute("data-id") || "" });
+    } else {
+      list.innerHTML = pagePapers.map(renderPaperCard).join("");
+      list.querySelectorAll(".xlate-one").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          enqueue({ id: btn.getAttribute("data-id") || "" });
+        });
       });
-    });
-    if (inflight && !pollTimer) {
-      pollTimer = setInterval(load, 8000);
-    } else if (!inflight && pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = 0;
     }
+    const prog = renderTranslateBanner();
+    const anyInflight = (lastCatalog.papers || []).some(function (p) {
+      const st = p.translate_status || "";
+      return st === "queued" || st === "running";
+    });
+    syncPolling(!!(prog && prog.active) || anyInflight);
+  }
+
+  function renderAll(resetPage) {
+    applyFilters(!!resetPage);
+    renderList();
   }
 
   function fillTags(papers) {
@@ -472,14 +762,17 @@
     if (cur && set[cur]) sel.value = cur;
   }
 
-  async function load() {
+  async function load(opts) {
+    const silent = !!(opts && opts.silent);
     const status = document.getElementById("status");
-    status.textContent = "";
-    status.className = "";
-    const q = document.getElementById("q").value.trim();
-    const tag = document.getElementById("tag").value;
+    if (!silent) {
+      status.textContent = "";
+      status.className = "";
+    }
     try {
-      const res = await fetch(apiURL(q, tag), { credentials: "same-origin", headers: authHeaders(false) });
+      // Always fetch the full catalog so client search/sort/pagination and
+      // page-level translate_progress stay accurate while jobs run.
+      const res = await fetch(apiURL(), { credentials: "same-origin", headers: authHeaders(false) });
       if (res.status === 401) {
         status.textContent = t("unauthorized");
         status.className = "err";
@@ -492,12 +785,14 @@
         return;
       }
       const data = await res.json();
-      if (!q && !tag) fillTags(data.papers || []);
+      fillTags(data.papers || []);
       lastCatalog = data;
-      renderList();
+      renderAll(false);
     } catch (e) {
-      status.textContent = String(e);
-      status.className = "err";
+      if (!silent) {
+        status.textContent = String(e);
+        status.className = "err";
+      }
     }
   }
 
@@ -526,16 +821,34 @@
     }
   }
 
+  function goPage(delta) {
+    const pages = Math.max(1, Math.ceil(filteredPapers.length / PAGE_SIZE) || 1);
+    pageIndex = Math.min(pages, Math.max(1, pageIndex + delta));
+    renderList();
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+  }
+
   document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
   document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
   document.getElementById("theme-light").addEventListener("click", function () { setTheme("light"); });
   document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
-  document.getElementById("apply").addEventListener("click", load);
+  document.getElementById("apply").addEventListener("click", function () { renderAll(true); });
   document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
   document.getElementById("q").addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter") { ev.preventDefault(); load(); }
+    if (ev.key === "Enter") { ev.preventDefault(); renderAll(true); }
   });
-  document.getElementById("tag").addEventListener("change", load);
+  document.getElementById("q").addEventListener("input", function () {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () { renderAll(true); }, 220);
+  });
+  document.getElementById("tag").addEventListener("change", function () { renderAll(true); });
+  document.getElementById("sort").addEventListener("change", function () { renderAll(true); });
+  document.querySelectorAll(".pager-prev").forEach(function (btn) {
+    btn.addEventListener("click", function () { goPage(-1); });
+  });
+  document.querySelectorAll(".pager-next").forEach(function (btn) {
+    btn.addEventListener("click", function () { goPage(1); });
+  });
   applyI18n();
   load();
 })();

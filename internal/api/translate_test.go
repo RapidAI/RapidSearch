@@ -468,3 +468,57 @@ func TestTranslateEnqueueFakeRunner(t *testing.T) {
 		t.Fatalf("missing zh link: %s", rr.Body.String())
 	}
 }
+
+
+func TestSummarizeTranslateProgress(t *testing.T) {
+	papers := []paperEntry{
+		{ID: "a", Title: "Alpha", TranslateStatus: translateQueued},
+		{ID: "b", Title: "Beta Running", TranslateStatus: translateRunning},
+		{ID: "c", Title: "Gamma", TranslateStatus: translateDone},
+		{ID: "d", Title: "Delta", TranslateStatus: translateQueued},
+		{ID: "e", Title: "Epsilon", TranslateStatus: translateFailed},
+	}
+	p := summarizeTranslateProgress(papers)
+	if p == nil || !p.Active || p.Queued != 2 || p.Running != 1 {
+		t.Fatalf("%+v", p)
+	}
+	if p.RunningID != "b" || p.RunningTitle != "Beta Running" {
+		t.Fatalf("running title %+v", p)
+	}
+	idle := summarizeTranslateProgress([]paperEntry{{ID: "x", TranslateStatus: translateDone}})
+	if idle == nil || idle.Active || idle.Queued != 0 || idle.Running != 0 {
+		t.Fatalf("idle %+v", idle)
+	}
+}
+
+func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
+	h, _ := papersHandler(t)
+	srv, ok := h.(*Server)
+	if !ok {
+		t.Fatalf("handler type %T", h)
+	}
+	svc := srv.papers().translate()
+	svc.putJob(translateJob{ID: "2401.05459", Status: translateRunning})
+	svc.putJob(translateJob{ID: "queued-other", Status: translateQueued})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if cat.TranslateProgress == nil || !cat.TranslateProgress.Active {
+		t.Fatalf("missing progress %+v", cat.TranslateProgress)
+	}
+	if cat.TranslateProgress.Running < 1 {
+		t.Fatalf("expected running in progress %+v", cat.TranslateProgress)
+	}
+	if cat.TranslateProgress.RunningTitle == "" && cat.TranslateProgress.RunningID == "" {
+		t.Fatalf("expected running identity %+v", cat.TranslateProgress)
+	}
+}

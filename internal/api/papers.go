@@ -57,10 +57,20 @@ type papersManifest struct {
 }
 
 type papersCatalog struct {
-	GeneratedAt string                 `json:"generated_at"`
-	Stats       map[string]interface{} `json:"stats,omitempty"`
-	Count       int                    `json:"count"`
-	Papers      []paperEntry           `json:"papers"`
+	GeneratedAt       string                 `json:"generated_at"`
+	Stats             map[string]interface{} `json:"stats,omitempty"`
+	Count             int                    `json:"count"`
+	Papers            []paperEntry           `json:"papers"`
+	TranslateProgress *translateProgress     `json:"translate_progress,omitempty"`
+}
+
+// translateProgress is a page-level summary of background BabelDOC jobs.
+type translateProgress struct {
+	Queued       int    `json:"queued"`
+	Running      int    `json:"running"`
+	Active       bool   `json:"active"`
+	RunningID    string `json:"running_id,omitempty"`
+	RunningTitle string `json:"running_title,omitempty"`
 }
 
 type papersStore struct {
@@ -280,7 +290,10 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	// Progress is always from the full catalog so filters cannot hide in-flight work.
+	progress := summarizeTranslateProgress(cat.Papers)
 	out := cat
+	out.TranslateProgress = progress
 	if q != "" || tag != "" {
 		filtered := filterPapers(cat.Papers, q, tag)
 		out.Papers = filtered
