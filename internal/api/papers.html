@@ -147,28 +147,13 @@
     }
     .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    #status, #cfg-status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
-    #status.err, #cfg-status.err { color: var(--bad); }
-    #status.ok, #cfg-status.ok { color: var(--ok); }
+    #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    #status.err { color: var(--bad); }
+    #status.ok { color: var(--ok); }
     .empty { color: var(--muted); padding: 24px 0; }
-    .nav a { color: var(--accent); text-decoration: none; font-size: 13px; }
-    section.panel {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 16px 18px 14px;
-      margin-bottom: 18px;
-      box-shadow: var(--shadow);
-    }
-    label.field { display: block; margin-bottom: 10px; color: var(--muted); font-size: 13px; }
-    label.field input { width: 100%; margin-top: 4px; }
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
-    .check { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; margin: 8px 0 12px; }
-    .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
-    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--btn); color: var(--muted); }
-    .badge.ok { color: var(--ok); }
-    code { font-size: 12px; background: var(--btn); padding: 1px 5px; border-radius: 4px; }
+    .nav a, .hint-line a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .hint-line { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+    .hint-line a { font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
   </style>
   <script>
   (function () {
@@ -210,37 +195,9 @@
   <h1 data-i18n="heading">Agent papers</h1>
   <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
 
-  <section class="panel" aria-labelledby="llm-heading">
-    <h2 id="llm-heading" data-i18n="llmHeading">Translation LLM</h2>
-    <p class="hint"><span data-i18n="llmHint">OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.</span>
-      <code id="cfgpath">translate-config.json</code>
-      <span id="babel-badge" class="badge" hidden></span>
-    </p>
-    <div class="grid2">
-      <label class="field"><span data-i18n="baseUrl">Base URL</span>
-        <input id="base-url" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.openai.com/v1">
-      </label>
-      <label class="field"><span data-i18n="model">Model</span>
-        <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-4o-mini">
-      </label>
-    </div>
-    <label class="field"><span data-i18n="apiKey">API key</span>
-      <input id="api-key" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
-    </label>
-    <div class="row">
-      <span id="key-state" class="badge">not configured</span>
-      <label class="check"><input type="checkbox" id="clear-key"> <span data-i18n="clearKey">Clear saved key</span></label>
-      <label class="field" style="margin:0;min-width:90px"><span data-i18n="qps">QPS</span>
-        <input id="qps" type="number" min="1" max="64" value="4" style="width:90px">
-      </label>
-    </div>
-    <label class="check"><input type="checkbox" id="auto-xlate"> <span data-i18n="autoXlate">Auto-translate new papers when the catalog is listed</span></label>
-    <div class="actions">
-      <button type="button" class="primary" id="save-cfg" data-i18n="save">Save</button>
-      <button type="button" id="test-cfg" data-i18n="test">Test</button>
-      <span id="cfg-status"></span>
-    </div>
-  </section>
+  <p class="hint-line">
+    <span data-i18n="llmSettingsHint">Translation LLM — configure in </span><a id="llm-settings-link" href="/settings" data-i18n="llmSettingsLink">Settings</a><span data-i18n="llmSettingsHintAfter"></span>
+  </p>
 
   <div class="toolbar">
     <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, arXiv id…" autocomplete="off">
@@ -276,27 +233,9 @@
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
       unauthorized: "Unauthorized — sign in via Settings first.",
-      llmHeading: "Translation LLM",
-      llmHint: "OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.",
-      baseUrl: "Base URL",
-      model: "Model",
-      apiKey: "API key",
-      pasteKey: "Paste key to replace",
-      clearKey: "Clear saved key",
-      qps: "QPS",
-      autoXlate: "Auto-translate new papers when the catalog is listed",
-      save: "Save",
-      test: "Test",
-      saving: "Saving…",
-      saved: "Saved.",
-      testing: "Testing…",
-      testOk: "LLM test succeeded ({via}).",
-      testFail: "LLM test failed: {err}",
-      notConfigured: "not configured",
-      configured: "configured",
-      configuredLast4: "configured · last4 {last4}",
-      babelOk: "babeldoc on PATH",
-      babelMissing: "babeldoc missing",
+      llmSettingsHint: "Translation LLM — configure in ",
+      llmSettingsLink: "Settings",
+      llmSettingsHintAfter: "",
       zh: "中文版",
       dual: "中英对照",
       queued: "Queued",
@@ -324,27 +263,9 @@
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
       unauthorized: "未授权 — 请先在设置页登录。",
-      llmHeading: "翻译模型",
-      llmHint: "供 BabelDOC 使用的 OpenAI 兼容接口。API key 留空则保留已保存值；接口不会返回完整密钥。",
-      baseUrl: "接口地址",
-      model: "模型",
-      apiKey: "API key",
-      pasteKey: "粘贴新 key 以替换",
-      clearKey: "清除已保存的 key",
-      qps: "QPS",
-      autoXlate: "列出目录时自动翻译尚未完成的论文",
-      save: "保存",
-      test: "测试",
-      saving: "保存中…",
-      saved: "已保存。",
-      testing: "测试中…",
-      testOk: "LLM 测试成功（{via}）。",
-      testFail: "LLM 测试失败：{err}",
-      notConfigured: "未配置",
-      configured: "已配置",
-      configuredLast4: "已配置 · 末四位 {last4}",
-      babelOk: "已检测到 babeldoc",
-      babelMissing: "未安装 babeldoc",
+      llmSettingsHint: "翻译 LLM 请到「",
+      llmSettingsLink: "设置",
+      llmSettingsHintAfter: "」配置",
       zh: "中文版",
       dual: "中英对照",
       queued: "排队中",
@@ -391,7 +312,6 @@
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
     applyI18n();
-    renderKeyState(lastCfg);
     renderMeta();
     renderList();
   }
@@ -415,6 +335,7 @@
   const prefix = appPrefix();
   const urlToken = new URLSearchParams(location.search).get("token") || "";
   document.getElementById("settings-link").href = withToken(prefix + "/settings");
+  document.getElementById("llm-settings-link").href = withToken(prefix + "/settings");
 
   function withToken(u) {
     if (!urlToken) return u;
@@ -442,7 +363,6 @@
 
   let lastCatalog = { count: 0, papers: [], generated_at: "" };
   let lastShown = 0;
-  let lastCfg = { api_key: {} };
   let pollTimer = 0;
 
   function renderMeta() {
@@ -563,7 +483,7 @@
       if (res.status === 401) {
         status.textContent = t("unauthorized");
         status.className = "err";
-        location.href = prefix + "/settings";
+        location.href = withToken(prefix + "/settings");
         return;
       }
       if (!res.ok) {
@@ -578,105 +498,6 @@
     } catch (e) {
       status.textContent = String(e);
       status.className = "err";
-    }
-  }
-
-  function renderKeyState(cfg) {
-    lastCfg = cfg || lastCfg;
-    const el = document.getElementById("key-state");
-    const key = (lastCfg && lastCfg.api_key) || {};
-    if (key.configured) {
-      el.textContent = key.last4 ? t("configuredLast4").replace("{last4}", key.last4) : t("configured");
-      el.className = "badge ok";
-    } else {
-      el.textContent = t("notConfigured");
-      el.className = "badge";
-    }
-    const badge = document.getElementById("babel-badge");
-    if (lastCfg && typeof lastCfg.babeldoc === "boolean") {
-      badge.hidden = false;
-      badge.textContent = lastCfg.babeldoc ? t("babelOk") : t("babelMissing");
-      badge.className = "badge" + (lastCfg.babeldoc ? " ok" : "");
-    }
-  }
-
-  async function loadCfg() {
-    try {
-      const res = await fetch(prefix + "/papers/translate/config", { credentials: "same-origin", headers: authHeaders(false) });
-      if (!res.ok) return;
-      const cfg = await res.json();
-      document.getElementById("base-url").value = cfg.base_url || "";
-      document.getElementById("model").value = cfg.model || "";
-      document.getElementById("qps").value = cfg.qps || 4;
-      document.getElementById("auto-xlate").checked = !!cfg.auto_translate;
-      if (cfg.config_path) document.getElementById("cfgpath").textContent = cfg.config_path;
-      document.getElementById("api-key").value = "";
-      document.getElementById("clear-key").checked = false;
-      renderKeyState(cfg);
-    } catch (e) {}
-  }
-
-  function setCfgStatus(kind, text) {
-    const el = document.getElementById("cfg-status");
-    el.className = kind || "";
-    el.textContent = text || "";
-  }
-
-  async function saveCfg() {
-    setCfgStatus("", t("saving"));
-    const body = {
-      base_url: document.getElementById("base-url").value.trim(),
-      model: document.getElementById("model").value.trim(),
-      qps: parseInt(document.getElementById("qps").value, 10) || 4,
-      auto_translate: document.getElementById("auto-xlate").checked,
-      clear_api_key: document.getElementById("clear-key").checked
-    };
-    const key = document.getElementById("api-key").value.trim();
-    if (key) body.api_key = key;
-    try {
-      const res = await fetch(prefix + "/papers/translate/config", {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: authHeaders(true),
-        body: JSON.stringify(body)
-      });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok) {
-        setCfgStatus("err", data.error || t("loadErr"));
-        return;
-      }
-      document.getElementById("api-key").value = "";
-      document.getElementById("clear-key").checked = false;
-      renderKeyState(data);
-      setCfgStatus("ok", t("saved"));
-    } catch (e) {
-      setCfgStatus("err", String(e));
-    }
-  }
-
-  async function testCfg() {
-    setCfgStatus("", t("testing"));
-    const body = {
-      base_url: document.getElementById("base-url").value.trim(),
-      model: document.getElementById("model").value.trim()
-    };
-    const key = document.getElementById("api-key").value.trim();
-    if (key) body.api_key = key;
-    try {
-      const res = await fetch(prefix + "/papers/translate/test", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: authHeaders(true),
-        body: JSON.stringify(body)
-      });
-      const data = await res.json().catch(function () { return {}; });
-      if (data.ok) {
-        setCfgStatus("ok", t("testOk").replace("{via}", data.via || "ok"));
-      } else {
-        setCfgStatus("err", t("testFail").replace("{err}", data.error || ("HTTP " + res.status)));
-      }
-    } catch (e) {
-      setCfgStatus("err", t("testFail").replace("{err}", String(e)));
     }
   }
 
@@ -711,14 +532,11 @@
   document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
   document.getElementById("apply").addEventListener("click", load);
   document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
-  document.getElementById("save-cfg").addEventListener("click", saveCfg);
-  document.getElementById("test-cfg").addEventListener("click", testCfg);
   document.getElementById("q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); load(); }
   });
   document.getElementById("tag").addEventListener("change", load);
   applyI18n();
-  loadCfg();
   load();
 })();
 </script>

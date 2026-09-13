@@ -76,8 +76,11 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "--bg: #f5f6f8") && !strings.Contains(body, "--bg:#f5f6f8") {
 		t.Fatal("missing light background token")
 	}
-	if !strings.Contains(body, "id=\"base-url\"") || !strings.Contains(body, "id=\"test-cfg\"") {
-		t.Fatal("missing LLM settings controls")
+	if strings.Contains(body, "id=\"base-url\"") || strings.Contains(body, "id=\"test-cfg\"") || strings.Contains(body, "id=\"save-cfg\"") {
+		t.Fatal("LLM settings panel should have moved to /settings")
+	}
+	if !strings.Contains(body, "id=\"llm-settings-link\"") || !strings.Contains(body, "翻译 LLM 请到「") {
+		t.Fatal("papers page should link Translation LLM settings to /settings")
 	}
 	if !strings.Contains(body, "中文版") || !strings.Contains(body, "中英对照") {
 		t.Fatal("missing translated download labels")

@@ -100,6 +100,16 @@ func TestSettingsGETMasksKeys(t *testing.T) {
 	if put.Code != http.StatusOK {
 		t.Fatalf("put status=%d %s", put.Code, put.Body.String())
 	}
+	var putView search.PublicView
+	if err := json.Unmarshal(put.Body.Bytes(), &putView); err != nil {
+		t.Fatalf("put json: %v", err)
+	}
+	if !putView.OK || !putView.Serper.Configured || putView.Serper.Last4 != "XYZQ" {
+		t.Fatalf("PUT response should already show configured mask: %+v", putView.Serper)
+	}
+	if strings.Contains(put.Body.String(), "abcdXYZQ") {
+		t.Fatal("PUT leaked raw key")
+	}
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/settings/config", nil)
@@ -180,6 +190,31 @@ func TestSettingsPageHTMLAuthenticated(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "hint_google") || !strings.Contains(string(body), "仅 Chrome") {
 		t.Fatal("settings page missing localized engine hints")
+	}
+	html := string(body)
+	if strings.Contains(html, `id="serper" type="password"`) || strings.Contains(html, `id="brave" type="password"`) {
+		t.Fatal("API key fields must not be type=password (browsers drop pasted values)")
+	}
+	if !strings.Contains(html, `id="serper" type="text"`) || !strings.Contains(html, `id="brave" type="text"`) {
+		t.Fatal("API key fields should be type=text")
+	}
+	if !strings.Contains(html, "keyMissingAfterSave") || !strings.Contains(html, "未检测到 API key") {
+		t.Fatal("settings page missing unconfigured-key warning copy")
+	}
+	if !strings.Contains(html, "applyPublic") {
+		t.Fatal("settings page should apply PUT response JSON to badges")
+	}
+	if !strings.Contains(html, `id="base-url"`) || !strings.Contains(html, `id="save-xlate"`) || !strings.Contains(html, `id="test-xlate"`) {
+		t.Fatal("settings page missing Translation LLM controls")
+	}
+	if strings.Contains(html, `id="api-key" type="password"`) {
+		t.Fatal("translate API key field must not be type=password")
+	}
+	if !strings.Contains(html, "/papers/translate/config") || !strings.Contains(html, "/papers/translate/test") {
+		t.Fatal("settings page should reuse papers translate config/test APIs")
+	}
+	if !strings.Contains(html, "翻译模型") || !strings.Contains(html, "llmHeading") {
+		t.Fatal("settings page missing Translation LLM i18n")
 	}
 }
 

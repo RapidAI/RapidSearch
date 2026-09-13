@@ -96,6 +96,24 @@
     #status.ok { color: var(--ok); }
     .check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
     code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
+    input[type="number"] {
+      width: 100%;
+      margin-top: 4px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      color: var(--ink);
+      font: inherit;
+    }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+    #xlate-status { min-height: 1.3em; color: var(--muted); font-size: 13px; }
+    #xlate-status.err { color: var(--bad); }
+    #xlate-status.ok { color: var(--ok); }
+    .nav-links { display: flex; gap: 12px; margin: 0 0 18px; font-size: 13px; }
+    .nav-links a { color: var(--accent); text-decoration: none; }
+    .nav-links a:hover { text-decoration: underline; }
   </style>
   <script>
   (function () {
@@ -127,14 +145,14 @@
     <h2 data-i18n="apiKeys">API keys</h2>
     <p class="hint"><span data-i18n="apiHint">Leave a field empty to keep the stored key. Check “Clear” to wipe it. Keys are stored in</span> <code id="cfgpath">search-config.json</code> <span data-i18n="apiHintAfter">(mode 0600) and never returned in full.</span></p>
     <label class="field"><span data-i18n="serperKey">Serper API key</span>
-      <input id="serper" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
+      <input id="serper" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
     </label>
     <div class="row">
       <span id="serper-state" class="badge">not configured</span>
       <label class="check"><input type="checkbox" id="clear-serper"> <span data-i18n="clearSerper">Clear saved Serper key</span></label>
     </div>
     <label class="field"><span data-i18n="braveKey">Brave Search API key</span>
-      <input id="brave" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
+      <input id="brave" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
     </label>
     <div class="row">
       <span id="brave-state" class="badge">not configured</span>
@@ -147,6 +165,42 @@
     <p class="hint" data-i18n="engineHint">Auto uses this enabled order. Disabled engines and keyed APIs without a key are skipped. Drag a row or use the arrows. Google stays off auto unless you enable it (captcha breaker still applies).</p>
     <div id="engines"></div>
   </section>
+
+  <section aria-labelledby="llm-heading">
+    <h2 id="llm-heading" data-i18n="llmHeading">Translation LLM</h2>
+    <p class="hint"><span data-i18n="llmHint">OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.</span>
+      <code id="xlate-cfgpath">translate-config.json</code>
+      <span id="babel-badge" class="badge" hidden></span>
+    </p>
+    <div class="grid2">
+      <label class="field"><span data-i18n="baseUrl">Base URL</span>
+        <input id="base-url" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://api.openai.com/v1">
+      </label>
+      <label class="field"><span data-i18n="model">Model</span>
+        <input id="model" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="gpt-4o-mini">
+      </label>
+    </div>
+    <label class="field"><span data-i18n="apiKey">API key</span>
+      <input id="api-key" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
+    </label>
+    <div class="row">
+      <span id="xlate-key-state" class="badge">not configured</span>
+      <label class="check"><input type="checkbox" id="clear-key"> <span data-i18n="clearKey">Clear saved key</span></label>
+      <label class="field" style="margin:0;min-width:90px;flex:0 0 auto"><span data-i18n="qps">QPS</span>
+        <input id="qps" type="number" min="1" max="64" value="4" style="width:90px">
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" id="auto-xlate"> <span data-i18n="autoXlate">Auto-translate new papers when the catalog is listed</span></label>
+    <div class="actions">
+      <button type="button" class="primary" id="save-xlate" data-i18n="saveXlate">Save translation settings</button>
+      <button type="button" id="test-xlate" data-i18n="testXlate">Test</button>
+      <span id="xlate-status"></span>
+    </div>
+  </section>
+
+  <p class="nav-links">
+    <a id="papers-link" href="/papers" data-i18n="papersLink">Agent papers</a>
+  </p>
 
   <div class="actions">
     <button class="primary" id="save" type="button" data-i18n="save">Save</button>
@@ -184,6 +238,7 @@
       unauthorized: "Unauthorized — not saved.",
       saveFailed: "Save failed ({status}).",
       saved: "Saved.",
+      keyMissingAfterSave: "No API key detected — Serper/Brave remain unconfigured. Paste a key and save again.",
       signingOut: "Signing out…",
       keySet: "key set",
       noKey: "no key (skipped on auto)",
@@ -200,7 +255,25 @@
       hint_bing: "HTTP scrape; Chrome only if requested explicitly",
       hint_duckduckgo_html: "HTTP only · no Chrome slot",
       hint_duckduckgo: "Chrome fallback after HTML",
-      hint_google: "Chrome only · disabled on auto by default; captcha breaker if enabled"
+      hint_google: "Chrome only · disabled on auto by default; captcha breaker if enabled",
+      llmHeading: "Translation LLM",
+      llmHint: "OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.",
+      baseUrl: "Base URL",
+      model: "Model",
+      apiKey: "API key",
+      clearKey: "Clear saved key",
+      qps: "QPS",
+      autoXlate: "Auto-translate new papers when the catalog is listed",
+      saveXlate: "Save translation settings",
+      testXlate: "Test",
+      xlateSaving: "Saving…",
+      xlateSaved: "Translation settings saved.",
+      xlateTesting: "Testing…",
+      xlateTestOk: "LLM test succeeded ({via}).",
+      xlateTestFail: "LLM test failed: {err}",
+      babelOk: "babeldoc on PATH",
+      babelMissing: "babeldoc missing",
+      papersLink: "Agent papers →"
     },
     zh: {
       title: "RapidSearch 设置",
@@ -228,6 +301,7 @@
       unauthorized: "未授权 — 未保存。",
       saveFailed: "保存失败（{status}）。",
       saved: "已保存。",
+      keyMissingAfterSave: "未检测到 API key，Serper/Brave 仍为未配置 — 请粘贴 key 后再保存。",
       signingOut: "正在退出…",
       keySet: "已配置 key",
       noKey: "无 key（自动跳过）",
@@ -244,7 +318,25 @@
       hint_bing: "HTTP 抓取；仅在显式指定时才用 Chrome",
       hint_duckduckgo_html: "仅 HTTP · 不占用 Chrome",
       hint_duckduckgo: "HTML 之后的 Chrome 兜底",
-      hint_google: "仅 Chrome · 默认不参与自动搜索；启用后仍受验证码熔断约束"
+      hint_google: "仅 Chrome · 默认不参与自动搜索；启用后仍受验证码熔断约束",
+      llmHeading: "翻译模型",
+      llmHint: "供 BabelDOC 使用的 OpenAI 兼容接口。API key 留空则保留已保存值；接口不会返回完整密钥。",
+      baseUrl: "接口地址",
+      model: "模型",
+      apiKey: "API key",
+      clearKey: "清除已保存的 key",
+      qps: "QPS",
+      autoXlate: "列出目录时自动翻译尚未完成的论文",
+      saveXlate: "保存翻译设置",
+      testXlate: "测试",
+      xlateSaving: "保存中…",
+      xlateSaved: "翻译设置已保存。",
+      xlateTesting: "测试中…",
+      xlateTestOk: "LLM 测试成功（{via}）。",
+      xlateTestFail: "LLM 测试失败：{err}",
+      babelOk: "已检测到 babeldoc",
+      babelMissing: "未安装 babeldoc",
+      papersLink: "Agent 论文库 →"
     }
   };
 
@@ -266,6 +358,7 @@
   let engines = [];
   let lastSerper = null;
   let lastBrave = null;
+  let lastXlate = null;
 
   function t(key, vars) {
     const pack = I18N[lang] || I18N.en;
@@ -300,6 +393,7 @@
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
     keyBadge(document.getElementById("serper-state"), lastSerper);
     keyBadge(document.getElementById("brave-state"), lastBrave);
+    renderXlateState(lastXlate);
     render();
     document.documentElement.setAttribute("data-i18n-ready", "1");
   }
@@ -320,8 +414,27 @@
     return "/settings";
   }
 
+  function appPrefix() {
+    const base = settingsBase();
+    if (base.endsWith("/settings")) return base.slice(0, -"/settings".length);
+    return "";
+  }
+
+  function withToken(u) {
+    if (!token) return u;
+    return u + (u.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(token);
+  }
+
   function configURL() {
     return settingsBase() + "/config";
+  }
+
+  function translateConfigURL() {
+    return appPrefix() + "/papers/translate/config";
+  }
+
+  function translateTestURL() {
+    return appPrefix() + "/papers/translate/test";
   }
 
   function headers(json) {
@@ -423,6 +536,143 @@
     render();
   }
 
+  function xlateStatus(msg, cls) {
+    const el = document.getElementById("xlate-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = cls || "";
+  }
+
+  function renderXlateState(cfg) {
+    lastXlate = cfg || lastXlate;
+    const el = document.getElementById("xlate-key-state");
+    const key = (lastXlate && lastXlate.api_key) || {};
+    keyBadge(el, key.configured ? key : null);
+    const badge = document.getElementById("babel-badge");
+    if (lastXlate && typeof lastXlate.babeldoc === "boolean") {
+      badge.hidden = false;
+      badge.textContent = lastXlate.babeldoc ? t("babelOk") : t("babelMissing");
+      badge.className = "badge" + (lastXlate.babeldoc ? " ok" : "");
+    }
+  }
+
+  async function loadXlate() {
+    try {
+      const res = await fetch(translateConfigURL(), { headers: headers(false), credentials: "same-origin" });
+      if (!res.ok) return;
+      const cfg = await res.json();
+      document.getElementById("base-url").value = cfg.base_url || "";
+      document.getElementById("model").value = cfg.model || "";
+      document.getElementById("qps").value = cfg.qps || 4;
+      document.getElementById("auto-xlate").checked = !!cfg.auto_translate;
+      if (cfg.config_path) document.getElementById("xlate-cfgpath").textContent = cfg.config_path;
+      document.getElementById("api-key").value = "";
+      document.getElementById("clear-key").checked = false;
+      renderXlateState(cfg);
+    } catch (e) {}
+  }
+
+  async function saveXlate() {
+    xlateStatus(t("xlateSaving"));
+    const body = {
+      base_url: document.getElementById("base-url").value.trim(),
+      model: document.getElementById("model").value.trim(),
+      qps: parseInt(document.getElementById("qps").value, 10) || 4,
+      auto_translate: document.getElementById("auto-xlate").checked,
+      clear_api_key: document.getElementById("clear-key").checked
+    };
+    const key = document.getElementById("api-key").value.trim();
+    if (key) body.api_key = key;
+    try {
+      const res = await fetch(translateConfigURL(), {
+        method: "PUT",
+        headers: headers(true),
+        credentials: "same-origin",
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (res.status === 401) {
+        xlateStatus(t("unauthorized"), "err");
+        return;
+      }
+      if (!res.ok) {
+        xlateStatus(data.error || t("saveFailed", { status: res.status }), "err");
+        return;
+      }
+      document.getElementById("api-key").value = "";
+      document.getElementById("clear-key").checked = false;
+      if (data.base_url !== undefined) document.getElementById("base-url").value = data.base_url || "";
+      if (data.model !== undefined) document.getElementById("model").value = data.model || "";
+      if (data.qps !== undefined) document.getElementById("qps").value = data.qps || 4;
+      if (data.auto_translate !== undefined) document.getElementById("auto-xlate").checked = !!data.auto_translate;
+      if (data.config_path) document.getElementById("xlate-cfgpath").textContent = data.config_path;
+      renderXlateState(data);
+      xlateStatus(t("xlateSaved"), "ok");
+    } catch (e) {
+      xlateStatus(String(e), "err");
+    }
+  }
+
+  async function testXlate() {
+    xlateStatus(t("xlateTesting"));
+    const body = {
+      base_url: document.getElementById("base-url").value.trim(),
+      model: document.getElementById("model").value.trim()
+    };
+    const key = document.getElementById("api-key").value.trim();
+    if (key) body.api_key = key;
+    try {
+      const res = await fetch(translateTestURL(), {
+        method: "POST",
+        headers: headers(true),
+        credentials: "same-origin",
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (data.ok) {
+        xlateStatus(t("xlateTestOk", { via: data.via || "ok" }), "ok");
+      } else {
+        xlateStatus(t("xlateTestFail", { err: data.error || ("HTTP " + res.status) }), "err");
+      }
+    } catch (e) {
+      xlateStatus(t("xlateTestFail", { err: String(e) }), "err");
+    }
+  }
+
+  function applyPublic(data) {
+    if (!data || typeof data !== "object") return false;
+    if (data.config_path) {
+      document.getElementById("cfgpath").textContent = data.config_path;
+    }
+    if (data.serper !== undefined) lastSerper = data.serper;
+    if (data.brave !== undefined) lastBrave = data.brave;
+    keyBadge(document.getElementById("serper-state"), lastSerper);
+    keyBadge(document.getElementById("brave-state"), lastBrave);
+    if (Array.isArray(data.priority)) {
+      engines = data.priority;
+      render();
+    }
+    return true;
+  }
+
+  function keyedEnabledUnconfigured() {
+    const missing = [];
+    engines.forEach(function (e) {
+      if (!e || !e.enabled) return;
+      if (e.id === "serper" && !(lastSerper && lastSerper.configured)) missing.push("Serper");
+      if (e.id === "brave" && !(lastBrave && lastBrave.configured)) missing.push("Brave");
+    });
+    return missing;
+  }
+
+  function finishSaveStatus() {
+    if (keyedEnabledUnconfigured().length) {
+      status(t("keyMissingAfterSave"), "err");
+    } else {
+      status(t("saved"), "ok");
+    }
+  }
+
   async function load() {
     status(t("loading"));
     const res = await fetch(configURL(), { headers: headers(false), credentials: "same-origin" });
@@ -435,21 +685,17 @@
       return;
     }
     const data = await res.json();
-    document.getElementById("cfgpath").textContent = data.config_path || "search-config.json";
-    lastSerper = data.serper;
-    lastBrave = data.brave;
-    keyBadge(document.getElementById("serper-state"), lastSerper);
-    keyBadge(document.getElementById("brave-state"), lastBrave);
-    engines = Array.isArray(data.priority) ? data.priority : [];
-    render();
+    applyPublic(data);
     status("");
   }
 
   document.getElementById("save").addEventListener("click", async function () {
     status(t("saving"));
+    const serperVal = String(document.getElementById("serper").value || "").trim();
+    const braveVal = String(document.getElementById("brave").value || "").trim();
     const body = {
-      serper_api_key: document.getElementById("serper").value,
-      brave_api_key: document.getElementById("brave").value,
+      serper_api_key: serperVal,
+      brave_api_key: braveVal,
       clear_serper: document.getElementById("clear-serper").checked,
       clear_brave: document.getElementById("clear-brave").checked,
       priority: engines.map(function (e) { return { id: e.id, enabled: !!e.enabled }; })
@@ -473,13 +719,17 @@
       status(msg, "err");
       return;
     }
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
     document.getElementById("serper").value = "";
     document.getElementById("brave").value = "";
     document.getElementById("clear-serper").checked = false;
     document.getElementById("clear-brave").checked = false;
-    status(t("saved"), "ok");
-    await load();
-    status(t("saved"), "ok");
+    const applied = applyPublic(data);
+    if (!applied || data.serper === undefined || data.brave === undefined) {
+      try { await load(); } catch (e) {}
+    }
+    finishSaveStatus();
   });
 
   document.getElementById("logout").addEventListener("click", async function () {
@@ -490,8 +740,17 @@
     location.reload();
   });
 
+  document.getElementById("papers-link").href = withToken(appPrefix() + "/papers");
+  document.getElementById("save-xlate").addEventListener("click", function () {
+    saveXlate().catch(function (e) { xlateStatus(String(e), "err"); });
+  });
+  document.getElementById("test-xlate").addEventListener("click", function () {
+    testXlate().catch(function (e) { xlateStatus(String(e), "err"); });
+  });
+
   applyI18n();
   load().catch(function (e) { status(String(e), "err"); });
+  loadXlate().catch(function () {});
 })();
 </script>
 </body>
