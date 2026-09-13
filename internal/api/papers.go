@@ -44,6 +44,7 @@ type paperEntry struct {
 	LocalPDF        string `json:"local_pdf,omitempty"` // relative download path
 	Brief           string `json:"brief,omitempty"`
 	ID              string `json:"id,omitempty"`
+	AbstractZH      string `json:"abstract_zh,omitempty"`
 	ZhPDF           string `json:"zh_pdf,omitempty"`
 	DualPDF         string `json:"dual_pdf,omitempty"`
 	TranslateStatus string `json:"translate_status,omitempty"`
@@ -62,6 +63,9 @@ type papersCatalog struct {
 	Count             int                    `json:"count"`
 	Papers            []paperEntry           `json:"papers"`
 	TranslateProgress *translateProgress     `json:"translate_progress,omitempty"`
+	// AbstractZHPending is the number of papers still missing a cached Chinese abstract.
+	// Used by the ZH UI to keep polling until translations land.
+	AbstractZHPending int `json:"abstract_zh_pending,omitempty"`
 	// CanManage is true when the caller may enqueue translations / open admin UI.
 	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
 	CanManage bool `json:"can_manage"`
@@ -83,6 +87,7 @@ type papersStore struct {
 	modTime time.Time
 	cat     papersCatalog
 	xlate   *translateService
+	absZH   *abstractZHService
 }
 
 func papersRoot() string {
@@ -96,8 +101,10 @@ func newPapersStore(root string) *papersStore {
 	if root == "" {
 		root = papersRoot()
 	}
-	ps := &papersStore{root: root, xlate: newTranslateService(root)}
+	xlate := newTranslateService(root)
+	ps := &papersStore{root: root, xlate: xlate, absZH: newAbstractZHService(root, xlate)}
 	ps.xlate.start()
+	ps.absZH.start()
 	return ps
 }
 
@@ -127,6 +134,9 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 		jobs = ps.xlate.jobsCopy()
 	}
 	overlayTranslations(out.Papers, ps.root, jobs)
+	if ps != nil && ps.absZH != nil {
+		ps.absZH.overlay(out.Papers)
+	}
 	return out, nil
 }
 
@@ -302,9 +312,14 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
-	// Auto-enqueue is an admin side effect — never trigger from anonymous GETs.
+	// Auto-enqueue PDF BabelDOC is an admin side effect — never from anonymous GETs.
 	if canManage {
 		s.maybeAutoTranslate(cat.Papers)
+	}
+	// Chinese abstracts are public catalog data: fill missing cache in background.
+	if abs := s.papers().absZH; abs != nil {
+		abs.ensureMissing(cat.Papers)
+		out.AbstractZHPending = abs.pendingCount(out.Papers)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -330,6 +345,7 @@ func filterPapers(in []paperEntry, q, tag string) []paperEntry {
 			blob := strings.ToLower(strings.Join([]string{
 				p.Title,
 				p.Abstract,
+				p.AbstractZH,
 				p.ArxivID,
 				p.ID,
 				p.Filename,

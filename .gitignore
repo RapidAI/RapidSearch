@@ -41,3 +41,7 @@ agent-papers/translate-config.json
 agent-papers/translate_status.json
 agent-papers/translate-work/
 **/translate-config.json
+
+# Cached Chinese paper abstracts (runtime LLM output)
+agent-papers/abstracts_zh.json
+**/abstracts_zh.json

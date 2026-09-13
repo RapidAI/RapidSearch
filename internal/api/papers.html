@@ -146,7 +146,14 @@
       border-radius: 999px;
       padding: 2px 8px;
     }
-    .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+    .brief {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0 0 12px;
+      cursor: help;
+      line-height: 1.45;
+    }
+    .brief.pending { font-style: italic; cursor: default; opacity: 0.85; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .xlate-err {
       color: var(--bad);
@@ -356,7 +363,8 @@
       queueFail: "Could not queue translation.",
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
       xlateBannerTitle: "Currently translating",
-      xlatePolling: "Auto-refreshing…"
+      xlatePolling: "Auto-refreshing…",
+      absTranslating: "Translating abstract…"
     },
     zh: {
       langLabel: "语言",
@@ -397,7 +405,8 @@
       queueFail: "无法加入翻译队列。",
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
       xlateBannerTitle: "正在翻译",
-      xlatePolling: "自动刷新中…"
+      xlatePolling: "自动刷新中…",
+      absTranslating: "摘要翻译中…"
     }
   };
 
@@ -521,6 +530,7 @@
       p.title,
       p.brief,
       p.abstract,
+      p.abstract_zh,
       p.arxiv_id,
       p.id,
       p.filename,
@@ -643,6 +653,41 @@
     pollTimer = setInterval(function () { load({ silent: true }); }, POLL_IDLE_MS);
   }
 
+  function briefChars(text, max) {
+    const s = String(text == null ? "" : text).trim();
+    if (!s) return "";
+    const chars = Array.from(s);
+    if (chars.length <= max) return s;
+    let cut = chars.slice(0, max);
+    for (let i = cut.length - 1; i > Math.floor(max * 2 / 3); i--) {
+      const ch = cut[i];
+      if (" \t\n，。、,.;；".indexOf(ch) >= 0) {
+        cut = cut.slice(0, i);
+        break;
+      }
+    }
+    return cut.join("").trim() + "…";
+  }
+
+  function abstractDisplay(p) {
+    const lang = currentLang();
+    const enFull = String(p.abstract || "").trim();
+    const zhFull = String(p.abstract_zh || "").trim();
+    if (lang === "zh") {
+      if (zhFull) {
+        return { text: briefChars(zhFull, 140), full: zhFull, pending: false };
+      }
+      if (enFull) {
+        // Show English briefly while ZH translation is filling in background.
+        return { text: t("absTranslating"), full: enFull, pending: true };
+      }
+      return { text: "", full: "", pending: false };
+    }
+    const full = enFull || String(p.brief || "").trim();
+    if (!full) return { text: "", full: "", pending: false };
+    return { text: briefChars(full, 280), full: full, pending: false };
+  }
+
   function statusLabel(st) {
     if (st === "queued") return t("queued");
     if (st === "running") return t("running");
@@ -737,13 +782,19 @@
     } else if (p.arxiv_id) {
       actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
     }
-    const brief = p.brief || "";
+    const abs = abstractDisplay(p);
+    let briefHtml = "";
+    if (abs.text) {
+      const cls = abs.pending ? "brief pending" : "brief";
+      const titleAttr = abs.full ? ' title="' + esc(abs.full) + '"' : "";
+      briefHtml = '<p class="' + cls + '"' + titleAttr + ">" + esc(abs.text) + "</p>";
+    }
     return (
       '<article class="paper">' +
         "<h2>" + esc(p.title || "") + "</h2>" +
         authors +
         '<div class="row">' + year + tags + "</div>" +
-        (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
+        briefHtml +
         '<div class="actions">' + actions + "</div>" +
         errHtml +
       "</article>"
@@ -773,7 +824,13 @@
       const st = p.translate_status || "";
       return st === "queued" || st === "running";
     });
-    syncPolling(!!(prog && prog.active) || anyInflight);
+    const absPending = currentLang() === "zh" && (
+      (Number(lastCatalog.abstract_zh_pending) || 0) > 0 ||
+      (lastCatalog.papers || []).some(function (p) {
+        return String(p.abstract || "").trim() && !String(p.abstract_zh || "").trim();
+      })
+    );
+    syncPolling(!!(prog && prog.active) || anyInflight || absPending);
   }
 
   function renderAll(resetPage) {
