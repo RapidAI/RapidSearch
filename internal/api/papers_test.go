@@ -186,6 +186,12 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `id="tag-chips"`) {
 		t.Fatal("papers page must show tag filter chips")
 	}
+	if !strings.Contains(body, "已有中文译本 {zh} 篇") || !strings.Contains(body, "{zh} with Chinese PDF") {
+		t.Fatal("papers meta line must show catalog-wide Chinese PDF count")
+	}
+	if !strings.Contains(body, "countCatalogZhPDFs") || !strings.Contains(body, "lastCatalog.papers") {
+		t.Fatal("ZH PDF count must come from the full catalog, not the filtered list")
+	}
 	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
 		t.Fatal("papers page must map stable tag keys to localized labels")
 	}
