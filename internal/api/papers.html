@@ -235,6 +235,101 @@
     .pager-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .pager-info { color: var(--muted); font-size: 13px; }
     .authors { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+    button.review-btn.busy { opacity: 0.7; cursor: wait; }
+    .review-stars-inline {
+      color: #c48a00;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px 24px;
+    }
+    .modal[hidden] { display: none !important; }
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(16, 24, 40, 0.42);
+    }
+    html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.58); }
+    .modal-panel {
+      position: relative;
+      z-index: 1;
+      width: min(740px, 100%);
+      max-height: calc(100vh - 64px);
+      overflow: auto;
+      background: var(--card);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 16px 48px rgba(16, 24, 40, 0.2);
+      padding: 18px 22px 20px;
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .modal-head h2 {
+      font-size: 1.12rem;
+      margin: 0;
+      line-height: 1.35;
+    }
+    .modal-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 4px;
+    }
+    .modal-close {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .review-section { margin: 0 0 14px; }
+    .review-section h3 {
+      font-size: 0.95rem;
+      margin: 0 0 6px;
+    }
+    .review-section p {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      color: var(--ink);
+    }
+    .review-rate {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 8px;
+    }
+    .review-rate-label { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+    .star-row { display: flex; gap: 2px; align-items: center; }
+    .star-btn {
+      background: none;
+      border: none;
+      padding: 0 3px;
+      font-size: 24px;
+      line-height: 1;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .star-btn.on { color: #e3a008; }
+    .star-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+    .review-rate.locked .star-btn { pointer-events: none; }
+    .review-rate-hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+    .review-avg { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+    .review-status { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+    .review-status.err { color: var(--bad); }
+    .review-status.busy { font-style: italic; }
   </style>
   <script>
   (function () {
@@ -317,6 +412,43 @@
       <button type="button" class="pager-next" data-i18n="next">Next</button>
     </div>
   </div>
+  <div id="review-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="review-backdrop" data-review-close="1"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="review-title">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" data-i18n="reviewKicker">Critical reading</p>
+          <h2 id="review-title"></h2>
+        </div>
+        <button type="button" class="modal-close" id="review-close" data-review-close="1" data-i18n-aria="reviewClose" aria-label="Close">×</button>
+      </div>
+      <p id="review-status" class="review-status" hidden></p>
+      <div id="review-body" hidden>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec1">方法原理与创新</h3>
+          <p id="rev-method-principles"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec2">方法本质</h3>
+          <p id="rev-method-essence"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec3">实验完整性</h3>
+          <p id="rev-experiment"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec4">论文质量总评</h3>
+          <p id="rev-quality"></p>
+        </section>
+      </div>
+      <div class="review-rate" id="review-rate" hidden>
+        <p class="review-rate-label" data-i18n="reviewRate">Rate this review</p>
+        <div class="star-row" id="review-stars" role="radiogroup" data-i18n-aria="reviewRate" aria-label="Rate this review"></div>
+        <p class="review-avg" id="review-avg"></p>
+        <p class="review-rate-hint" id="review-rate-hint" data-i18n="reviewRateLocked" hidden>Rating unlocks after the review is generated.</p>
+      </div>
+    </div>
+  </div>
 </main>
 <script>
 (function () {
@@ -364,7 +496,25 @@
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
       xlateBannerTitle: "Currently translating",
       xlatePolling: "Auto-refreshing…",
-      absTranslating: "Translating abstract…"
+      absTranslating: "Translating abstract…",
+      reviewView: "View review",
+      reviewGen: "Generate review",
+      reviewGenerating: "Generating review…",
+      reviewKicker: "Critical reading",
+      reviewSec1: "Method principles & innovation",
+      reviewSec2: "Essence of the approach",
+      reviewSec3: "Experimental completeness",
+      reviewSec4: "Overall quality",
+      reviewRate: "Rate this review",
+      reviewAvg: "Average {avg} · {n} ratings",
+      reviewNoRatings: "No ratings yet",
+      reviewClose: "Close",
+      reviewGenFail: "Could not generate review.",
+      reviewRateFail: "Could not save rating.",
+      reviewRateLocked: "Rating unlocks after the review is generated.",
+      reviewNotReady: "Review is not ready yet.",
+      reviewNeedLLM: "Configure the translation LLM in Settings first.",
+      reviewLoadFail: "Failed to load review."
     },
     zh: {
       langLabel: "语言",
@@ -406,7 +556,25 @@
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
       xlateBannerTitle: "正在翻译",
       xlatePolling: "自动刷新中…",
-      absTranslating: "摘要翻译中…"
+      absTranslating: "摘要翻译中…",
+      reviewView: "查看解读",
+      reviewGen: "生成解读",
+      reviewGenerating: "生成解读中…",
+      reviewKicker: "论文解读",
+      reviewSec1: "方法原理与创新",
+      reviewSec2: "方法本质",
+      reviewSec3: "实验完整性",
+      reviewSec4: "论文质量总评",
+      reviewRate: "为解读评分",
+      reviewAvg: "平均 {avg} 分 · {n} 人评分",
+      reviewNoRatings: "暂无评分",
+      reviewClose: "关闭",
+      reviewGenFail: "无法生成解读。",
+      reviewRateFail: "无法保存评分。",
+      reviewRateLocked: "解读生成完成后即可评分。",
+      reviewNotReady: "解读尚未生成完成。",
+      reviewNeedLLM: "请先在设置中配置翻译 LLM。",
+      reviewLoadFail: "加载解读失败。"
     }
   };
 
@@ -537,6 +705,8 @@
   const POLL_IDLE_MS = 30000;
   let idlePoll = false;
   let searchTimer = 0;
+  const generating = {};
+  let openReview = null;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -829,6 +999,18 @@
     } else if (p.arxiv_id) {
       actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
     }
+    const pid = p.id || p.arxiv_id || "";
+    if (pid) {
+      const busy = !!generating[pid];
+      const label = busy ? t("reviewGenerating") : (p.has_review ? t("reviewView") : t("reviewGen"));
+      const cls = "review-btn" + (busy ? " busy" : "");
+      actions += '<button type="button" class="' + cls + '" data-id="' + esc(pid) + '"' +
+        (busy ? " disabled" : "") + ">" + esc(label) + "</button>";
+      if (p.has_review && Number(p.rating_count) > 0) {
+        const avg = Number(p.avg_stars) || 0;
+        actions += '<span class="review-stars-inline" title="' + esc(t("reviewAvg").replace("{avg}", String(avg)).replace("{n}", String(p.rating_count))) + '">★ ' + esc(avg) + "</span>";
+      }
+    }
     const abs = abstractDisplay(p);
     let briefHtml = "";
     if (abs.text) {
@@ -863,6 +1045,11 @@
           const payload = { id: btn.getAttribute("data-id") || "" };
           if (btn.getAttribute("data-force") === "1") payload.force = true;
           enqueue(payload);
+        });
+      });
+      list.querySelectorAll(".review-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          openReviewPanel(btn.getAttribute("data-id") || "");
         });
       });
     }
@@ -966,6 +1153,212 @@
     }
   }
 
+  function reviewURL(id, suffix) {
+    return prefix + "/papers/review/" + encodeURIComponent(id) + (suffix || "");
+  }
+
+  function findCatalogPaper(id) {
+    return (lastCatalog.papers || []).find(function (p) {
+      return (p.id || p.arxiv_id || "") === id;
+    }) || null;
+  }
+
+  function patchCatalogReview(id, data) {
+    (lastCatalog.papers || []).forEach(function (p) {
+      if ((p.id || p.arxiv_id || "") !== id) return;
+      p.has_review = !!(data && data.has_review);
+      p.avg_stars = data && typeof data.avg_stars === "number" ? data.avg_stars : (p.avg_stars || 0);
+      p.rating_count = data && typeof data.rating_count === "number" ? data.rating_count : (p.rating_count || 0);
+    });
+  }
+
+  function setReviewStatus(msg, kind) {
+    const el = document.getElementById("review-status");
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-status" + (kind ? " " + kind : "");
+  }
+
+  function renderStars(myStars, enabled) {
+    const row = document.getElementById("review-stars");
+    const mine = Number(myStars) || 0;
+    let html = "";
+    for (let i = 1; i <= 5; i++) {
+      html += '<button type="button" class="star-btn' + (i <= mine ? " on" : "") +
+        '" data-stars="' + i + '" aria-label="' + i + '"' +
+        (enabled ? "" : " disabled") + ">★</button>";
+    }
+    row.innerHTML = html;
+    if (!enabled) return;
+    row.querySelectorAll(".star-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        rateOpenReview(Number(btn.getAttribute("data-stars")) || 0);
+      });
+    });
+  }
+
+  function setReviewRatingEnabled(enabled, data) {
+    const box = document.getElementById("review-rate");
+    const hint = document.getElementById("review-rate-hint");
+    const avg = document.getElementById("review-avg");
+    box.hidden = false;
+    box.classList.toggle("locked", !enabled);
+    if (openReview) openReview.ready = !!enabled;
+    if (!enabled) {
+      renderStars(0, false);
+      avg.hidden = true;
+      avg.textContent = "";
+      hint.hidden = false;
+      hint.textContent = t("reviewRateLocked");
+      return;
+    }
+    hint.hidden = true;
+    avg.hidden = false;
+    renderStars(data && data.my_stars ? data.my_stars : 0, true);
+    renderReviewAvg(data);
+  }
+
+  function hideReviewRating() {
+    const box = document.getElementById("review-rate");
+    box.hidden = true;
+    box.classList.remove("locked");
+    document.getElementById("review-stars").innerHTML = "";
+    if (openReview) openReview.ready = false;
+  }
+
+  function renderReviewAvg(data) {
+    const el = document.getElementById("review-avg");
+    const n = data && Number(data.rating_count) || 0;
+    if (!n) {
+      el.textContent = t("reviewNoRatings");
+      return;
+    }
+    const avg = data && typeof data.avg_stars === "number" ? data.avg_stars : 0;
+    el.textContent = t("reviewAvg").replace("{avg}", String(avg)).replace("{n}", String(n));
+  }
+
+  function fillReviewModal(data) {
+    document.getElementById("review-title").textContent = (data && data.title) || (openReview && openReview.title) || "";
+    document.getElementById("rev-method-principles").textContent = (data && data.analysis && data.analysis.method_principles) || "";
+    document.getElementById("rev-method-essence").textContent = (data && data.analysis && data.analysis.method_essence) || "";
+    document.getElementById("rev-experiment").textContent = (data && data.analysis && data.analysis.experiment) || "";
+    document.getElementById("rev-quality").textContent = (data && data.analysis && data.analysis.quality) || "";
+    const has = !!(data && data.has_review);
+    document.getElementById("review-body").hidden = !has;
+    if (has) {
+      setReviewRatingEnabled(true, data);
+    } else {
+      hideReviewRating();
+    }
+  }
+
+  function closeReviewModal() {
+    const modal = document.getElementById("review-modal");
+    modal.hidden = true;
+    openReview = null;
+    hideReviewRating();
+    setReviewStatus("", "");
+  }
+
+  function showReviewModal(title) {
+    const modal = document.getElementById("review-modal");
+    document.getElementById("review-title").textContent = title || "";
+    modal.hidden = false;
+    applyI18n();
+  }
+
+  async function openReviewPanel(id) {
+    if (!id || generating[id]) return;
+    const paper = findCatalogPaper(id) || { id: id, title: id, has_review: false };
+    openReview = { id: id, title: paper.title || id, ready: false };
+    showReviewModal(openReview.title);
+    document.getElementById("review-body").hidden = true;
+    hideReviewRating();
+    if (paper.has_review) {
+      setReviewStatus("", "");
+      try {
+        const res = await fetch(reviewURL(id), { credentials: "same-origin", headers: authHeaders(false) });
+        const data = await res.json().catch(function () { return {}; });
+        if (!res.ok || !data.ok) {
+          setReviewStatus(t("reviewLoadFail"), "err");
+          return;
+        }
+        fillReviewModal(data);
+        return;
+      } catch (e) {
+        setReviewStatus(String(e), "err");
+        return;
+      }
+    }
+    generating[id] = true;
+    if (openReview) openReview.ready = false;
+    renderList();
+    showReviewModal(openReview.title);
+    document.getElementById("review-body").hidden = true;
+    setReviewRatingEnabled(false);
+    setReviewStatus(t("reviewGenerating"), "busy");
+    try {
+      const res = await fetch(reviewURL(id, "/generate"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        const msg = data && data.error === "translation LLM is not configured"
+          ? t("reviewNeedLLM")
+          : (data && data.error ? String(data.error) : t("reviewGenFail"));
+        setReviewStatus(msg, "err");
+        hideReviewRating();
+        return;
+      }
+      setReviewStatus("", "");
+      fillReviewModal(data);
+      patchCatalogReview(id, data);
+    } catch (e) {
+      setReviewStatus(String(e), "err");
+    } finally {
+      delete generating[id];
+      renderList();
+    }
+  }
+
+  async function rateOpenReview(stars) {
+    if (!openReview || !openReview.id || !openReview.ready || !stars) return;
+    if (generating[openReview.id]) return;
+    try {
+      const res = await fetch(reviewURL(openReview.id, "/rate"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({ stars: stars })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        const err = data && data.error ? String(data.error) : "";
+        if (err === "review is still generating" || err === "review is not ready") {
+          setReviewStatus(t("reviewNotReady"), "err");
+        } else {
+          setReviewStatus(err || t("reviewRateFail"), "err");
+        }
+        return;
+      }
+      setReviewStatus("", "");
+      fillReviewModal(data);
+      patchCatalogReview(openReview.id, data);
+      renderList();
+    } catch (e) {
+      setReviewStatus(String(e), "err");
+    }
+  }
+
   function goPage(delta) {
     const pages = Math.max(1, Math.ceil(filteredPapers.length / PAGE_SIZE) || 1);
     pageIndex = Math.min(pages, Math.max(1, pageIndex + delta));
@@ -993,6 +1386,14 @@
   });
   document.querySelectorAll(".pager-next").forEach(function (btn) {
     btn.addEventListener("click", function () { goPage(1); });
+  });
+  document.querySelectorAll("[data-review-close]").forEach(function (el) {
+    el.addEventListener("click", function () { closeReviewModal(); });
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape" && !document.getElementById("review-modal").hidden) {
+      closeReviewModal();
+    }
   });
   applyI18n();
   applyManageUI();
