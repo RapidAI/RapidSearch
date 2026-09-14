@@ -68,12 +68,15 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 
 - `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述), `llm-training` (LLM 训练), `agent-tools-memory` (agent工具与记忆), `other` (其它).
 - `POST /papers/import` — public (lightly rate-limited) manual import. **`tag` is required** on every path (JSON URL/id and PDF upload); missing or unknown tags are rejected before download or ingest. JSON `{ "url_or_id": "2504.01990", "tag": "llm-training" }` accepts an arXiv id, arXiv abs/pdf URL, or a direct http(s) PDF URL. Multipart `tag` + `file` (or `pdf`) uploads a local PDF; if both a file and `url_or_id` are sent, the file wins. Uploads must look like a traditional academic paper (PDF magic, size ≤ 80MB, extractable text with Abstract/Introduction/References or 摘要/引言/参考文献). Rejection codes include `not_a_paper`, `not_pdf`, `too_large`, `scanned`. Successful imports write `PAPERS_DIR/pdfs`, upsert `manifest.json` (and `papers.db` when present) with `source=manual` and the chosen tag, then run the same catalog / optional `auto_translate` / abstract-ZH path as synced papers. Private/loopback URLs are blocked unless `PAPERS_IMPORT_ALLOW_PRIVATE=1` (local/dev). Daily ArXiv sync also searches `llm-training` and `agent-tools-memory`; `other` stays manual-only.
-- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`page_count`, `zh_pdf`, `dual_pdf`, `translate_status`, `translate_skip_reason`, `can_manage`). `page_count` is computed from the local PDF. Papers with `page_count > 100` get `translate_skip_reason=too_many_pages` and are not translated (100 pages is allowed). `tag=` matches stable English keys. No API keys / translate-config.
+- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`page_count`, `zh_pdf`, `dual_pdf`, `translate_status`, `translate_skip_reason`, `can_manage`, `has_review`, `avg_stars`, `rating_count`). `page_count` is computed from the local PDF. Papers with `page_count > 100` get `translate_skip_reason=too_many_pages` and are not translated (100 pages is allowed). `tag=` matches stable English keys. No API keys / translate-config / rater list.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
 - `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
 - `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Papers with more than 100 pages are rejected with `rejected[id]=too_many_pages` (and `error=too_many_pages` when that is the only target). Auto-translate, translate-pending, translate-all, and per-paper translate all honor the gate. The worker pool is **dual-lane** (default `PAPERS_TRANSLATE_CONCURRENCY=3`): fast lane for `page_count ≤ 50`, slow lane for 51–100. When the slow queue has work, 1 of 3 slots is reserved for it so long PDFs do not block short ones; an empty lane donates its slots. Background jobs run in parallel for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, `fast_queued`, `slow_queued`, and `concurrency`.
+- `GET /papers/review/{id}` — public: structured Chinese 解读 (if generated) plus average stars. No raw rater list. Sets a stable anonymous `rs_papers_rater` cookie when the caller is not a Hub session.
+- `POST /papers/review/{id}/generate` — public if translate-config LLM is ready: generate 精读+评审 sections via the same Hub OpenAI-compatible LLM as BabelDOC. Idempotent when a review already exists unless `{ "force": true }`. Ratings are kept on regenerate.
+- `POST /papers/review/{id}/rate` — public: `{ "stars": 1-5 }`. Upserts by Hub user key (logged-in) or anonymous rater cookie; returns the new average. Rejects with 409 (`review is not ready` / `review is still generating`) if no completed review exists or generate is in-flight; never writes a ratings-only stub.
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
@@ -83,11 +86,12 @@ pdfs/zh/{id}.zh.pdf        # Chinese-only (mono)
 pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
 translate-config.json      # LLM settings (secrets; not in git)
 translate_status.json      # queue/job status
+reviews/{id}.json          # 解读 + ratings (runtime; not in git)
 ```
 
 Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
 
-本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。
+本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。每张卡片在 arXiv 后提供「生成解读 / 查看解读」：用同一套翻译 LLM 生成中文精读+评审，并支持匿名 cookie 评分（展示均分）。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.

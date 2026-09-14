@@ -130,8 +130,40 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
 		t.Fatal("papers page must classify fast vs slow translate lanes")
 	}
+	if !strings.Contains(body, `tagChips: "Tags",`) || !strings.Contains(body, `tagChips: "标签",`) {
+		t.Fatal("tagChips i18n keys must have trailing commas before reviewView")
+	}
+	if !strings.Contains(body, `reviewView: "View review"`) || !strings.Contains(body, `reviewView: "查看解读"`) {
+		t.Fatal("review overlay i18n must follow tagChips")
+	}
+	if strings.Contains(body, "let banner =") || strings.Contains(body, "var banner =") {
+		t.Fatal("renderTranslateBanner must not redeclare the banner DOM element")
+	}
+	if !strings.Contains(body, "bannerTitle") {
+		t.Fatal("translate banner title string must use bannerTitle")
+	}
 	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
 		t.Fatal("papers page must show page-level translation progress banner")
+	}
+	if !strings.Contains(body, "white-space: pre-line") {
+		t.Fatal("banner-detail must wrap running titles with pre-line")
+	}
+	detailCSSStart := strings.Index(body, "#xlate-banner .banner-detail")
+	if detailCSSStart < 0 {
+		t.Fatal("missing banner-detail CSS")
+	}
+	detailCSS := body[detailCSSStart:]
+	if i := strings.Index(detailCSS, "#xlate-banner .banner-meta"); i > 0 {
+		detailCSS = detailCSS[:i]
+	}
+	if strings.Contains(detailCSS, "ellipsis") || strings.Contains(detailCSS, "nowrap") {
+		t.Fatal("banner-detail must not ellipsis-truncate or nowrap running titles")
+	}
+	if !strings.Contains(body, "formatRunningBannerList") || !strings.Contains(body, `(i + 1) + ". "`) {
+		t.Fatal("banner must render a numbered multi-line running list")
+	}
+	if strings.Contains(body, `titles.join(" · ")`) || strings.Contains(body, `ids.join(" · ")`) {
+		t.Fatal("running titles must not be joined on one truncated line")
 	}
 	if !strings.Contains(body, "POLL_ACTIVE_MS") && !strings.Contains(body, "4000") {
 		t.Fatal("expected active polling while translations run")
