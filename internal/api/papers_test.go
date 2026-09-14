@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -128,8 +129,16 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
 		t.Fatal("search placeholder should cover title/authors/abstract/tags")
 	}
+	if !strings.Contains(body, "{visits} visits") || !strings.Contains(body, "访问 {visits}") {
+		t.Fatal("papers page must i18n public visit count")
+	}
+	if !strings.Contains(body, "MaClaw Selected papers") || !strings.Contains(body, "码卡龙论文精选") {
+		t.Fatal("papers page must use MaClaw / 码卡龙 site title")
+	}
+	if !strings.Contains(body, "lastCatalog.visits") {
+		t.Fatal("papers page must display visits from /papers/api catalog JSON")
+	}
 }
-
 
 func TestPapersPageAnonymousOK(t *testing.T) {
 	h, _ := papersHandler(t)
@@ -265,5 +274,121 @@ func TestSettingsStillGatedFromPapersFlow(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("/settings/config status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func papersAPICatalog(t *testing.T, h http.Handler) papersCatalog {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("/papers/api status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	return cat
+}
+
+func TestPapersVisitCounterBumpAndPersist(t *testing.T) {
+	h, dir := papersHandler(t)
+	if cat := papersAPICatalog(t, h); cat.Visits != 0 {
+		t.Fatalf("initial visits=%d", cat.Visits)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodHead, "/papers", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HEAD /papers status=%d", rr.Code)
+	}
+	if cat := papersAPICatalog(t, h); cat.Visits != 0 {
+		t.Fatalf("HEAD must not increment visits=%d", cat.Visits)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /papers status=%d", rr.Code)
+	}
+	if cat := papersAPICatalog(t, h); cat.Visits != 1 {
+		t.Fatalf("after GET /papers visits=%d", cat.Visits)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "visit-stats.json"))
+	if err != nil {
+		t.Fatalf("visit-stats.json: %v", err)
+	}
+	var st visitStatsFile
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Visits != 1 {
+		t.Fatalf("persisted visits=%d body=%s", st.Visits, raw)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/pdf/2401.05459", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PDF status=%d", rr.Code)
+	}
+	if cat := papersAPICatalog(t, h); cat.Visits != 1 {
+		t.Fatalf("PDF download must not increment visits=%d", cat.Visits)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /papers/ status=%d", rr.Code)
+	}
+	if cat := papersAPICatalog(t, h); cat.Visits != 2 {
+		t.Fatalf("after second HTML GET visits=%d", cat.Visits)
+	}
+
+	h2 := New(nil, "", nil, nil)
+	if cat := papersAPICatalog(t, h2); cat.Visits != 2 {
+		t.Fatalf("restart must reload persisted visits=%d", cat.Visits)
+	}
+}
+
+func TestPapersVisitCounterConcurrent(t *testing.T) {
+	h, dir := papersHandler(t)
+	const n = 40
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			rr := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+			h.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				errCh <- fmt.Errorf("GET /papers status=%d", rr.Code)
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if cat := papersAPICatalog(t, h); cat.Visits != n {
+		t.Fatalf("concurrent visits=%d want=%d", cat.Visits, n)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "visit-stats.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st visitStatsFile
+	if err := json.Unmarshal(raw, &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Visits != n {
+		t.Fatalf("persisted concurrent visits=%d want=%d", st.Visits, n)
 	}
 }

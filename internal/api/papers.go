@@ -69,6 +69,9 @@ type papersCatalog struct {
 	// CanManage is true when the caller may enqueue translations / open admin UI.
 	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
 	CanManage bool `json:"can_manage"`
+	// Visits is the persisted public page-view count for GET /papers (HTML).
+	// Not incremented by /papers/api, PDF downloads, or HEAD.
+	Visits int64 `json:"visits"`
 }
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
@@ -82,6 +85,10 @@ type translateProgress struct {
 	RunningTitles []string `json:"running_titles,omitempty"`
 }
 
+type visitStatsFile struct {
+	Visits int64 `json:"visits"`
+}
+
 type papersStore struct {
 	mu      sync.Mutex
 	root    string
@@ -90,6 +97,10 @@ type papersStore struct {
 	cat     papersCatalog
 	xlate   *translateService
 	absZH   *abstractZHService
+
+	visitMu     sync.Mutex
+	visits      int64
+	visitsReady bool
 }
 
 func papersRoot() string {
@@ -139,7 +150,65 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 	if ps != nil && ps.absZH != nil {
 		ps.absZH.overlay(out.Papers)
 	}
+	out.Visits = ps.currentVisits()
 	return out, nil
+}
+
+func visitStatsPath(root string) string {
+	if root == "" {
+		root = papersRoot()
+	}
+	return filepath.Join(root, "visit-stats.json")
+}
+
+func (ps *papersStore) currentVisits() int64 {
+	if ps == nil {
+		return 0
+	}
+	ps.visitMu.Lock()
+	defer ps.visitMu.Unlock()
+	ps.loadVisitsLocked()
+	return ps.visits
+}
+
+func (ps *papersStore) incrementVisit() int64 {
+	if ps == nil {
+		return 0
+	}
+	ps.visitMu.Lock()
+	defer ps.visitMu.Unlock()
+	ps.loadVisitsLocked()
+	ps.visits++
+	if err := ps.persistVisitsLocked(); err != nil {
+		log.Printf("papers visit persist: %v", err)
+	}
+	return ps.visits
+}
+
+func (ps *papersStore) loadVisitsLocked() {
+	if ps.visitsReady {
+		return
+	}
+	ps.visitsReady = true
+	raw, err := os.ReadFile(visitStatsPath(ps.root))
+	if err != nil {
+		return
+	}
+	var st visitStatsFile
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return
+	}
+	if st.Visits > 0 {
+		ps.visits = st.Visits
+	}
+}
+
+func (ps *papersStore) persistVisitsLocked() error {
+	b, err := json.Marshal(visitStatsFile{Visits: ps.visits})
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(visitStatsPath(ps.root), append(b, '\n'), 0o644)
 }
 
 func (ps *papersStore) catalogBase() (papersCatalog, error) {
@@ -278,10 +347,15 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.Method {
-	case http.MethodGet, http.MethodHead:
+	case http.MethodGet:
+		// Count HTML page views only. HEAD, /papers/api polls, and PDF
+		// downloads must not increment.
+		s.papers().incrementVisit()
 		// Catalog page is public; Settings link always shown. Translate actions
 		// are gated in the UI via /papers/api can_manage, and mutations still
 		// require authorizeSettings. Unauthenticated /settings shows login.
+		writeSettingsHTML(w, r, papersPageHTML)
+	case http.MethodHead:
 		writeSettingsHTML(w, r, papersPageHTML)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Papers</title>
+  <title>MaClaw Selected papers</title>
   <style>
     :root, html[data-theme="light"] {
       --bg: #f5f6f8;
@@ -273,7 +273,7 @@
   </div>
 </div>
 <main>
-  <h1 data-i18n="heading">Agent papers</h1>
+  <h1 data-i18n="heading">MaClaw Selected papers</h1>
   <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
 
   <p class="hint-line">
@@ -327,7 +327,7 @@
     en: {
       langLabel: "Language",
       themeLabel: "Theme",
-      heading: "Agent papers",
+      heading: "MaClaw Selected papers",
       lead: "Browse the local catalog, download cached PDFs, and queue Chinese translations.",
       settingsLink: "Settings",
       searchPh: "Search title, authors, abstract, tags…",
@@ -336,6 +336,7 @@
       sortNewest: "Newest first",
       sortOldest: "Oldest first",
       meta: "{matched} match · {total} in catalog · page {page}/{pages} · generated {when}",
+      visits: "{visits} visits",
       pageInfo: "Showing {from}–{to} of {matched}",
       prev: "Previous",
       next: "Next",
@@ -369,7 +370,7 @@
     zh: {
       langLabel: "语言",
       themeLabel: "主题",
-      heading: "Agent 论文库",
+      heading: "码卡龙论文精选",
       lead: "浏览本地目录、下载已缓存 PDF，并排队生成中文翻译。",
       settingsLink: "设置",
       searchPh: "搜索标题、作者、摘要、标签…",
@@ -378,6 +379,7 @@
       sortNewest: "最新优先",
       sortOldest: "最早优先",
       meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 第 {page}/{pages} 页 · 生成于 {when}",
+      visits: "访问 {visits}",
       pageInfo: "显示第 {from}–{to} 篇，共 {matched} 篇",
       prev: "上一页",
       next: "下一页",
@@ -447,6 +449,7 @@
     const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
     document.getElementById("theme-light").classList.toggle("active", theme === "light");
     document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
+    document.title = t("heading");
     document.documentElement.setAttribute("data-i18n-ready", "1");
   }
   function setLang(lang) {
@@ -498,7 +501,7 @@
     return withToken(u);
   }
 
-  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false };
+  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false, visits: 0 };
   let canManage = false;
   let filteredPapers = [];
   let pageIndex = 1; // 1-based
@@ -714,6 +717,8 @@
     const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
     const matched = filteredPapers.length;
     const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
+    const visits = typeof lastCatalog.visits === "number" ? lastCatalog.visits : 0;
+    const visitsText = t("visits").replace("{visits}", String(visits));
     const text = t("meta")
       .replace("{matched}", String(matched))
       .replace("{shown}", String(matched))
@@ -721,7 +726,7 @@
       .replace("{page}", String(pageIndex))
       .replace("{pages}", String(pages))
       .replace("{when}", when);
-    document.getElementById("meta").textContent = text;
+    document.getElementById("meta").textContent = text + " · " + visitsText;
   }
 
   function renderPagers() {

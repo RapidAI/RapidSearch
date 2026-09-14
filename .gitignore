@@ -45,3 +45,7 @@ agent-papers/translate-work/
 # Cached Chinese paper abstracts (runtime LLM output)
 agent-papers/abstracts_zh.json
 **/abstracts_zh.json
+
+# Public /papers page-view counter (runtime)
+agent-papers/visit-stats.json
+**/visit-stats.json
