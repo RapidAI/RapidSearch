@@ -51,6 +51,10 @@ type paperEntry struct {
 	DualPDF         string `json:"dual_pdf,omitempty"`
 	TranslateStatus string `json:"translate_status,omitempty"`
 	TranslateError  string `json:"translate_error,omitempty"`
+	// PageCount is the local PDF page count (0 when unknown / no local file).
+	PageCount int `json:"page_count,omitempty"`
+	// TranslateSkipReason is a machine-readable gate, e.g. too_many_pages.
+	TranslateSkipReason string `json:"translate_skip_reason,omitempty"`
 }
 
 type papersManifest struct {
@@ -238,10 +242,12 @@ func enrichPaper(p paperEntry, pdfDir string) paperEntry {
 		if st, err := os.Stat(full); err == nil && !st.IsDir() {
 			p.HasLocal = true
 			p.LocalPDF = "/papers/pdf/" + name
+			p = attachPageCount(p, full)
 		}
 	}
 	p.ID = paperTranslateID(p)
 	p.Brief = briefText(p.Abstract, 280)
+	p.TranslateSkipReason = paperTranslateSkipReason(p)
 	// Do not leak absolute host paths in API responses.
 	p.PDFPath = ""
 	return p

@@ -495,6 +495,7 @@ func (ps *papersStore) importUploadedPaper(ctx context.Context, tag, uploadName 
 		Authors:        meta.Authors,
 		Abstract:       meta.Abstract,
 		Year:           meta.Year,
+		PageCount:      meta.Pages,
 		TopicTags:      []string{tag},
 		Score:          importManualScore,
 		Source:         paperSourceManual,
@@ -524,6 +525,11 @@ func (ps *papersStore) saveImportedPDF(p paperEntry, body []byte) (paperEntry, b
 	}
 	p.PDFPath = filepath.ToSlash(filepath.Join("pdfs", name))
 	p.Filename = name
+	if n := pdfPageCountBytes(body); n > 0 {
+		p.PageCount = n
+	} else if n := pdfPageCountFile(dest); n > 0 {
+		p.PageCount = n
+	}
 
 	updated, err := ps.writeManifestPaper(p)
 	if err != nil {
@@ -693,6 +699,9 @@ func mergeImportedPaper(old, neu paperEntry) paperEntry {
 	}
 	if neu.Updated != "" {
 		out.Updated = neu.Updated
+	}
+	if neu.PageCount > 0 {
+		out.PageCount = neu.PageCount
 	}
 	out.Source = paperSourceManual
 	if !containsString(out.QueryHits, importQueryHit) {

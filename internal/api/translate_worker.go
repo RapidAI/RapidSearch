@@ -45,12 +45,27 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 		}
 		p, ok := byID[id]
 		if !ok {
-			if _, err := originalPDFAbs(s.root, id); err != nil {
+			abs, err := originalPDFAbs(s.root, id)
+			if err != nil {
 				out.Skipped = append(out.Skipped, id)
 				continue
 			}
+			p.ID = id
+			p.HasLocal = true
+			p.Filename = filepath.Base(abs)
+			p = attachPageCount(p, abs)
 		} else if !p.HasLocal {
 			out.Skipped = append(out.Skipped, id)
+			continue
+		}
+		if p.PageCount <= 0 && p.Filename != "" {
+			if abs, err := originalPDFAbs(s.root, p.Filename); err == nil {
+				p = attachPageCount(p, abs)
+			}
+		}
+		if paperTooManyPages(p) {
+			out.Skipped = append(out.Skipped, id)
+			out.Rejected[id] = translateSkipTooManyPages
 			continue
 		}
 
@@ -412,6 +427,16 @@ func (s *translateService) runOne(id string) {
 		return
 	}
 	j.Filename = filepath.Base(src)
+	if n := pdfPageCountFile(src); n > translateMaxPages {
+		log.Printf("papers translate id=%s skip %s pages=%d", id, translateSkipTooManyPages, n)
+		s.mu.Lock()
+		delete(s.status.Jobs, id)
+		if err := s.persistStatusLocked(); err != nil {
+			log.Printf("papers translate-status write: %v", err)
+		}
+		s.mu.Unlock()
+		return
+	}
 
 	// Already produced both outputs (e.g. copied in while queued).
 	if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {

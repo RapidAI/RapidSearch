@@ -519,6 +519,7 @@ func overlayOne(p paperEntry, root string, jobs map[string]translateJob) paperEn
 			p.TranslateError = ""
 		}
 	}
+	p.TranslateSkipReason = paperTranslateSkipReason(p)
 	return p
 }
 
@@ -810,8 +811,9 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 			Running:    svc.runningID(),
 			RunningIDs: svc.runningIDs(),
 		}
-		if force && len(res.Queued) == 0 && len(res.Rejected) > 0 {
+		if len(res.Queued) == 0 && len(res.Rejected) > 0 && (force || hasTranslateSkipReject(res.Rejected)) {
 			// Prefer a clear Chinese message when the only target is mid-flight.
+			// Page-count rejects use the machine-readable too_many_pages reason.
 			for _, reason := range res.Rejected {
 				resp.OK = false
 				resp.Error = reason
@@ -912,10 +914,24 @@ func (s *translateService) AutoTranslate() bool {
 	return s != nil && s.snapshot().AutoTranslate
 }
 
+func hasTranslateSkipReject(rejected map[string]string) bool {
+	for _, reason := range rejected {
+		if reason == translateSkipTooManyPages {
+			return true
+		}
+	}
+	return false
+}
+
 func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 	var ids []string
 	for _, p := range papers {
 		if !p.HasLocal || p.ID == "" {
+			continue
+		}
+		// Auto-translate never spends a slot on over-long PDFs.
+		// Translate-all still includes them so enqueue can return too_many_pages.
+		if auto && paperTooManyPages(p) {
 			continue
 		}
 		// Already translated — never auto / bulk-enqueue again.
