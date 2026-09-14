@@ -8,6 +8,8 @@ from search_download_papers import (
     STABLE_TAGS,
     extract_arxiv_id,
     preserve_manual_tags,
+    relevance_score,
+    tag_topics,
     validate_topic_tag,
     Paper,
 )
@@ -48,6 +50,39 @@ class TestValidateTopicTag(unittest.TestCase):
         self.assertTrue(preserve_manual_tags(p2))
         p3 = Paper(title="x", topic_tags=["self-evolution"], source="")
         self.assertFalse(preserve_manual_tags(p3))
+        # Auto-assigned training/tools tags may be refreshed by retag.
+        p4 = Paper(title="x", topic_tags=["llm-training"], source="")
+        self.assertFalse(preserve_manual_tags(p4))
+
+
+class TestAutoTopicTags(unittest.TestCase):
+    def test_llm_training(self):
+        tags = tag_topics(
+            "Simple Preference Optimization for LLMs",
+            "We study DPO and RLHF for large language model post-training.",
+        )
+        self.assertIn("llm-training", tags)
+        self.assertNotIn("other", tags)
+        self.assertGreaterEqual(
+            relevance_score(
+                "Simple Preference Optimization for LLMs",
+                "We study DPO and RLHF for large language model post-training.",
+            ),
+            3.0,
+        )
+
+    def test_agent_tools_memory(self):
+        tags = tag_topics(
+            "Tool-using language agents with long-term memory",
+            "An LLM agent that calls tools and stores episodic memory.",
+        )
+        self.assertIn("agent-tools-memory", tags)
+        self.assertNotIn("other", tags)
+
+    def test_other_never_auto(self):
+        tags = tag_topics("A theory of everything", "No agents or language models here.")
+        self.assertNotIn("other", tags)
+        self.assertEqual(tags, [])
 
 
 if __name__ == "__main__":
