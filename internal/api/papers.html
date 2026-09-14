@@ -47,17 +47,40 @@
       background: var(--bg);
       color: var(--ink);
     }
-    .top {
+    .title-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 16px 18px 0;
+      gap: 12px 16px;
       flex-wrap: wrap;
+      margin: 0 0 6px;
+    }
+    .title-row h1 { margin: 0; flex: 0 1 auto; }
+    .title-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .title-actions .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-actions .nav a {
+      display: inline-block;
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      text-decoration: none;
+      font-size: 13px;
     }
     .lang-switch, .theme-switch { display: flex; gap: 4px; }
+    .theme-switch button, .lang-switch button { padding: 6px 10px; }
     .lang-switch button.active, .theme-switch button.active {
       background: var(--accent);
       color: #fff;
@@ -67,7 +90,7 @@
     html[data-theme="light"] .theme-switch button.active {
       background: #0b63ce;
     }
-    main { max-width: 960px; margin: 0 auto; padding: 12px 18px 48px; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px 18px 48px; }
     h1 { font-size: 1.45rem; margin: 0 0 6px; }
     h2 { font-size: 1.05rem; margin: 0 0 10px; }
     p.lead { color: var(--muted); margin: 0 0 18px; }
@@ -305,24 +328,24 @@
   </script>
 </head>
 <body>
-<div class="top">
-  <div class="nav">
-    <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
-    <button type="button" class="primary" id="import-open" data-i18n="importOpen">Import paper</button>
-  </div>
-  <div class="row" style="margin:0">
-    <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
-      <button type="button" id="theme-light" data-theme="light">Aa</button>
-      <button type="button" id="theme-dark" data-theme="dark">◐</button>
-    </div>
-    <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
-      <button type="button" id="lang-zh" data-lang="zh">中文</button>
-      <button type="button" id="lang-en" data-lang="en">EN</button>
-    </div>
-  </div>
-</div>
 <main>
-  <h1 data-i18n="heading">码卡龙论文精选</h1>
+  <div class="title-row">
+    <h1 data-i18n="heading">码卡龙论文精选</h1>
+    <div class="title-actions">
+      <div class="nav">
+        <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
+        <button type="button" class="primary" id="import-open" data-i18n="importOpen">Import paper</button>
+      </div>
+      <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
+        <button type="button" id="theme-light" data-theme="light">Aa</button>
+        <button type="button" id="theme-dark" data-theme="dark">◐</button>
+      </div>
+      <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
+        <button type="button" id="lang-zh" data-lang="zh">中文</button>
+        <button type="button" id="lang-en" data-lang="en">EN</button>
+      </div>
+    </div>
+  </div>
   <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
 
   <p class="hint-line">
