@@ -1,0 +1,24 @@
+source,target,tgt_lng
+agent,智能体,zh-CN
+agents,智能体,zh-CN
+multi-agent,多智能体,zh-CN
+LLM,大语言模型,zh-CN
+large language model,大语言模型,zh-CN
+foundation model,基础模型,zh-CN
+self-evolution,自进化,zh-CN
+self-improving,自改进,zh-CN
+red teaming,红队测试,zh-CN
+jailbreak,越狱,zh-CN
+prompt injection,提示注入,zh-CN
+alignment,对齐,zh-CN
+fine-tuning,微调,zh-CN
+reinforcement learning,强化学习,zh-CN
+runtime,运行时,zh-CN
+safety,安全,zh-CN
+security,安全性,zh-CN
+tool use,工具使用,zh-CN
+function calling,函数调用,zh-CN
+retrieval-augmented generation,检索增强生成,zh-CN
+RAG,检索增强生成,zh-CN
+IoT,物联网,zh-CN
+Internet of Things,物联网,zh-CN

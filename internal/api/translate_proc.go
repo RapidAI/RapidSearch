@@ -10,8 +10,6 @@ import (
 	"syscall"
 )
 
-const translateGlobalLockName = ".run.lock"
-
 // translateWorkDir is the per-paper BabelDOC output directory.
 func translateWorkDir(root, id string) string {
 	id = sanitizePaperID(id)
@@ -19,35 +17,6 @@ func translateWorkDir(root, id string) string {
 		return ""
 	}
 	return filepath.Join(root, "translate-work", id)
-}
-
-func translateGlobalLockPath(root string) string {
-	if root == "" {
-		root = papersRoot()
-	}
-	return filepath.Join(root, "translate-work", translateGlobalLockName)
-}
-
-// acquireTranslateLock takes an exclusive flock so at most one BabelDOC run
-// proceeds for this papers root (including across search-service restarts).
-// The returned unlock function must be called; it is safe if acquire failed.
-func acquireTranslateLock(root string) (unlock func(), err error) {
-	path := translateGlobalLockPath(root)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return func() {}, err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return func() {}, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		_ = f.Close()
-		return func() {}, err
-	}
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
-	}, nil
 }
 
 // translateOSBusy reports whether a translate_worker.py or babeldoc process is
@@ -81,14 +50,16 @@ func translateOSBusy(root, id string) bool {
 	})
 }
 
-// anyTranslateOSBusy reports any in-flight BabelDOC / translate_worker for this
-// papers root (hard global concurrency = 1).
-func anyTranslateOSBusy(root string) (busy bool, id string) {
+// scanTranslateOSBusy lists in-flight BabelDOC / translate_worker processes for
+// this papers root. unidentified workers (no extractable paper id) are counted
+// separately so they still occupy a concurrency slot after a restart.
+func scanTranslateOSBusy(root string) (ids []string, unknown int) {
 	root = filepath.Clean(root)
 	rootSlash := filepath.ToSlash(root)
 	if rootSlash == "" || rootSlash == "." {
-		return false, ""
+		return nil, 0
 	}
+	seen := map[string]bool{}
 	anyProcCmdline(func(cmd string) bool {
 		if !isTranslateCmdline(cmd) {
 			return false
@@ -98,11 +69,23 @@ func anyTranslateOSBusy(root string) (busy bool, id string) {
 		if !strings.Contains(norm, rootSlash) && !strings.Contains(cmd, root) {
 			return false
 		}
-		busy = true
-		id = extractTranslateID(cmd)
-		return true // stop scan
+		id := extractTranslateID(cmd)
+		if id == "" {
+			unknown++
+			return false
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+		return false // continue scan — multiple papers may be translating
 	})
-	return busy, id
+	return ids, unknown
+}
+
+func listTranslateOSBusy(root string) []string {
+	ids, _ := scanTranslateOSBusy(root)
+	return ids
 }
 
 func isTranslateCmdline(cmd string) bool {

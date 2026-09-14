@@ -45,3 +45,19 @@ agent-papers/translate-work/
 # Cached Chinese paper abstracts (runtime LLM output)
 agent-papers/abstracts_zh.json
 **/abstracts_zh.json
+
+# Papers visit counter + ops pause (runtime)
+agent-papers/visit-stats.json
+**/visit-stats.json
+agent-papers/translate.pause
+**/translate.pause
+
+# Paper reviews (LLM 解读 + ratings; runtime, never commit)
+agent-papers/reviews/
+**/agent-papers/reviews/
+
+# Local rebuild leftovers
+search-proxy-linux
+search-service.prev
+search-service.restart.log
+*.restart.log

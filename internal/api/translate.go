@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,10 +22,13 @@ import (
 )
 
 const (
-	translateConfigName = "translate-config.json"
-	translateStatusName = "translate_status.json"
-	translateConfigMode = 0o600
-	translateDefaultQPS = 4
+	translateConfigName         = "translate-config.json"
+	translateStatusName         = "translate_status.json"
+	translateConfigMode         = 0o600
+	translateDefaultQPS         = 4
+	translateDefaultConcurrency = 3
+	translateMinConcurrency     = 1
+	translateMaxConcurrency     = 8
 )
 
 // Translation job statuses exposed on /papers/api.
@@ -36,12 +41,12 @@ const (
 )
 
 type translateFileConfig struct {
-	Version       int     `json:"version"`
-	BaseURL       string  `json:"base_url"`
-	APIKey        string  `json:"api_key,omitempty"`
-	Model         string  `json:"model"`
-	QPS           int     `json:"qps,omitempty"`
-	AutoTranslate bool    `json:"auto_translate"`
+	Version       int    `json:"version"`
+	BaseURL       string `json:"base_url"`
+	APIKey        string `json:"api_key,omitempty"`
+	Model         string `json:"model"`
+	QPS           int    `json:"qps,omitempty"`
+	AutoTranslate bool   `json:"auto_translate"`
 }
 
 type translateSnapshot struct {
@@ -101,10 +106,13 @@ type translateService struct {
 	status translateStatusFile
 	queue  []string
 	inQ    map[string]bool
-	runID  string
-	kick   chan struct{}
-	runner translateRunner
-	client *http.Client
+	// running is the set of paper ids with an in-process runOne goroutine.
+	running map[string]bool
+	// concurrency is the max number of distinct-paper BabelDOC jobs (1–8).
+	concurrency int
+	kick        chan struct{}
+	runner      translateRunner
+	client      *http.Client
 	// started is true after the background loop is launched.
 	started bool
 }
@@ -129,8 +137,10 @@ func newTranslateService(root string) *translateService {
 			Version: 1,
 			Jobs:    map[string]translateJob{},
 		},
-		inQ:  make(map[string]bool),
-		kick: make(chan struct{}, 1),
+		inQ:         make(map[string]bool),
+		running:     make(map[string]bool),
+		concurrency: parseTranslateConcurrency(),
+		kick:        make(chan struct{}, 1),
 	}
 	_ = s.loadConfig()
 	_ = s.loadStatus()
@@ -152,8 +162,10 @@ func (s *translateService) start() {
 	go s.loop()
 }
 
-// recoverJobs rehydrates queued ids into the in-memory queue after a reload,
-// and claims the global slot when an orphaned BabelDOC is still running.
+// recoverJobs rehydrates queued ids into the in-memory queue after a reload.
+// Orphan BabelDOC processes occupy concurrency slots via occupiedSlots()
+// and are adopted/skipped by reconcileExternal; we do not spawn a second
+// worker for the same paper id.
 func (s *translateService) recoverJobs() {
 	if s == nil {
 		return
@@ -166,15 +178,12 @@ func (s *translateService) recoverJobs() {
 	for id, j := range s.status.Jobs {
 		switch j.Status {
 		case translateRunning:
-			if jobProcessBusy(s.root, id) {
-				if s.runID == "" {
-					s.runID = id
-				}
+			if jobProcessBusy(s.root, id) || s.running[id] {
 				continue
 			}
 			// Dead "running" jobs are finalized by reconcileExternal.
 		case translateQueued:
-			if s.inQ[id] || s.runID == id {
+			if s.inQ[id] || s.running[id] {
 				continue
 			}
 			if jobProcessBusy(s.root, id) {
@@ -183,9 +192,6 @@ func (s *translateService) recoverJobs() {
 				j.Error = ""
 				j.UpdatedAt = now
 				s.status.Jobs[id] = j
-				if s.runID == "" {
-					s.runID = id
-				}
 				dirty = true
 				continue
 			}
@@ -446,7 +452,6 @@ func (s *translateService) persistStatusLocked() error {
 	return atomicWriteFile(translateStatusPath(s.root), append(b, '\n'), 0o644)
 }
 
-
 func summarizeTranslateProgress(papers []paperEntry) *translateProgress {
 	p := &translateProgress{}
 	for _, paper := range papers {
@@ -455,16 +460,23 @@ func summarizeTranslateProgress(papers []paperEntry) *translateProgress {
 			p.Queued++
 		case translateRunning:
 			p.Running++
+			id := paper.ID
+			title := strings.TrimSpace(paper.Title)
+			if id != "" {
+				p.RunningIDs = append(p.RunningIDs, id)
+			}
+			if title != "" {
+				p.RunningTitles = append(p.RunningTitles, title)
+			} else if id != "" {
+				p.RunningTitles = append(p.RunningTitles, id)
+			}
 			if p.RunningID == "" {
-				p.RunningID = paper.ID
-				p.RunningTitle = strings.TrimSpace(paper.Title)
+				p.RunningID = id
+				p.RunningTitle = title
 			}
 		}
 	}
 	p.Active = p.Queued > 0 || p.Running > 0
-	if !p.Active {
-		return p
-	}
 	return p
 }
 
@@ -593,8 +605,8 @@ func sanitizeUserError(s string) string {
 		}
 	}
 	out := strings.Join(fields, " ")
-	if len(out) > 240 {
-		out = out[:240] + "…"
+	if len(out) > 480 {
+		out = out[:480] + "…"
 	}
 	return out
 }
@@ -740,12 +752,13 @@ type translateEnqueueReq struct {
 }
 
 type translateEnqueueResp struct {
-	OK       bool              `json:"ok"`
-	Queued   []string          `json:"queued"`
-	Skipped  []string          `json:"skipped,omitempty"`
-	Rejected map[string]string `json:"rejected,omitempty"`
-	Running  string            `json:"running,omitempty"`
-	Error    string            `json:"error,omitempty"`
+	OK         bool              `json:"ok"`
+	Queued     []string          `json:"queued"`
+	Skipped    []string          `json:"skipped,omitempty"`
+	Rejected   map[string]string `json:"rejected,omitempty"`
+	Running    string            `json:"running,omitempty"`
+	RunningIDs []string          `json:"running_ids,omitempty"`
+	Error      string            `json:"error,omitempty"`
 }
 
 func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
@@ -790,11 +803,12 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 		}
 		res := svc.enqueue(ids, cat.Papers, force)
 		resp := translateEnqueueResp{
-			OK:       true,
-			Queued:   res.Queued,
-			Skipped:  res.Skipped,
-			Rejected: res.Rejected,
-			Running:  svc.runningID(),
+			OK:         true,
+			Queued:     res.Queued,
+			Skipped:    res.Skipped,
+			Rejected:   res.Rejected,
+			Running:    svc.runningID(),
+			RunningIDs: svc.runningIDs(),
 		}
 		if force && len(res.Queued) == 0 && len(res.Rejected) > 0 {
 			// Prefer a clear Chinese message when the only target is mid-flight.
@@ -819,22 +833,79 @@ func (s *translateService) queuePublic() map[string]any {
 		v.Error = sanitizeUserError(v.Error)
 		jobs[k] = v
 	}
+	ids := s.runningIDsLocked()
+	first := ""
+	if len(ids) > 0 {
+		first = ids[0]
+	}
 	return map[string]any{
-		"ok":      true,
-		"queued":  pending,
-		"running": s.runID,
-		"jobs":    jobs,
-		"babeldoc": babeldocOnPath(),
+		"ok":          true,
+		"queued":      pending,
+		"running":     first,
+		"running_ids": ids,
+		"concurrency": s.concurrencyLimit(),
+		"jobs":        jobs,
+		"babeldoc":    babeldocOnPath(),
 	}
 }
 
 func (s *translateService) runningID() string {
-	if s == nil {
+	ids := s.runningIDs()
+	if len(ids) == 0 {
 		return ""
+	}
+	return ids[0]
+}
+
+func (s *translateService) runningIDs() []string {
+	if s == nil {
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.runID
+	return s.runningIDsLocked()
+}
+
+func (s *translateService) runningIDsLocked() []string {
+	if s == nil || len(s.running) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(s.running))
+	for id := range s.running {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (s *translateService) concurrencyLimit() int {
+	if s == nil {
+		return translateDefaultConcurrency
+	}
+	if s.concurrency >= translateMinConcurrency {
+		return s.concurrency
+	}
+	return parseTranslateConcurrency()
+}
+
+func parseTranslateConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv("PAPERS_TRANSLATE_CONCURRENCY"))
+	if raw == "" {
+		return translateDefaultConcurrency
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return translateDefaultConcurrency
+	}
+	if n < translateMinConcurrency {
+		return translateMinConcurrency
+	}
+	if n > translateMaxConcurrency {
+		return translateMaxConcurrency
+	}
+	return n
 }
 
 func (s *translateService) AutoTranslate() bool {

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Search & download academic papers on agent self-evolution and agent security.
-Primary source: ArXiv API. Optional: Semantic Scholar, local RapidSearch + Crawl4AI.
+Search & download academic papers on agent self-evolution, agent security,
+and LLM-based IoT (AIoT). Primary source: ArXiv API. Optional: Semantic Scholar,
+local RapidSearch + Crawl4AI.
+
+Stable topic_tags keys: self-evolution | security | both | llm-iot | survey
 """
 from __future__ import annotations
 
@@ -79,6 +82,12 @@ DEFAULT_QUERIES = [
     'all:"alignment" AND all:"self-modifying agents" OR all:"agentic" AND all:jailbreak',
     'all:"secure self-improvement" OR all:"safe self-improving" OR all:"aligned self-evolution"',
     'all:"self-evolving" AND (all:safety OR all:security OR all:alignment) AND (all:agent OR all:LLM)',
+    # LLM-based IoT / AIoT (always AND LLM/agent framing — not generic IoT hardware)
+    'all:"LLM" AND (all:IoT OR all:AIoT OR all:"Internet of Things")',
+    'all:"language model" AND (all:IoT OR all:"smart home" OR all:"edge device" OR all:MQTT)',
+    'all:"LLM agent" AND (all:IoT OR all:AIoT OR all:"sensor network" OR all:"cyber-physical")',
+    'all:AIoT AND (all:LLM OR all:agent OR all:"foundation model" OR all:"language model")',
+    'all:"Internet of Things" AND (all:"LLM agent" OR all:"language agent" OR all:agentic)',
 ]
 
 # Broader web/RapidSearch queries (human phrasing)
@@ -95,7 +104,33 @@ WEB_QUERIES = [
     "safe self-evolution agent alignment",
     "secure agent self-improvement",
     "secure self-improvement aligned self-modifying agents",
+    "LLM Internet of Things AIoT arxiv",
+    "LLM agent IoT edge device paper",
+    "AIoT large language model agent",
+    "LLM smart home MQTT agent",
 ]
+
+
+KEYWORDS_FILENAME = "search_keywords.json"
+
+
+def load_search_queries(out_dir: Path | str | None = None) -> list[str]:
+    """Return ArXiv queries: merged_queries from search_keywords.json if present, else DEFAULT_QUERIES.
+
+    Merged list is seed ∪ auto, already gated/deduped by maintain_keywords.py.
+    Does not broaden into general ML — file is produced under topic gates.
+    """
+    base = Path(out_dir) if out_dir else Path(__file__).resolve().parent
+    kw_path = base / KEYWORDS_FILENAME
+    if not kw_path.exists():
+        return list(DEFAULT_QUERIES)
+    try:
+        data = json.loads(kw_path.read_text(encoding="utf-8"))
+    except Exception:
+        return list(DEFAULT_QUERIES)
+    merged = data.get("merged_queries") or []
+    cleaned = [q.strip() for q in merged if isinstance(q, str) and q.strip()]
+    return cleaned if cleaned else list(DEFAULT_QUERIES)
 
 # Relevance patterns
 AGENT_RE = re.compile(
@@ -130,6 +165,34 @@ LLM_RE = re.compile(
     r"chatbot|instruct(?:ion)?[\s-]?tun)\b",
     re.I,
 )
+# IoT / AIoT / CPS / edge / smart-home — only used when paired with LLM/agent framing
+IOT_RE = re.compile(
+    r"\b("
+    r"iot|aiot|iiot|"
+    r"internet[\s-]?of[\s-]?things|"
+    r"edge[\s-]?devices?|"
+    r"smart[\s-]?homes?|"
+    r"smart[\s-]?cit(?:y|ies)|"
+    r"mqtt|"
+    r"sensor[\s-]?networks?|"
+    r"cyber[\s-]?physical(?:\s+systems?)?"
+    r")\b",
+    re.I,
+)
+# Tighter than LLM_RE: drop transformer/chatbot-only so vision-IoT does not flood.
+LLM_IOT_FRAME_RE = re.compile(
+    r"\b(llm|llms|large[\s-]?language|language[\s-]?model|language[\s-]?agent|"
+    r"foundation[\s-]?model|gpt-\d|chatgpt)\b",
+    re.I,
+)
+# "without any language model" / "no LLM" should not count as framing.
+LLM_IOT_NEG_RE = re.compile(
+    r"\b(?:without|no|not|unlike|non)[\s\w-]{0,48}"
+    r"(?:llm|llms|language[\s-]?model|language[\s-]?agent|foundation[\s-]?model)\b",
+    re.I,
+)
+
+PRIMARY_TAGS = ("both", "self-evolution", "security", "llm-iot")
 
 ARXIV_ID_RE = re.compile(
     r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:)?(\d{4}\.\d{4,5})(?:v\d+)?",
@@ -217,11 +280,51 @@ def extract_doi(text: str) -> str:
     return m.group(0).rstrip(".") if m else ""
 
 
+IOT_STRONG_RE = re.compile(
+    r"\b(aiot|iiot|internet[\s-]?of[\s-]?things|llm[\s-]?iot|"
+    r"iot[\s-]?agents?|agents?[\s-]?iot)\b",
+    re.I,
+)
+
+
+def is_llm_iot(title: str, abstract: str) -> bool:
+    """True when IoT/AIoT/CPS/edge/smart-home is framed as LLM/agent/foundation-model.
+
+    Passing mentions (e.g. "smartphones and IoT") do not count unless IoT is in
+    the title, a strong phrase (AIoT / Internet of Things), or within ~80 chars
+    of an LLM/agent frame.
+    """
+    text = f"{title}. {abstract}"
+    if not IOT_RE.search(text):
+        return False
+    framed = bool(AGENT_RE.search(text) or LLM_IOT_FRAME_RE.search(text))
+    if not framed:
+        return False
+    if LLM_IOT_NEG_RE.search(text) and not (
+        AGENT_RE.search(title) or LLM_IOT_FRAME_RE.search(title)
+    ):
+        return False
+    if IOT_RE.search(title) or IOT_STRONG_RE.search(text):
+        return True
+    # Same-sentence pairing only — avoids passing "smartphones and IoT, …" then later "LLM".
+    for sent in re.split(r"[.!?;\n]+", text):
+        if IOT_RE.search(sent) and (AGENT_RE.search(sent) or LLM_IOT_FRAME_RE.search(sent)):
+            return True
+    return False
+
+
 def tag_topics(title: str, abstract: str) -> list[str]:
+    """Return stable English tag keys (primary + optional survey / llm-iot overlay).
+
+    Primary (mutually exclusive): both | self-evolution | security | llm-iot
+    Overlay: llm-iot may also attach when IoT+LLM overlaps an agent primary.
+    Secondary: survey
+    """
     text = f"{title} {abstract}"
     evo = bool(EVOLVE_RE.search(text))
     sec = bool(SECURITY_RE.search(text))
     survey = bool(SURVEY_RE.search(text))
+    llm_iot = is_llm_iot(title, abstract)
     tags: list[str] = []
     if evo and sec:
         tags.append("both")
@@ -229,15 +332,14 @@ def tag_topics(title: str, abstract: str) -> list[str]:
         tags.append("self-evolution")
     elif sec:
         tags.append("security")
-    if survey and tags:
-        tags.append("survey")
-    elif survey and (evo or sec or AGENT_RE.search(text)):
-        # survey-only but still agent-framed: keep theme if possible
-        if evo:
-            tags = ["self-evolution", "survey"]
-        elif sec:
-            tags = ["security", "survey"]
-        else:
+    elif llm_iot:
+        tags.append("llm-iot")
+    if llm_iot and "llm-iot" not in tags:
+        tags.append("llm-iot")
+    if survey:
+        if tags:
+            tags.append("survey")
+        elif AGENT_RE.search(text) or LLM_RE.search(text):
             tags = ["survey"]
     return tags
 
@@ -248,11 +350,12 @@ def relevance_score(title: str, abstract: str) -> float:
     has_llm = bool(LLM_RE.search(text))
     evo = bool(EVOLVE_RE.search(text))
     sec = bool(SECURITY_RE.search(text))
+    llm_iot = is_llm_iot(title, abstract)
 
     if not (has_agent or has_llm):
-        # pure classic RL / unrelated
+        # pure classic RL / generic IoT hardware / unrelated
         return -1.0
-    if not (evo or sec):
+    if not (evo or sec or llm_iot):
         return -0.5
 
     score = 0.0
@@ -266,18 +369,24 @@ def relevance_score(title: str, abstract: str) -> float:
         score += 3.0
     if evo and sec:
         score += 1.5  # bonus for both themes
+    if llm_iot:
+        score += 3.0  # enough to pass the gate without evo/sec
+        if evo or sec:
+            score += 0.5
     # title hits weigh more
     if EVOLVE_RE.search(title) or SECURITY_RE.search(title):
         score += 2.0
+    if IOT_RE.search(title) and (has_agent or has_llm):
+        score += 1.5
     if AGENT_RE.search(title):
         score += 1.0
     # soft penalty: RL-heavy without LLM
-    if RL_ONLY_RE.search(text) and not has_llm and not EVOLVE_RE.search(text):
+    if RL_ONLY_RE.search(text) and not has_llm and not EVOLVE_RE.search(text) and not llm_iot:
         score -= 2.0
     # surveys/reviews are high-value for corpus coverage
-    if SURVEY_RE.search(text) and (evo or sec):
+    if SURVEY_RE.search(text) and (evo or sec or llm_iot):
         score += 1.5
-    if SURVEY_RE.search(title) and (evo or sec or has_agent):
+    if SURVEY_RE.search(title) and (evo or sec or has_agent or llm_iot):
         score += 1.0
     return score
 
@@ -291,8 +400,12 @@ def is_relevant(paper: Paper) -> bool:
 _last_arxiv_call = 0.0
 
 
-def arxiv_sleep(min_interval: float = 3.2) -> None:
+def arxiv_sleep(min_interval: float = 8.0) -> None:
     global _last_arxiv_call
+    try:
+        min_interval = float(os.environ.get("ARXIV_MIN_INTERVAL", min_interval))
+    except ValueError:
+        pass
     elapsed = time.time() - _last_arxiv_call
     if elapsed < min_interval:
         time.sleep(min_interval - elapsed)
@@ -304,7 +417,7 @@ def arxiv_query(
     cache_dir: Path,
     start: int = 0,
     max_results: int = 15,
-    retries: int = 5,
+    retries: int = 8,
     sort_by: str = "relevance",
     sort_order: str = "descending",
     submitted_from: Optional[str] = None,
@@ -348,12 +461,12 @@ def arxiv_query(
             status = getattr(r, "status_code", 200)
             body = r.text if hasattr(r, "text") else r.content.decode("utf-8", "replace")
             if status == 429 or "Rate exceeded" in body or "Retry after" in body:
-                wait = 15 * (attempt + 1)
+                wait = 45 * (attempt + 1)
                 log(f"  ArXiv rate limit — sleep {wait}s (attempt {attempt+1}/{retries})")
                 time.sleep(wait)
                 continue
             if status >= 500:
-                wait = 8 * (attempt + 1)
+                wait = 20 * (attempt + 1)
                 log(f"  ArXiv HTTP {status} — sleep {wait}s")
                 time.sleep(wait)
                 continue
@@ -362,7 +475,7 @@ def arxiv_query(
                 return []
             break
         except Exception as e:
-            wait = 8 * (attempt + 1)
+            wait = 20 * (attempt + 1)
             log(f"  ArXiv error {e!r} — sleep {wait}s")
             time.sleep(wait)
             body = ""
@@ -570,8 +683,13 @@ def papers_from_web_hits(hits: list[dict]) -> list[Paper]:
         snippet = h.get("snippet") or ""
         arxiv_id = extract_arxiv_id(url) or extract_arxiv_id(title) or extract_arxiv_id(snippet)
         if not arxiv_id and "arxiv" not in url.lower() and "openreview" not in url.lower():
-            # only keep arxiv / openreview-ish for this pass
-            if not (AGENT_RE.search(title) and (EVOLVE_RE.search(title + snippet) or SECURITY_RE.search(title + snippet))):
+            # only keep arxiv / openreview-ish, or clearly on-topic title+snippet
+            blob = f"{title} {snippet}"
+            framed = bool(AGENT_RE.search(title) or LLM_RE.search(blob))
+            themed = bool(
+                EVOLVE_RE.search(blob) or SECURITY_RE.search(blob) or IOT_RE.search(blob)
+            )
+            if not (framed and themed):
                 continue
         doi = extract_doi(url) or extract_doi(snippet)
         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else ""
@@ -791,10 +909,11 @@ def write_index(out: Path, papers: list[Paper], stats: dict) -> None:
         "",
         "## Themes / 主题",
         "",
-        "- **self-evolution** — self-evolving / self-improving / self-modifying / continual agents",
-        "- **security** — LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection",
-        "- **both** — safe/secure self-evolution & alignment of self-modifying agents",
-        "- **survey** — survey / review / 综述 (flag when detected in title/abstract)",
+        "- **self-evolution** — agent自进化: self-evolving / self-improving / self-modifying / continual agents",
+        "- **security** — agent安全: LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection",
+        "- **both** — agent安全自进化: safe/secure self-evolution & alignment of self-modifying agents",
+        "- **llm-iot** — LLM based 物联网: LLM/AIoT / LLM agents for IoT, edge, smart home/city, CPS (not generic IoT hardware)",
+        "- **survey** — 综述: survey / review (secondary flag when detected in title/abstract)",
         "",
     ]
     theme_counts = stats.get("theme_counts") or {}
@@ -834,10 +953,15 @@ def write_index(out: Path, papers: list[Paper], stats: dict) -> None:
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     default_out = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Search & download agent self-evolution / security papers")
+    p = argparse.ArgumentParser(description="Search & download agent self-evolution / security / LLM-IoT papers")
     p.add_argument("--out", type=Path, default=default_out, help="Output directory")
     p.add_argument("--max", type=int, default=20, help="Max unique papers to keep/download")
     p.add_argument("--dry-run", action="store_true", help="Do not download PDFs")
+    p.add_argument(
+        "--retag",
+        action="store_true",
+        help="Recompute topic_tags/score for existing corpus (manifest+DB); no search/download",
+    )
     p.add_argument(
         "--queries",
         type=str,
@@ -849,10 +973,96 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def retag_corpus(out: Path) -> dict:
+    """Recompute topic_tags + score for all papers in manifest + papers.db.
+
+    Does not delete or rewrite PDFs. Only metadata (tags/score) is refreshed.
+    """
+    mp = out / "manifest.json"
+    if not mp.exists():
+        log("No manifest.json — nothing to retag")
+        return {"n": 0, "changed": 0, "theme_counts": {}, "primary": {}}
+
+    data = json.loads(mp.read_text(encoding="utf-8"))
+    papers: list[Paper] = []
+    theme_counts: dict[str, int] = {}
+    primary_counts: dict[str, int] = {}
+    changed = 0
+    for d in data.get("papers") or []:
+        p = Paper(**{k: v for k, v in d.items() if k in Paper.__dataclass_fields__})
+        old_tags = list(p.topic_tags or [])
+        p.topic_tags = tag_topics(p.title, p.abstract)
+        p.score = relevance_score(p.title, p.abstract)
+        if p.topic_tags != old_tags:
+            changed += 1
+        papers.append(p)
+        for t in p.topic_tags:
+            theme_counts[t] = theme_counts.get(t, 0) + 1
+        prim = "none"
+        for k in PRIMARY_TAGS:
+            if k in p.topic_tags:
+                prim = k
+                break
+        primary_counts[prim] = primary_counts.get(prim, 0) + 1
+
+    stats = dict(data.get("stats") or {})
+    stats["theme_counts"] = theme_counts
+    stats["retagged_at"] = datetime.now(timezone.utc).isoformat()
+    stats["retag_changed"] = changed
+    write_manifest(out, papers, stats)
+    write_index(out, papers, stats)
+
+    db_path = out / "papers.db"
+    if db_path.exists():
+        from db import _as_tags, connect, content_hash, init_db, paper_id_from_fields
+
+        conn = connect(db_path)
+        try:
+            init_db(conn)
+            updated = 0
+            for p in papers:
+                pid = paper_id_from_fields(
+                    arxiv_id=p.arxiv_id,
+                    doi=p.doi,
+                    title=p.title,
+                    dedupe_key=p.dedupe_key(),
+                )
+                tags = _as_tags(p.topic_tags)
+                row = conn.execute(
+                    "SELECT title, abstract, authors FROM papers WHERE id=?",
+                    (pid,),
+                ).fetchone()
+                if not row:
+                    continue
+                ch = content_hash(row["title"] or "", row["abstract"] or "", row["authors"] or "", tags)
+                conn.execute(
+                    "UPDATE papers SET tags=?, content_hash=? WHERE id=?",
+                    (tags, ch, pid),
+                )
+                updated += 1
+            conn.commit()
+            log(f"DB tags updated for {updated} rows (PDFs untouched)")
+        finally:
+            conn.close()
+
+    log(f"Retagged {len(papers)} papers, {changed} tag-sets changed")
+    log(f"theme_counts={theme_counts}")
+    log(f"primary_counts={primary_counts}")
+    return {
+        "n": len(papers),
+        "changed": changed,
+        "theme_counts": theme_counts,
+        "primary": primary_counts,
+    }
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
+    if getattr(args, "retag", False):
+        retag_corpus(args.out)
+        return 0
     paths = ensure_dirs(args.out)
-    queries = [q.strip() for q in args.queries.split(";") if q.strip()] if args.queries else list(DEFAULT_QUERIES)
+    queries = [q.strip() for q in args.queries.split(";") if q.strip()] if args.queries else load_search_queries(args.out)
 
     pool: dict[str, Paper] = {}
     searched = 0
@@ -890,6 +1100,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             "safe self-evolution agent alignment",
             "secure self-improvement agent alignment",
             "adversarial agents jailbreak LLM",
+            "LLM IoT AIoT agent",
+            "large language model Internet of Things",
+            "LLM agent smart home edge device",
         ]
         for i, q in enumerate(s2_queries, 1):
             log(f"Semantic Scholar [{i}/{len(s2_queries)}]: {q}")
@@ -937,20 +1150,23 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not p.topic_tags:
                 p.topic_tags = tag_topics(p.title, p.abstract) or ["self-evolution"]
 
-    # Balance themes: prefer mix of self-evolution, security, both (+ surveys)
+    # Balance themes: prefer mix of self-evolution, security, both, llm-iot (+ surveys)
     candidates.sort(key=lambda x: (-x.score, -(x.year or 0), x.title))
     selected: list[Paper] = []
-    counts = {"self-evolution": 0, "security": 0, "both": 0, "survey": 0}
-    target_each = max(3, args.max // 3)
+    counts = {"self-evolution": 0, "security": 0, "both": 0, "llm-iot": 0, "survey": 0}
+    target_each = max(3, args.max // 4)
     survey_target = max(4, args.max // 8)
 
     def primary_tag(p: Paper) -> str:
-        if "both" in p.topic_tags:
+        tags = p.topic_tags or []
+        if "both" in tags:
             return "both"
-        if "security" in p.topic_tags:
+        if "security" in tags:
             return "security"
-        if "self-evolution" in p.topic_tags:
+        if "self-evolution" in tags:
             return "self-evolution"
+        if "llm-iot" in tags:
+            return "llm-iot"
         return "self-evolution"
 
     existing_keys = set(existing.keys()) if existing else set()
