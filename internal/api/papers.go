@@ -399,6 +399,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		abs.ensureMissing(cat.Papers)
 		out.AbstractZHPending = abs.pendingCount(out.Papers)
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
 }
 

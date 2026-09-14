@@ -884,7 +884,7 @@
     try {
       // Always fetch the full catalog so client search/sort/pagination and
       // page-level translate_progress stay accurate while jobs run.
-      const res = await fetch(apiURL(), { credentials: "same-origin", headers: authHeaders(false) });
+      const res = await fetch(apiURL(), { credentials: "same-origin", cache: "no-store", headers: authHeaders(false) });
       if (!res.ok) {
         status.textContent = t("loadErr") + " (" + res.status + ")";
         status.className = "err";

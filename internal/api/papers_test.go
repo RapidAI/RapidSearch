@@ -294,8 +294,21 @@ func papersAPICatalog(t *testing.T, h http.Handler) papersCatalog {
 
 func TestPapersVisitCounterBumpAndPersist(t *testing.T) {
 	h, dir := papersHandler(t)
-	if cat := papersAPICatalog(t, h); cat.Visits != 0 {
-		t.Fatalf("initial visits=%d", cat.Visits)
+	rr0 := httptest.NewRecorder()
+	req0 := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(rr0, req0)
+	if rr0.Code != http.StatusOK {
+		t.Fatalf("/papers/api status=%d body=%s", rr0.Code, rr0.Body.String())
+	}
+	if cc := rr0.Header().Get("Cache-Control"); !strings.Contains(strings.ToLower(cc), "no-store") {
+		t.Fatalf("catalog API must not be cached, Cache-Control=%q", cc)
+	}
+	var init papersCatalog
+	if err := json.Unmarshal(rr0.Body.Bytes(), &init); err != nil {
+		t.Fatal(err)
+	}
+	if init.Visits != 0 {
+		t.Fatalf("initial visits=%d", init.Visits)
 	}
 
 	rr := httptest.NewRecorder()
