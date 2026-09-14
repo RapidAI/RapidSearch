@@ -74,7 +74,7 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
 - `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker runs up to `PAPERS_TRANSLATE_CONCURRENCY` BabelDOC jobs in parallel (default 3, clamp 1–8) for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, and `concurrency`.
 
-**BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
+**BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). `translate_worker.py` defaults to `--disable-same-text-fallback`, `--translate-table-text`, `--min-text-length 3`, and an academic CS → zh-CN system prompt; it does **not** default `--enhance-compatibility`. LLM preflight, optional pause, mono-ZH completeness, and one `--ignore-cache` retry stay in the Python worker. Opt out with `PAPERS_TRANSLATE_*` env vars (see `agent-papers/README.md`). Translations are written under `PAPERS_DIR`:
 
 ```
 pdfs/*.pdf                 # originals

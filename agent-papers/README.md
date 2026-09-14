@@ -159,20 +159,44 @@ Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`
 
 Background worker shells out to `agent-papers/translate_worker.py` or `babeldoc` on `PATH`. Up to `PAPERS_TRANSLATE_CONCURRENCY` different papers run in parallel (default 3, clamp 1–8); the same paper id never runs twice.
 
+Quality defaults are baked into `translate_worker.py` (Go stays thin). They target residual-English mono ZH (title Chinese, abstract/body still English):
+
+| Default | BabelDOC / worker flag | Opt out |
+|---|---|---|
+| ON | `--disable-same-text-fallback` | `PAPERS_TRANSLATE_DISABLE_SAME_TEXT_FALLBACK=0` or `--no-disable-same-text-fallback` |
+| ON | `--translate-table-text` | `PAPERS_TRANSLATE_TABLE_TEXT=0` |
+| ON | academic CS → zh-CN `--custom-system-prompt` (translate **all** prose; keep formulas / code / IDs / citations / author names) | `PAPERS_TRANSLATE_SYSTEM_PROMPT` or `--custom-system-prompt` |
+| ON | `--min-text-length 3` | `PAPERS_TRANSLATE_MIN_TEXT_LENGTH=0` |
+| optional | `--glossary-files` (or `$PAPERS_DIR/glossary.csv`) | `PAPERS_TRANSLATE_GLOSSARY_FILES` |
+| OFF | `--enhance-compatibility` | set `PAPERS_TRANSLATE_ENHANCE_COMPATIBILITY=1` only if a PDF needs it |
+
+Pipeline still: LLM preflight (models, then a tiny chat ping) → optional pause (`$PAPERS_DIR/translate.pause` or `PAPERS_TRANSLATE_PAUSE_SECONDS`) → BabelDOC → mono-ZH completeness (majority-English / mixed residual body paragraphs) → one `--ignore-cache` retry on a miss. API key stays in `OPENAI_API_KEY` / `translate-config.json` (never argv).
+
 ```bash
 uv tool install --python 3.12 BabelDOC
 export PAPERS_DIR=/workspace/agent-papers
 export PAPERS_TRANSLATE_CONCURRENCY=3   # optional; default is already 3
 # Configure base_url / api_key / model on /settings, then:
 # POST /papers/translate  {"all":true}
+python3 agent-papers/translate_worker.py --check   # prints quality defaults
+python3 agent-papers/test_translate_worker.py
 ```
 
-CLI equivalent:
+Optional file `$PAPERS_DIR/translate-quality.json` overrides defaults; env then CLI win. Example:
+
+```json
+{"min_text_length": 3, "translate_table_text": true, "enhance_compatibility": false}
+```
+
+CLI equivalent (key via env, not `--openai-api-key`):
 
 ```
-babeldoc --openai --openai-model MODEL --openai-base-url URL --openai-api-key KEY \
+export OPENAI_API_KEY=...
+babeldoc --openai --openai-model MODEL --openai-base-url URL \
   --files in.pdf --lang-in en --lang-out zh-CN --output OUTDIR \
-  --watermark-output-mode=no_watermark
+  --watermark-output-mode=no_watermark \
+  --disable-same-text-fallback --translate-table-text --min-text-length 3 \
+  --custom-system-prompt "…"
 ```
 
 Produces mono (Chinese-only) + dual (bilingual) by default. RapidSearch copies them to `pdfs/zh/` and `pdfs/dual/`. Do not commit PDFs or API keys. Deploy an updated `search-proxy` so public hub streams `/papers/pdf/zh/…` and `/papers/pdf/dual/…`.
