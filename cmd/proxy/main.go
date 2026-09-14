@@ -139,12 +139,10 @@ func (h *hub) handleTunnel(c net.Conn) {
 		return
 	}
 	_ = c.SetDeadline(time.Time{})
-	if tc, ok := c.(*net.TCPConn); ok {
-		_ = tc.SetKeepAlive(true)
-		_ = tc.SetKeepAlivePeriod(30 * time.Second)
-	}
+	tunnel.EnableTCPKeepAlive(c)
 
 	s := newSession(c, br)
+	s.startKeepalive()
 	h.mu.Lock()
 	old := h.sess
 	h.sess = s
@@ -153,9 +151,10 @@ func (h *hub) handleTunnel(c net.Conn) {
 		log.Printf("replacing previous tunnel from %s", old.remote)
 		old.close(errReplaced)
 	}
-	log.Printf("tunnel connected from %s", c.RemoteAddr())
+	log.Printf("tunnel connected from %s (ping=%s pong_wait=%s read_idle=%s tcp_keepalive=%s)",
+		c.RemoteAddr(), tunnel.PingInterval, tunnel.PongTimeout, tunnel.ReadIdleTimeout, tunnel.TCPKeepAlivePeriod)
 	s.readLoop()
-	log.Printf("tunnel disconnected from %s", c.RemoteAddr())
+	log.Printf("tunnel disconnected from %s: %v", c.RemoteAddr(), s.closeReason())
 	h.mu.Lock()
 	if h.sess == s {
 		h.sess = nil
@@ -397,18 +396,39 @@ type session struct {
 	mu     sync.Mutex
 	pend   map[string]chan tunnel.Frame
 	closed bool
+	onPong func()
+	stopKA func()
+	reason error
 }
 
 func newSession(c net.Conn, br *bufio.Reader) *session {
-	return &session{conn: c, br: br, remote: c.RemoteAddr().String(), pend: map[string]chan tunnel.Frame{}}
+	return &session{
+		conn:   c,
+		br:     br,
+		remote: c.RemoteAddr().String(),
+		pend:   map[string]chan tunnel.Frame{},
+		onPong: func() {},
+		stopKA: func() {},
+	}
+}
+
+func (s *session) startKeepalive() {
+	s.startKeepaliveCfg(tunnel.DefaultKeepalive())
+}
+
+func (s *session) startKeepaliveCfg(cfg tunnel.KeepaliveConfig) {
+	s.onPong, s.stopKA = tunnel.StartKeepalive(context.Background(), cfg, s.write, func(err error) {
+		log.Printf("tunnel keepalive dead from %s: %v", s.remote, err)
+		s.close(err)
+	})
 }
 
 func (s *session) write(f tunnel.Frame) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	_ = s.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	_ = tunnel.SetWriteIdle(s.conn)
 	err := tunnel.WriteFrame(s.conn, f)
-	_ = s.conn.SetWriteDeadline(time.Time{})
+	tunnel.ClearWriteDeadline(s.conn)
 	return err
 }
 
@@ -437,19 +457,28 @@ func (s *session) roundTrip(ctx context.Context, f tunnel.Frame) (tunnel.Frame, 
 	}
 }
 
+func (s *session) closeReason() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reason != nil {
+		return s.reason
+	}
+	return io.EOF
+}
+
 func (s *session) readLoop() {
 	defer s.close(io.EOF)
 	for {
-		_ = s.conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 		var f tunnel.Frame
-		if err := tunnel.ReadFrame(s.br, &f); err != nil {
+		if err := tunnel.ReadFrameRefreshing(s.conn, s.br, &f); err != nil {
+			s.close(tunnel.ClassifyReadError(err))
 			return
 		}
 		switch f.Type {
-		case tunnel.TypePong, tunnel.TypePing:
-			if f.Type == tunnel.TypePing {
-				_ = s.write(tunnel.Frame{Type: tunnel.TypePong, ID: f.ID})
-			}
+		case tunnel.TypePong:
+			s.onPong()
+		case tunnel.TypePing:
+			_ = s.write(tunnel.Frame{Type: tunnel.TypePong, ID: f.ID})
 		case tunnel.TypeResp, tunnel.TypeRespHead, tunnel.TypeRespChunk, tunnel.TypeRespEnd:
 			s.mu.Lock()
 			ch := s.pend[f.ID]
@@ -475,6 +504,9 @@ func (s *session) close(err error) {
 		return
 	}
 	s.closed = true
+	if err != nil {
+		s.reason = err
+	}
 	for id, ch := range s.pend {
 		select {
 		case ch <- tunnel.Frame{Type: "resp", ID: id, Status: 503, Error: "offline"}:
@@ -482,7 +514,11 @@ func (s *session) close(err error) {
 		}
 		delete(s.pend, id)
 	}
+	stopKA := s.stopKA
 	s.mu.Unlock()
+	if stopKA != nil {
+		stopKA()
+	}
 	_ = s.conn.Close()
 }
 
