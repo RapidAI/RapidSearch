@@ -49,6 +49,11 @@ type paperEntry struct {
 	DualPDF         string `json:"dual_pdf,omitempty"`
 	TranslateStatus string `json:"translate_status,omitempty"`
 	TranslateError  string `json:"translate_error,omitempty"`
+
+	// Review flags for catalog cards (no rater list).
+	HasReview   bool    `json:"has_review"`
+	AvgStars    float64 `json:"avg_stars"`
+	RatingCount int     `json:"rating_count"`
 }
 
 type papersManifest struct {
@@ -92,6 +97,7 @@ type papersStore struct {
 	cat     papersCatalog
 	xlate   *translateService
 	absZH   *abstractZHService
+	reviews *reviewService
 	visits  *visitCounter
 }
 
@@ -107,7 +113,13 @@ func newPapersStore(root string) *papersStore {
 		root = papersRoot()
 	}
 	xlate := newTranslateService(root)
-	ps := &papersStore{root: root, xlate: xlate, absZH: newAbstractZHService(root, xlate), visits: newVisitCounter(root)}
+	ps := &papersStore{
+		root:    root,
+		xlate:   xlate,
+		absZH:   newAbstractZHService(root, xlate),
+		reviews: newReviewService(root, xlate),
+		visits:  newVisitCounter(root),
+	}
 	ps.xlate.start()
 	ps.absZH.start()
 	return ps
@@ -141,6 +153,9 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 	overlayTranslations(out.Papers, ps.root, jobs)
 	if ps != nil && ps.absZH != nil {
 		ps.absZH.overlay(out.Papers)
+	}
+	if ps != nil && ps.reviews != nil {
+		ps.reviews.overlay(out.Papers)
 	}
 	return out, nil
 }

@@ -67,12 +67,15 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). **Catalog + existing PDFs are public** (no login). Translate enqueue, translate config/test, and `/settings*` still require Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`. The `/papers` page always shows a **Settings** link (anonymous users get the Hub login page there). Translate / Re-translate buttons appear only when `/papers/api` returns `can_manage: true`. Defaults to a **light (white)** theme.
 
 - `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述).
-- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`). `tag=` matches stable English keys. No API keys / translate-config.
+- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`, `has_review`, `avg_stars`, `rating_count`). `tag=` matches stable English keys. No API keys / translate-config / rater list.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
 - `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
 - `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker runs up to `PAPERS_TRANSLATE_CONCURRENCY` BabelDOC jobs in parallel (default 3, clamp 1–8) for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, and `concurrency`.
+- `GET /papers/review/{id}` — public: structured Chinese 解读 (if generated) plus average stars. No raw rater list. Sets a stable anonymous `rs_papers_rater` cookie when the caller is not a Hub session.
+- `POST /papers/review/{id}/generate` — public if translate-config LLM is ready: generate 精读+评审 sections via the same Hub OpenAI-compatible LLM as BabelDOC. Idempotent when a review already exists unless `{ "force": true }`. Ratings are kept on regenerate.
+- `POST /papers/review/{id}/rate` — public: `{ "stars": 1-5 }`. Upserts by Hub user key (logged-in) or anonymous rater cookie; returns the new average.
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
@@ -82,11 +85,12 @@ pdfs/zh/{id}.zh.pdf        # Chinese-only (mono)
 pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
 translate-config.json      # LLM settings (secrets; not in git)
 translate_status.json      # queue/job status
+reviews/{id}.json          # 解读 + ratings (runtime; not in git)
 ```
 
 Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
 
-本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。
+本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。每张卡片在 arXiv 后提供「生成解读 / 查看解读」：用同一套翻译 LLM 生成中文精读+评审，并支持匿名 cookie 评分（展示均分）。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
