@@ -75,7 +75,7 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker runs up to `PAPERS_TRANSLATE_CONCURRENCY` BabelDOC jobs in parallel (default 3, clamp 1–8) for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, and `concurrency`.
 - `GET /papers/review/{id}` — public: structured Chinese 解读 (if generated) plus average stars. No raw rater list. Sets a stable anonymous `rs_papers_rater` cookie when the caller is not a Hub session.
 - `POST /papers/review/{id}/generate` — public if translate-config LLM is ready: generate 精读+评审 sections via the same Hub OpenAI-compatible LLM as BabelDOC. Idempotent when a review already exists unless `{ "force": true }`. Ratings are kept on regenerate.
-- `POST /papers/review/{id}/rate` — public: `{ "stars": 1-5 }`. Upserts by Hub user key (logged-in) or anonymous rater cookie; returns the new average.
+- `POST /papers/review/{id}/rate` — public: `{ "stars": 1-5 }`. Upserts by Hub user key (logged-in) or anonymous rater cookie; returns the new average. Rejects with 409 (`review is not ready` / `review is still generating`) if no completed review exists or generate is in-flight; never writes a ratings-only stub.
 
 **BabelDOC** must be on `PATH` (`uv tool install --python 3.12 BabelDOC`). Translations are written under `PAPERS_DIR`:
 
