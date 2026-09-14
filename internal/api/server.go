@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -33,10 +34,11 @@ type Server struct {
 	// hedgeAfter overrides the 3s hedged-failover delay (tests).
 	hedgeAfter time.Duration
 	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
-	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
-	cfg       *search.Store
-	auth      *proxyauth.Checker
+	runEngine   func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
+	cfg         *search.Store
+	auth        *proxyauth.Checker
 	papersStore *papersStore
+	papersOnce  sync.Once
 }
 
 type engineTransport int

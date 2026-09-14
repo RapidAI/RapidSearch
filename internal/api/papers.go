@@ -125,9 +125,11 @@ func (s *Server) papers() *papersStore {
 	if s == nil {
 		return nil
 	}
-	if s.papersStore == nil {
-		s.papersStore = newPapersStore(papersRoot())
-	}
+	s.papersOnce.Do(func() {
+		if s.papersStore == nil {
+			s.papersStore = newPapersStore(papersRoot())
+		}
+	})
 	return s.papersStore
 }
 
