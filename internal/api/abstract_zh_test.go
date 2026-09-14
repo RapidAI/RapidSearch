@@ -154,3 +154,110 @@ func TestPapersPageAbstractTooltipJS(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractChatContentShapes(t *testing.T) {
+	reviewJSON := `{"method_principles":"甲","method_essence":"乙","experiment":"丙","quality":"丁"}`
+
+	t.Run("message content", func(t *testing.T) {
+		got, err := extractChatContent([]byte(`{"choices":[{"message":{"content":"  hello  "}}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "hello" {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("empty content no reasoning", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[{"finish_reason":"length","message":{"content":""}}]}`))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "empty chat content") {
+			t.Fatalf("want empty chat content, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "finish_reason=length") {
+			t.Fatalf("want finish_reason in error, got %v", err)
+		}
+		if strings.Contains(err.Error(), "unexpected end of JSON") {
+			t.Fatalf("must not leak JSON parse error: %v", err)
+		}
+	})
+
+	t.Run("null content", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[{"finish_reason":"stop","message":{"content":null}}]}`))
+		if err == nil || !strings.Contains(err.Error(), "empty chat content") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("empty choices", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[]}`))
+		if err == nil || !strings.Contains(err.Error(), "empty chat choices") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("reasoning_content JSON", func(t *testing.T) {
+		body := chatBody(t, "length", "", "thinking...\n"+reviewJSON+"\n", "")
+		got, err := extractChatContent(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != reviewJSON {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("reasoning field JSON", func(t *testing.T) {
+		body := chatBody(t, "", "", "", "prefix "+reviewJSON)
+		got, err := extractChatContent(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != reviewJSON {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("reasoning without JSON", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[{"finish_reason":"length","message":{"content":"","reasoning_content":"only chain of thought"}}]}`))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "empty chat content") || !strings.Contains(err.Error(), "reasoning present") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("content preferred over reasoning", func(t *testing.T) {
+		body := chatBody(t, "", "from content", reviewJSON, "")
+		got, err := extractChatContent(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "from content" {
+			t.Fatalf("got %q", got)
+		}
+	})
+}
+
+func chatBody(t *testing.T, finish, content, reasoningContent, reasoning string) []byte {
+	t.Helper()
+	msg := map[string]any{"content": content}
+	if reasoningContent != "" {
+		msg["reasoning_content"] = reasoningContent
+	}
+	if reasoning != "" {
+		msg["reasoning"] = reasoning
+	}
+	choice := map[string]any{"message": msg}
+	if finish != "" {
+		choice["finish_reason"] = finish
+	}
+	b, err := json.Marshal(map[string]any{"choices": []any{choice}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

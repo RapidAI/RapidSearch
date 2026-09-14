@@ -29,9 +29,11 @@ const (
 	raterCookieName   = "rs_papers_rater"
 	raterCookieMaxAge = 365 * 24 * 60 * 60
 	reviewHTTPTimeout = 120 * time.Second
-	reviewMaxTokens   = 2500
-	reviewMinStars    = 1
-	reviewMaxStars    = 5
+	// Budget covers Hub reasoning models (reasoning_content counts toward
+	// max_tokens) plus a full four-section Chinese JSON review.
+	reviewMaxTokens = 12288
+	reviewMinStars  = 1
+	reviewMaxStars  = 5
 )
 
 // paperReviewAnalysis is the structured Chinese 精读+评审 write-up.
@@ -637,6 +639,9 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 func parseReviewAnalysis(raw string) (paperReviewAnalysis, error) {
 	var empty paperReviewAnalysis
 	s := strings.TrimSpace(raw)
+	if s == "" {
+		return empty, fmt.Errorf("empty analysis JSON")
+	}
 	s = strings.TrimPrefix(s, "```json")
 	s = strings.TrimPrefix(s, "```JSON")
 	s = strings.TrimPrefix(s, "```")

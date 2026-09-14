@@ -415,6 +415,97 @@ func TestParseReviewAnalysisFences(t *testing.T) {
 	}
 }
 
+func TestParseReviewAnalysisEmpty(t *testing.T) {
+	_, err := parseReviewAnalysis("   ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty analysis JSON") {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("must not surface raw JSON EOF: %v", err)
+	}
+}
+
+func TestReviewMaxTokensBudget(t *testing.T) {
+	if reviewMaxTokens < 8000 {
+		t.Fatalf("reviewMaxTokens=%d is too small for Hub reasoning + Chinese JSON review", reviewMaxTokens)
+	}
+}
+
+func TestGenerateReviewOpenAIReasoningOnly(t *testing.T) {
+	reviewJSON := `{"method_principles":"原理","method_essence":"本质","experiment":"实验","quality":"总评"}`
+	var gotMax atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotMax.Store(int32(req.MaxTokens))
+		w.Header().Set("Content-Type", "application/json")
+		payload, err := json.Marshal(map[string]any{
+			"choices": []any{
+				map[string]any{
+					"finish_reason": "length",
+					"message": map[string]any{
+						"content":           "",
+						"reasoning_content": "思考过程 " + reviewJSON,
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal hub response: %v", err)
+			http.Error(w, "marshal", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer hub.Close()
+
+	analysis, model, err := generateReviewOpenAI(context.Background(), hub.Client(), translateSnapshot{
+		BaseURL: hub.URL + "/v1",
+		APIKey:  "k",
+		Model:   "auto",
+	}, paperEntry{Title: "T", Abstract: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "auto" {
+		t.Fatalf("model=%q", model)
+	}
+	if analysis.MethodPrinciples != "原理" || analysis.Quality != "总评" {
+		t.Fatalf("%+v", analysis)
+	}
+	if int(gotMax.Load()) != reviewMaxTokens {
+		t.Fatalf("max_tokens=%d want %d", gotMax.Load(), reviewMaxTokens)
+	}
+}
+
+func TestGenerateReviewOpenAIEmptyContentError(t *testing.T) {
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":""}}]}`))
+	}))
+	defer hub.Close()
+
+	_, _, err := generateReviewOpenAI(context.Background(), hub.Client(), translateSnapshot{
+		BaseURL: hub.URL + "/v1",
+		APIKey:  "k",
+		Model:   "auto",
+	}, paperEntry{Title: "T", Abstract: "A"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "empty chat content") {
+		t.Fatalf("want empty chat content, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("must not surface raw JSON EOF: %v", err)
+	}
+}
+
 func TestReviewDirGitignored(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".gitignore"))
 	if err != nil {
