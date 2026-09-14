@@ -524,6 +524,11 @@ func (ps *papersStore) saveImportedPDF(p paperEntry, body []byte) (paperEntry, b
 	}
 	p.PDFPath = filepath.ToSlash(filepath.Join("pdfs", name))
 	p.Filename = name
+	if p.PageCount <= 0 {
+		if n := pdfPageCountFromBytes(body); n > 0 {
+			p.PageCount = n
+		}
+	}
 
 	updated, err := ps.writeManifestPaper(p)
 	if err != nil {
@@ -608,25 +613,7 @@ func (ps *papersStore) writeManifestPaper(p paperEntry) (updated bool, err error
 	man.Stats["theme_counts"] = themeCounts(man.Papers)
 	man.Stats["last_import_at"] = man.GeneratedAt
 
-	tmp, err := os.CreateTemp(root, "manifest.*.json")
-	if err != nil {
-		return false, err
-	}
-	tmpName := tmp.Name()
-	enc := json.NewEncoder(tmp)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(man); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return false, err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return false, err
-	}
-	if err := os.Rename(tmpName, manPath); err != nil {
-		os.Remove(tmpName)
+	if err := persistManifestJSON(manPath, man); err != nil {
 		return false, err
 	}
 	ps.loaded = time.Time{}
@@ -693,6 +680,9 @@ func mergeImportedPaper(old, neu paperEntry) paperEntry {
 	}
 	if neu.Updated != "" {
 		out.Updated = neu.Updated
+	}
+	if neu.PageCount > 0 {
+		out.PageCount = neu.PageCount
 	}
 	out.Source = paperSourceManual
 	if !containsString(out.QueryHits, importQueryHit) {

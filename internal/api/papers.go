@@ -39,6 +39,7 @@ type paperEntry struct {
 	Updated        string   `json:"updated,omitempty"`
 	QueryHits      []string `json:"query_hits,omitempty"`
 	Source         string   `json:"source,omitempty"` // "manual" for user imports
+	PageCount      int      `json:"page_count,omitempty"`
 
 	// Filled for API/HTML consumers.
 	Filename        string `json:"filename,omitempty"`
@@ -197,6 +198,13 @@ func (ps *papersStore) catalogBase() (papersCatalog, error) {
 		return papersCatalog{}, err
 	}
 	pdfDir := filepath.Join(root, "pdfs")
+	if backfillPaperPageCounts(man.Papers, pdfDir) {
+		if err := persistManifestJSON(manPath, man); err != nil {
+			log.Printf("papers page_count persist: %v", err)
+		} else if st2, serr := os.Stat(manPath); serr == nil {
+			st = st2
+		}
+	}
 	entries := make([]paperEntry, 0, len(man.Papers))
 	for _, p := range man.Papers {
 		p = enrichPaper(p, pdfDir)
@@ -223,21 +231,18 @@ func (ps *papersStore) catalogBase() (papersCatalog, error) {
 }
 
 func enrichPaper(p paperEntry, pdfDir string) paperEntry {
-	name := filepath.Base(strings.TrimSpace(p.PDFPath))
-	if name == "." || name == string(filepath.Separator) {
-		name = ""
-	}
-	if name == "" && p.ArxivID != "" {
-		if hit := findPDFByArxiv(pdfDir, p.ArxivID); hit != "" {
-			name = hit
-		}
-	}
+	name := localPDFBasename(p, pdfDir)
 	p.Filename = name
 	if name != "" {
 		full := filepath.Join(pdfDir, name)
 		if st, err := os.Stat(full); err == nil && !st.IsDir() {
 			p.HasLocal = true
 			p.LocalPDF = "/papers/pdf/" + name
+			if p.PageCount <= 0 {
+				if n := pdfPageCountFromFile(full); n > 0 {
+					p.PageCount = n
+				}
+			}
 		}
 	}
 	p.ID = paperTranslateID(p)
@@ -245,6 +250,76 @@ func enrichPaper(p paperEntry, pdfDir string) paperEntry {
 	// Do not leak absolute host paths in API responses.
 	p.PDFPath = ""
 	return p
+}
+
+// localPDFBasename maps a catalog entry to a file under pdfs/.
+func localPDFBasename(p paperEntry, pdfDir string) string {
+	name := filepath.Base(strings.TrimSpace(p.PDFPath))
+	if name == "." || name == string(filepath.Separator) {
+		name = ""
+	}
+	if name == "" && strings.TrimSpace(p.Filename) != "" {
+		name = filepath.Base(p.Filename)
+	}
+	if name != "" {
+		if st, err := os.Stat(filepath.Join(pdfDir, name)); err == nil && !st.IsDir() {
+			return name
+		}
+	}
+	if p.ArxivID != "" {
+		if hit := findPDFByArxiv(pdfDir, p.ArxivID); hit != "" {
+			return hit
+		}
+	}
+	return ""
+}
+
+// backfillPaperPageCounts fills missing page_count from local PDFs.
+// Returns true when at least one catalog row was updated (caller should persist).
+func backfillPaperPageCounts(papers []paperEntry, pdfDir string) bool {
+	dirty := false
+	for i := range papers {
+		if papers[i].PageCount > 0 {
+			continue
+		}
+		name := localPDFBasename(papers[i], pdfDir)
+		if name == "" {
+			continue
+		}
+		n := pdfPageCountFromFile(filepath.Join(pdfDir, name))
+		if n <= 0 {
+			continue
+		}
+		papers[i].PageCount = n
+		dirty = true
+	}
+	return dirty
+}
+
+func persistManifestJSON(manPath string, man papersManifest) error {
+	dir := filepath.Dir(manPath)
+	tmp, err := os.CreateTemp(dir, "manifest.*.json")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	enc := json.NewEncoder(tmp)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(man); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, manPath); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func findPDFByArxiv(pdfDir, arxivID string) string {

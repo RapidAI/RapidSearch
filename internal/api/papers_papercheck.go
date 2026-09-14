@@ -194,7 +194,7 @@ func extractPaperMetaFromPDF(raw []byte, uploadName string) extractedPaperMeta {
 }
 
 func extractPDFText(raw []byte) (text string, pages, images int) {
-	pages = countPDFPages(raw)
+	pages = pdfPageCountFromBytes(raw)
 	images = len(rePDFImage.FindAllIndex(raw, -1))
 	var parts []string
 	eachPDFStream(raw, func(dict, data []byte) {

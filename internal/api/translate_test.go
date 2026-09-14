@@ -533,6 +533,148 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 	}
 }
 
+func TestEnqueueRejectsOverFiftyPages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "long.pdf"), nPagePDF(51), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTranslateService(dir)
+	svc.mu.Lock()
+	svc.started = true
+	svc.mu.Unlock()
+
+	papers := []paperEntry{{
+		ID: "long", HasLocal: true, Filename: "long.pdf", PageCount: 51,
+	}}
+	res := svc.enqueue([]string{"long"}, papers, false)
+	if len(res.Queued) != 0 {
+		t.Fatalf("51 pages must not enqueue: %+v", res)
+	}
+	if res.Rejected["long"] != translateSkipTooLong {
+		t.Fatalf("rejected=%v", res.Rejected)
+	}
+
+	// Force re-translate is also gated.
+	res = svc.enqueue([]string{"long"}, papers, true)
+	if len(res.Queued) != 0 || res.Rejected["long"] != translateSkipTooLong {
+		t.Fatalf("force must also skip >50: %+v", res)
+	}
+
+	// Unknown catalog page_count still rejects when the local PDF is 51 pages.
+	res = svc.enqueue([]string{"long"}, []paperEntry{{
+		ID: "long", HasLocal: true, Filename: "long.pdf",
+	}}, false)
+	if len(res.Queued) != 0 || res.Rejected["long"] != translateSkipTooLong {
+		t.Fatalf("file-derived count must reject: %+v", res)
+	}
+}
+
+func TestEnqueueAllowsFiftyPages(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "ok.pdf"), nPagePDF(50), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := newTranslateService(dir)
+	svc.mu.Lock()
+	svc.started = true
+	svc.mu.Unlock()
+
+	papers := []paperEntry{{
+		ID: "ok", HasLocal: true, Filename: "ok.pdf", PageCount: 50,
+	}}
+	res := svc.enqueue([]string{"ok"}, papers, false)
+	if len(res.Queued) != 1 {
+		t.Fatalf("50 pages must enqueue: %+v", res)
+	}
+}
+
+func TestTranslatePostRejectsOverFiftyAndAllowsFifty(t *testing.T) {
+	h, dir := papersHandler(t)
+	name := "2401.05459_personal_llm_agents.pdf"
+	long := nPagePDF(51)
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", name), long, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	man := papersManifest{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Papers: []paperEntry{{
+			Title:     "Long Paper",
+			Year:      2024,
+			ArxivID:   "2401.05459",
+			PDFPath:   "pdfs/" + name,
+			PageCount: 51,
+		}},
+	}
+	if err := persistManifestJSON(filepath.Join(dir, "manifest.json"), man); err != nil {
+		t.Fatal(err)
+	}
+	h.(*Server).papers().invalidateCatalog()
+
+	post := func(body string) translateEnqueueResp {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/papers/translate", strings.NewReader(body))
+		papersAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+		}
+		var enq translateEnqueueResp
+		if err := json.Unmarshal(rr.Body.Bytes(), &enq); err != nil {
+			t.Fatal(err)
+		}
+		return enq
+	}
+
+	enq := post(`{"id":"2401.05459"}`)
+	if enq.OK || enq.Error != translateSkipTooLong || len(enq.Queued) != 0 {
+		t.Fatalf("single-card 51 pages: %+v", enq)
+	}
+	enq = post(`{"all":true}`)
+	if len(enq.Queued) != 0 {
+		t.Fatalf("translate-all must skip 51 pages: %+v", enq)
+	}
+
+	man.Papers[0].PageCount = 50
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", name), nPagePDF(50), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := persistManifestJSON(filepath.Join(dir, "manifest.json"), man); err != nil {
+		t.Fatal(err)
+	}
+	h.(*Server).papers().invalidateCatalog()
+	enq = post(`{"id":"2401.05459"}`)
+	if !enq.OK || len(enq.Queued) != 1 {
+		t.Fatalf("50 pages must queue: %+v", enq)
+	}
+}
+
+func TestPendingTranslateIDsSkipsOverFiftyPages(t *testing.T) {
+	papers := []paperEntry{
+		{ID: "short", HasLocal: true, PageCount: 12},
+		{ID: "edge", HasLocal: true, PageCount: 50},
+		{ID: "long", HasLocal: true, PageCount: 51},
+		{ID: "unknown", HasLocal: true},
+	}
+	got := pendingTranslateIDs(papers, true)
+	want := map[string]bool{"short": true, "edge": true, "unknown": true}
+	if len(got) != 3 {
+		t.Fatalf("ids=%v", got)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Fatalf("unexpected %s in %v", id, got)
+		}
+	}
+}
+
 func TestEnqueueSkipsDoneUnlessForce(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755)

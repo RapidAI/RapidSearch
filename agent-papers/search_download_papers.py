@@ -310,6 +310,7 @@ class Paper:
     published: str = ""
     updated: str = ""
     source: str = ""  # "manual" for user imports; empty for search/sync
+    page_count: int = 0  # local PDF pages; 0 = unknown
 
     def dedupe_key(self) -> str:
         if self.arxiv_id:

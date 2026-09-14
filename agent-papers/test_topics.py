@@ -54,6 +54,12 @@ class TestValidateTopicTag(unittest.TestCase):
         p4 = Paper(title="x", topic_tags=["llm-training"], source="")
         self.assertFalse(preserve_manual_tags(p4))
 
+    def test_page_count_roundtrip(self):
+        p = Paper(title="x", page_count=51)
+        d = {k: v for k, v in p.__dict__.items()}
+        p2 = Paper(**{k: v for k, v in d.items() if k in Paper.__dataclass_fields__})
+        self.assertEqual(p2.page_count, 51)
+
 
 class TestAutoTopicTags(unittest.TestCase):
     def test_llm_training(self):

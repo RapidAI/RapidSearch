@@ -151,7 +151,7 @@
     }
     article.paper h2 { font-size: 1.05rem; margin: 0 0 8px; line-height: 1.35; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-    .year, .status-pill {
+    .year, .pages, .status-pill {
       font-size: 12px;
       color: var(--muted);
       border: 1px solid var(--line);
@@ -178,13 +178,14 @@
     }
     .brief.pending { font-style: italic; cursor: default; opacity: 0.85; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .xlate-err {
+    .xlate-err, .xlate-skip {
       color: var(--bad);
       font-size: 12px;
       margin: 8px 0 0;
       line-height: 1.4;
       word-break: break-word;
     }
+    .xlate-skip { color: var(--muted); }
     #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
     #xlate-banner {
       display: none;
@@ -464,6 +465,9 @@
       xlateErrPrefix: "Error: ",
       xlate: "Translate",
       xlatePending: "Translate pending",
+      pages: "{n} pages",
+      pagesUnknown: "—",
+      xlateSkipPages: "Over 50 pages, skip translation",
       queuedOk: "Queued {n} paper(s).",
       queueFail: "Could not queue translation.",
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
@@ -533,6 +537,9 @@
       xlateErrPrefix: "错误：",
       xlate: "翻译",
       xlatePending: "翻译待处理",
+      pages: "共 {n} 页",
+      pagesUnknown: "—",
+      xlateSkipPages: "超过 50 页，跳过翻译",
       queuedOk: "已排队 {n} 篇。",
       queueFail: "无法加入翻译队列。",
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
@@ -909,6 +916,26 @@
     return { text: briefChars(full, 280), full: full, pending: false };
   }
 
+  function paperPageCount(p) {
+    const n = Number(p && p.page_count);
+    return n > 0 ? n : 0;
+  }
+  function paperTooLongToTranslate(p) {
+    return paperPageCount(p) > 50;
+  }
+  function pageCountLabel(p) {
+    const n = paperPageCount(p);
+    if (n > 0) {
+      return '<span class="pages">' + esc(t("pages").replace("{n}", String(n))) + "</span>";
+    }
+    return "";
+  }
+  function enqueueErrorText(err) {
+    if (err === "正在翻译中") return t("xlateBusy");
+    if (err === "超过 50 页，跳过翻译") return t("xlateSkipPages");
+    return String(err || "");
+  }
+
   function statusLabel(st) {
     if (st === "queued") return t("queued");
     if (st === "running") return t("running");
@@ -977,6 +1004,7 @@
       return '<span class="tag" data-tag="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</span>";
     }).join("");
     const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
+    const pages = pageCountLabel(p);
     const authors = (p.authors || []).length
       ? '<p class="authors">' + esc((p.authors || []).join(", ")) + "</p>"
       : "";
@@ -1001,16 +1029,27 @@
     if (canManage && p.has_local && st !== "queued" && st !== "running") {
       // One button: 「翻译」 unless a completed translation exists → 「再次翻译」(force).
       // Hidden for anonymous visitors; 中文版 / 中英对照 links above stay public.
-      const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
-      if (completed) {
-        actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
+      // Papers over 50 pages never enter the BabelDOC queue.
+      if (paperTooLongToTranslate(p)) {
+        const reason = t("xlateSkipPages");
+        const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
+        const label = completed ? t("reXlate") : t("xlate");
+        actions += '<button type="button" class="xlate-one" disabled title="' + esc(reason) + '">' + esc(label) + "</button>";
       } else {
-        actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+        const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
+        if (completed) {
+          actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
+        } else {
+          actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+        }
       }
     }
     let errHtml = "";
     if (st === "failed" && p.translate_error) {
       errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
+    }
+    if (canManage && paperTooLongToTranslate(p) && st !== "done" && !(p.zh_pdf || p.dual_pdf)) {
+      errHtml += '<p class="xlate-skip">' + esc(t("xlateSkipPages")) + "</p>";
     }
     if (p.source_url) {
       actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
@@ -1028,7 +1067,7 @@
       '<article class="paper">' +
         "<h2>" + esc(p.title || "") + "</h2>" +
         authors +
-        '<div class="row">' + year + tags + "</div>" +
+        '<div class="row">' + year + pages + tags + "</div>" +
         briefHtml +
         '<div class="actions">' + actions + "</div>" +
         errHtml +
@@ -1048,6 +1087,7 @@
       list.innerHTML = pagePapers.map(renderPaperCard).join("");
       list.querySelectorAll(".xlate-one").forEach(function (btn) {
         btn.addEventListener("click", function () {
+          if (btn.disabled) return;
           const payload = { id: btn.getAttribute("data-id") || "" };
           if (btn.getAttribute("data-force") === "1") payload.force = true;
           enqueue(payload);
@@ -1169,7 +1209,7 @@
       });
       const data = await res.json().catch(function () { return {}; });
       if (data && data.error) {
-        status.textContent = data.error === "正在翻译中" ? t("xlateBusy") : String(data.error);
+        status.textContent = enqueueErrorText(data.error);
         status.className = "err";
         load({ silent: true });
         return;
@@ -1180,6 +1220,14 @@
         return;
       }
       const n = (data.queued || []).length;
+      const rejected = data.rejected || {};
+      const skipReasons = Object.keys(rejected).map(function (id) { return rejected[id]; });
+      if (n === 0 && skipReasons.length) {
+        status.textContent = enqueueErrorText(skipReasons[0]);
+        status.className = "err";
+        load({ silent: true });
+        return;
+      }
       status.textContent = t("queuedOk").replace("{n}", String(n));
       status.className = n ? "ok" : "";
       load();

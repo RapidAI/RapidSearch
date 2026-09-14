@@ -192,6 +192,15 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "已有中文译本 {zh} 篇") || !strings.Contains(body, "{zh} with Chinese PDF") {
 		t.Fatal("papers meta line must show catalog-wide Chinese PDF count")
 	}
+	if !strings.Contains(body, "共 {n} 页") || !strings.Contains(body, "{n} pages") {
+		t.Fatal("paper cards must show ZH/EN page-count copy")
+	}
+	if !strings.Contains(body, "超过 50 页，跳过翻译") || !strings.Contains(body, "Over 50 pages, skip translation") {
+		t.Fatal("papers page must explain why >50-page papers skip translation")
+	}
+	if !strings.Contains(body, "paperTooLongToTranslate") || !strings.Contains(body, "page_count") {
+		t.Fatal("translate buttons must be gated on page_count > 50")
+	}
 	if !strings.Contains(body, "countCatalogZhPDFs") || !strings.Contains(body, "lastCatalog.papers") {
 		t.Fatal("ZH PDF count must come from the full catalog, not the filtered list")
 	}
@@ -217,6 +226,41 @@ func TestPapersPageAnonymousOK(t *testing.T) {
 	}
 	if !strings.Contains(body, `id="xlate-pending"`) || !strings.Contains(body, "hidden") {
 		t.Fatal("translate-pending should start hidden until can_manage")
+	}
+}
+
+func TestPapersAPIExposesPageCount(t *testing.T) {
+	h, dir := papersHandler(t)
+	name := "2401.05459_personal_llm_agents.pdf"
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", name), academicPaperPDF(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	man := papersManifest{
+		GeneratedAt: "2026-01-01T00:00:00Z",
+		Papers: []paperEntry{{
+			Title:   "Personal LLM Agents",
+			Year:    2024,
+			ArxivID: "2401.05459",
+			PDFPath: "pdfs/" + name,
+		}},
+	}
+	if err := persistManifestJSON(filepath.Join(dir, "manifest.json"), man); err != nil {
+		t.Fatal(err)
+	}
+	h.(*Server).papers().invalidateCatalog()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Papers) != 1 || cat.Papers[0].PageCount != 2 {
+		t.Fatalf("api page_count %+v", cat.Papers)
 	}
 }
 
