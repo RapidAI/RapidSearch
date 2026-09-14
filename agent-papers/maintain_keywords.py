@@ -2,7 +2,9 @@
 """Mine on-topic ArXiv search keywords from the local agent-papers corpus.
 
 Stay on topic: agent self-evolution / self-improving LLM agents / agent security /
-agentic safety / red-teaming / jailbreak-for-agents / LLM-based IoT (AIoT).
+agentic safety / red-teaming / jailbreak-for-agents / LLM-based IoT (AIoT) /
+LLM training (SFT, RLHF, pretraining) / agent tools & memory.
+`other` is never mined.
 Every auto query is gated with agent/LLM-agent framing so ambiguous terms never
 search general ML or generic IoT hardware alone.
 """
@@ -27,6 +29,10 @@ from search_download_papers import (
     LLM_RE,
     SECURITY_RE,
     SURVEY_RE,
+    TOOLS_MEMORY_RE,
+    TRAINING_RE,
+    is_agent_tools_memory,
+    is_llm_training,
     tag_topics,
 )
 
@@ -183,6 +189,22 @@ AMBIGUOUS_ALONE = frozenset(
         "edge device",
         "sensor network",
         "cyber-physical",
+        "sft",
+        "rlhf",
+        "dpo",
+        "rag",
+        "memory",
+        "fine-tuning",
+        "finetuning",
+        "pretraining",
+        "pre-training",
+        "post-training",
+        "instruction tuning",
+        "lora",
+        "qlora",
+        "peft",
+        "tool use",
+        "function calling",
     }
 )
 
@@ -196,7 +218,10 @@ TOPIC_BONUS_RE = re.compile(
     r"language[\s-]?agent|multi[\s-]?agent|tool[\s-]?using|"
     r"continual[\s-]?improv\w*|open[\s-]?ended[\s-]?evolution|"
     r"agentic[\s-]?reinforcement|secure[\s-]?self|safe[\s-]?self|"
-    r"aiot|internet[\s-]?of[\s-]?things|llm[\s-]?iot|cyber[\s-]?physical"
+    r"aiot|internet[\s-]?of[\s-]?things|llm[\s-]?iot|cyber[\s-]?physical|"
+    r"rlhf|sft|instruction[\s-]?tun\w*|pre[\s-]?train\w*|post[\s-]?train\w*|"
+    r"tool[\s-]?call\w*|function[\s-]?call\w*|tool[\s-]?use|"
+    r"agent[\s-]?memory|long[\s-]?term[\s-]?memory|retrieval[\s-]?augment\w*"
     r")\b",
     re.I,
 )
@@ -259,12 +284,23 @@ def paper_on_topic(title: str, abstract: str, tags: list[str]) -> bool:
     evo = bool(EVOLVE_RE.search(text))
     sec = bool(SECURITY_RE.search(text))
     has_iot = bool(IOT_RE.search(text))
+    train = is_llm_training(title, abstract)
+    tools = is_agent_tools_memory(title, abstract)
     if tags:
         tagset = {t.lower() for t in tags}
-        if tagset & {"self-evolution", "security", "both", "survey", "llm-iot"}:
+        if tagset & {
+            "self-evolution",
+            "security",
+            "both",
+            "survey",
+            "llm-iot",
+            "llm-training",
+            "agent-tools-memory",
+            "other",
+        }:
             # still require agent or LLM framing to avoid pure ML / generic IoT
             return has_agent or has_llm
-    return (has_agent or has_llm) and (evo or sec or has_iot)
+    return (has_agent or has_llm) and (evo or sec or has_iot or train or tools)
 
 
 def load_papers(out: Path, db_path: Path) -> list[dict]:
@@ -341,6 +377,14 @@ def topic_affinity(term: str, title_hits: int, abs_hits: int, tag_counter: Count
         score += 2.5
     elif IOT_RE.search(term):
         score += 1.0  # IoT alone is weak; must pair via agent gate
+    if TRAINING_RE.search(term) and LLM_RE.search(term):
+        score += 2.5
+    elif TRAINING_RE.search(term):
+        score += 1.2
+    if TOOLS_MEMORY_RE.search(term) and (AGENT_RE.search(term) or LLM_RE.search(term)):
+        score += 2.5
+    elif TOOLS_MEMORY_RE.search(term):
+        score += 1.2
     if SURVEY_RE.search(term) and n >= 2:
         score += 0.5
 
@@ -355,6 +399,8 @@ def topic_affinity(term: str, title_hits: int, abs_hits: int, tag_counter: Count
             score += 0.4 * c
         elif tag == "llm-iot":
             score += 0.4 * c
+        elif tag in ("llm-training", "agent-tools-memory"):
+            score += 0.4 * c
         elif tag == "survey":
             score += 0.1 * c
 
@@ -364,7 +410,12 @@ def topic_affinity(term: str, title_hits: int, abs_hits: int, tag_counter: Count
     if term in AMBIGUOUS_ALONE or (n == 1 and term in AMBIGUOUS_ALONE):
         score -= 1.0  # still usable if paired later
     if any(p in GENERIC_CS for p in parts) and not (
-        AGENT_RE.search(term) or EVOLVE_RE.search(term) or SECURITY_RE.search(term)
+        AGENT_RE.search(term)
+        or EVOLVE_RE.search(term)
+        or SECURITY_RE.search(term)
+        or TRAINING_RE.search(term)
+        or TOOLS_MEMORY_RE.search(term)
+        or LLM_RE.search(term)
     ):
         score -= 4.0
 
@@ -413,6 +464,8 @@ def mine_terms(papers: list[dict]) -> list[dict]:
                 or SECURITY_RE.search(phrase)
                 or LLM_RE.search(phrase)
                 or IOT_RE.search(phrase)
+                or TRAINING_RE.search(phrase)
+                or TOOLS_MEMORY_RE.search(phrase)
             ):
                 continue
             abs_counts[phrase] += 1
@@ -436,7 +489,9 @@ def mine_terms(papers: list[dict]) -> list[dict]:
                 or EVOLVE_RE.search(term)
                 or SECURITY_RE.search(term)
                 or IOT_RE.search(term)
-                or term in {"jailbreak", "agentic", "agent", "agents"}
+                or TRAINING_RE.search(term)
+                or TOOLS_MEMORY_RE.search(term)
+                or term in {"jailbreak", "agentic", "agent", "agents", "rlhf", "sft"}
             ):
                 continue
             if term in GENERIC_CS or term in STOPWORDS:
@@ -450,6 +505,8 @@ def mine_terms(papers: list[dict]) -> list[dict]:
                 or EVOLVE_RE.search(term)
                 or SECURITY_RE.search(term)
                 or IOT_RE.search(term)
+                or TRAINING_RE.search(term)
+                or TOOLS_MEMORY_RE.search(term)
             ):
                 continue
 
@@ -482,6 +539,11 @@ def agent_gate_clause() -> str:
     return '(all:"LLM agent" OR all:"language agent" OR all:agentic OR ti:agent OR all:"multi-agent")'
 
 
+def llm_gate_clause() -> str:
+    """Framing for LLM-training queries that are not agent-specific."""
+    return '(all:LLM OR all:"language model" OR all:"large language" OR ti:LLM)'
+
+
 def theme_clause_for_term(term: str, tags: list[str]) -> Optional[str]:
     """Extra theme OR-group when the term itself is not clearly evolve/security/IoT.
 
@@ -493,10 +555,24 @@ def theme_clause_for_term(term: str, tags: list[str]) -> Optional[str]:
     has_evo = bool(EVOLVE_RE.search(term))
     has_sec = bool(SECURITY_RE.search(term))
     has_iot = bool(IOT_RE.search(term))
-    # Strong theme words (self-evolving, jailbreak, AIoT, …): agent gate is enough.
-    if has_evo or has_sec or has_iot:
+    has_train = bool(TRAINING_RE.search(term))
+    has_tools = bool(TOOLS_MEMORY_RE.search(term))
+    # Strong theme words (self-evolving, jailbreak, AIoT, SFT, tool-calling, …): gate is enough.
+    if has_evo or has_sec or has_iot or has_train or has_tools:
         return None
     tagset = set(tags)
+    if "llm-training" in tagset and not (
+        tagset & {"self-evolution", "security", "both", "agent-tools-memory"}
+    ):
+        return (
+            '(all:SFT OR all:RLHF OR all:DPO OR all:"fine-tuning" OR all:pretraining '
+            'OR all:"instruction tuning" OR all:"post-training")'
+        )
+    if "agent-tools-memory" in tagset and not (tagset & {"self-evolution", "security", "both"}):
+        return (
+            '(all:"tool use" OR all:"tool calling" OR all:"function calling" '
+            'OR all:"agent memory" OR all:RAG)'
+        )
     if "llm-iot" in tagset and not (tagset & {"self-evolution", "security", "both"}):
         return '(all:IoT OR all:AIoT OR all:"Internet of Things")'
     if "security" in tagset and "self-evolution" not in tagset and "both" not in tagset:
@@ -525,7 +601,11 @@ def build_query_for_term(item: dict) -> str:
     term = item["term"]
     tags = item.get("tags") or []
     phrase = quote_arxiv_phrase(term)
-    gate = agent_gate_clause()
+    tagset = {t.lower() for t in tags}
+    training_only = "llm-training" in tagset and not (
+        tagset & {"self-evolution", "security", "both", "agent-tools-memory", "llm-iot"}
+    )
+    gate = llm_gate_clause() if training_only else agent_gate_clause()
     theme = theme_clause_for_term(term, tags)
 
     # Title-preferring form for strong multi-word phrases
@@ -576,6 +656,8 @@ def select_auto_queries(terms: list[dict], auto_cap: int) -> tuple[list[str], li
             if not (
                 EVOLVE_RE.search(term)
                 or SECURITY_RE.search(term)
+                or TRAINING_RE.search(term)
+                or TOOLS_MEMORY_RE.search(term)
                 or TOPIC_BONUS_RE.search(term)
             ):
                 continue
@@ -586,7 +668,13 @@ def select_auto_queries(terms: list[dict], auto_cap: int) -> tuple[list[str], li
                 if len(parts) != 2:
                     continue
                 if not (
-                    (EVOLVE_RE.search(term) or SECURITY_RE.search(term) or IOT_RE.search(term))
+                    (
+                        EVOLVE_RE.search(term)
+                        or SECURITY_RE.search(term)
+                        or IOT_RE.search(term)
+                        or TRAINING_RE.search(term)
+                        or TOOLS_MEMORY_RE.search(term)
+                    )
                     and (AGENT_RE.search(term) or LLM_RE.search(term) or TOPIC_BONUS_RE.search(term))
                 ):
                     continue

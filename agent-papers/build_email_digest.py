@@ -11,6 +11,9 @@ TAG_CN = {
     "both": "agent安全自进化",
     "llm-iot": "LLM based 物联网",
     "survey": "综述",
+    "llm-training": "LLM 训练",
+    "agent-tools-memory": "agent工具与记忆",
+    "other": "其它",
 }
 
 def brief(title, abstract, tags):
@@ -31,6 +34,10 @@ def brief(title, abstract, tags):
         return "LLM agent 安全、威胁或防护。"
     if "llm-iot" in tags or "iot" in t or "aiot" in t or "internet of things" in t or "internet of things" in a:
         return "LLM / agent 驱动的物联网（AIoT）系统。"
+    if "llm-training" in tags or "rlhf" in t or "sft" in t or "fine-tun" in t or "pretrain" in t:
+        return "大语言模型训练 / 后训练（SFT、RLHF、对齐等）。"
+    if "agent-tools-memory" in tags or "tool" in t or "function call" in t or "memory" in t:
+        return "Agent 工具调用或记忆 / RAG 相关工作。"
     if any(x in t for x in ("evolv", "improv", "mutab")):
         return "agent 自进化/自改进或持续适应。"
     abs0 = (abstract or "").strip().split(". ")[0]

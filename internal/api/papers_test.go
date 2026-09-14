@@ -140,11 +140,65 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
 		t.Fatal("papers page must include llm-iot key and English label")
 	}
+	if !strings.Contains(body, "llm-training") || !strings.Contains(body, "LLM 训练") ||
+		!strings.Contains(body, "LLM training") {
+		t.Fatal("papers page must include llm-training key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "agent-tools-memory") || !strings.Contains(body, "agent工具与记忆") ||
+		!strings.Contains(body, "Agent tools & memory") {
+		t.Fatal("papers page must include agent-tools-memory key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `"other"`) || !strings.Contains(body, "其它") ||
+		!strings.Contains(body, "Other") {
+		t.Fatal("papers page must include other key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `id="import-open"`) || !strings.Contains(body, `id="import-dialog"`) ||
+		!strings.Contains(body, "/papers/import") {
+		t.Fatal("papers page must offer public import paper control")
+	}
+	if !strings.Contains(body, `id="import-pdf"`) || !strings.Contains(body, `accept="application/pdf,.pdf"`) {
+		t.Fatal("import dialog must offer PDF upload")
+	}
+	if !strings.Contains(body, `id="import-tag" required`) && !strings.Contains(body, `id="import-tag" required>`) {
+		t.Fatal("category select must stay required for every import path")
+	}
+	if !strings.Contains(body, "importNeedTag") || !strings.Contains(body, "请选择分类") {
+		t.Fatal("import UI must keep the required-category message")
+	}
+	if !strings.Contains(body, "if (!tag)") {
+		t.Fatal("submitImport must reject a missing category before URL or upload")
+	}
+	if !strings.Contains(body, "FormData") || !strings.Contains(body, `fd.append("tag", tag)`) {
+		t.Fatal("upload path must send the required tag in multipart form")
+	}
+	if !strings.Contains(body, "importChecking") || !strings.Contains(body, "importUploading") {
+		t.Fatal("upload UI must show checking and uploading status")
+	}
+	if !strings.Contains(body, "importErr_not_a_paper") || !strings.Contains(body, "不像传统学术论文") {
+		t.Fatal("import UI must localize structure-check failures")
+	}
+	if !strings.Contains(body, "导入论文") || !strings.Contains(body, "Import paper") {
+		t.Fatal("papers page must localize the import button")
+	}
+	if !strings.Contains(body, `source: "Source"`) || !strings.Contains(body, `source: "来源"`) {
+		t.Fatal("paper card source link must use Source / 来源, not arXiv-only copy")
+	}
+	if strings.Contains(body, `t("arxiv")`) || strings.Contains(body, `arxiv: "arXiv"`) {
+		t.Fatal("card action i18n key arxiv should have been renamed to source")
+	}
+	if !strings.Contains(body, `id="tag-chips"`) {
+		t.Fatal("papers page must show tag filter chips")
+	}
+	if !strings.Contains(body, "已有中文译本 {zh} 篇") || !strings.Contains(body, "{zh} with Chinese PDF") {
+		t.Fatal("papers meta line must show catalog-wide Chinese PDF count")
+	}
+	if !strings.Contains(body, "countCatalogZhPDFs") || !strings.Contains(body, "lastCatalog.papers") {
+		t.Fatal("ZH PDF count must come from the full catalog, not the filtered list")
+	}
 	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
 		t.Fatal("papers page must map stable tag keys to localized labels")
 	}
 }
-
 
 func TestPapersPageAnonymousOK(t *testing.T) {
 	h, _ := papersHandler(t)

@@ -47,17 +47,40 @@
       background: var(--bg);
       color: var(--ink);
     }
-    .top {
+    .title-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 16px 18px 0;
+      gap: 12px 16px;
       flex-wrap: wrap;
+      margin: 0 0 6px;
+    }
+    .title-row h1 { margin: 0; flex: 0 1 auto; }
+    .title-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .title-actions .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-actions .nav a {
+      display: inline-block;
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      text-decoration: none;
+      font-size: 13px;
     }
     .lang-switch, .theme-switch { display: flex; gap: 4px; }
+    .theme-switch button, .lang-switch button { padding: 6px 10px; }
     .lang-switch button.active, .theme-switch button.active {
       background: var(--accent);
       color: #fff;
@@ -67,7 +90,7 @@
     html[data-theme="light"] .theme-switch button.active {
       background: #0b63ce;
     }
-    main { max-width: 960px; margin: 0 auto; padding: 12px 18px 48px; }
+    main { max-width: 960px; margin: 0 auto; padding: 16px 18px 48px; }
     h1 { font-size: 1.45rem; margin: 0 0 6px; }
     h2 { font-size: 1.05rem; margin: 0 0 10px; }
     p.lead { color: var(--muted); margin: 0 0 18px; }
@@ -235,6 +258,69 @@
     .pager-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .pager-info { color: var(--muted); font-size: 13px; }
     .authors { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: -6px 0 14px;
+    }
+    .chips button {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+    .chips button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    #import-open { font-size: 13px; }
+    dialog#import-dialog {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      padding: 18px 18px 14px;
+      width: min(480px, calc(100vw - 32px));
+    }
+    dialog#import-dialog::backdrop { background: rgba(16, 24, 40, 0.35); }
+    dialog#import-dialog h2 { margin: 0 0 6px; }
+    dialog#import-dialog .lead { margin: 0 0 14px; font-size: 13px; }
+    dialog#import-dialog label {
+      display: block;
+      font-size: 13px;
+      margin: 0 0 4px;
+      color: var(--muted);
+    }
+    dialog#import-dialog input, dialog#import-dialog select {
+      width: 100%;
+      margin: 0 0 12px;
+    }
+    dialog#import-dialog input[type="file"] {
+      font-size: 13px;
+      padding: 6px 0;
+    }
+    dialog#import-dialog .import-hint {
+      margin: -6px 0 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    dialog#import-dialog .import-or {
+      margin: -4px 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+    dialog#import-dialog .dlg-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    #import-status { min-height: 1.2em; font-size: 13px; margin: 0 0 8px; }
+    #import-status.err { color: var(--bad); }
+    #import-status.ok { color: var(--ok); }
   </style>
   <script>
   (function () {
@@ -257,23 +343,24 @@
   </script>
 </head>
 <body>
-<div class="top">
-  <div class="nav">
-    <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
-  </div>
-  <div class="row" style="margin:0">
-    <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
-      <button type="button" id="theme-light" data-theme="light">Aa</button>
-      <button type="button" id="theme-dark" data-theme="dark">◐</button>
-    </div>
-    <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
-      <button type="button" id="lang-zh" data-lang="zh">中文</button>
-      <button type="button" id="lang-en" data-lang="en">EN</button>
-    </div>
-  </div>
-</div>
 <main>
-  <h1 data-i18n="heading">码卡龙论文精选</h1>
+  <div class="title-row">
+    <h1 data-i18n="heading">码卡龙论文精选</h1>
+    <div class="title-actions">
+      <div class="nav">
+        <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
+        <button type="button" class="primary" id="import-open" data-i18n="importOpen">Import paper</button>
+      </div>
+      <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
+        <button type="button" id="theme-light" data-theme="light">Aa</button>
+        <button type="button" id="theme-dark" data-theme="dark">◐</button>
+      </div>
+      <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
+        <button type="button" id="lang-zh" data-lang="zh">中文</button>
+        <button type="button" id="lang-en" data-lang="en">EN</button>
+      </div>
+    </div>
+  </div>
   <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
 
   <p class="hint-line">
@@ -292,6 +379,7 @@
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
     <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
   </div>
+  <div class="chips" id="tag-chips" role="group" data-i18n-aria="tagChips" aria-label="Tags"></div>
   <p class="meta" id="meta"></p>
   <div id="xlate-banner" role="status" aria-live="polite" hidden>
     <span class="pulse" aria-hidden="true"></span>
@@ -318,6 +406,23 @@
     </div>
   </div>
 </main>
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <h2 id="import-title" data-i18n="importTitle">Import paper</h2>
+  <p class="lead" data-i18n="importLead">Provide an arXiv id/URL or a PDF file, and choose a required category.</p>
+  <label for="import-url" data-i18n="importURL">arXiv URL / id or PDF URL</label>
+  <input id="import-url" type="text" data-i18n-placeholder="importURLPh" placeholder="2504.01990 or https://arxiv.org/abs/…" autocomplete="off">
+  <p class="import-or" data-i18n="importOr">or</p>
+  <label for="import-pdf" data-i18n="importPDF">Upload PDF</label>
+  <input id="import-pdf" type="file" accept="application/pdf,.pdf">
+  <p class="import-hint" data-i18n="importSourceHint">Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.</p>
+  <label for="import-tag" data-i18n="importTag">Category</label>
+  <select id="import-tag" required></select>
+  <p id="import-status"></p>
+  <div class="dlg-actions">
+    <button type="button" id="import-cancel" data-i18n="importCancel">Cancel</button>
+    <button type="button" class="primary" id="import-submit" data-i18n="importSubmit">Import</button>
+  </div>
+</dialog>
 <script>
 (function () {
   const LANG_KEY = "rs_settings_lang";
@@ -335,14 +440,14 @@
       apply: "Filter",
       sortNewest: "Newest first",
       sortOldest: "Oldest first",
-      meta: "{matched} match · {total} in catalog · page {page}/{pages} · {visits} visits · generated {when}",
+      meta: "{matched} match · {total} in catalog · {zh} with Chinese PDF · page {page}/{pages} · {visits} visits · generated {when}",
       pageInfo: "Showing {from}–{to} of {matched}",
       prev: "Previous",
       next: "Next",
       empty: "No papers match.",
       download: "Download PDF",
       view: "Open PDF",
-      arxiv: "arXiv",
+      source: "Source",
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
       unauthorized: "Unauthorized — sign in via Settings first.",
@@ -364,7 +469,34 @@
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
       xlateBannerTitle: "Currently translating",
       xlatePolling: "Auto-refreshing…",
-      absTranslating: "Translating abstract…"
+      absTranslating: "Translating abstract…",
+      importOpen: "Import paper",
+      importTitle: "Import paper",
+      importLead: "Provide an arXiv id/URL or a PDF file, and choose a required category.",
+      importURL: "arXiv URL / id or PDF URL",
+      importURLPh: "2504.01990 or https://arxiv.org/abs/…",
+      importOr: "or",
+      importPDF: "Upload PDF",
+      importSourceHint: "Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.",
+      importTag: "Category",
+      importCancel: "Cancel",
+      importSubmit: "Import",
+      importWorking: "Importing…",
+      importChecking: "Checking that this looks like an academic paper…",
+      importUploading: "Uploading…",
+      importOk: "Imported “{title}”.",
+      importFail: "Could not import that paper.",
+      importNeedURL: "Enter an arXiv id, arXiv URL, or PDF URL.",
+      importNeedSource: "Enter a URL/id or choose a PDF file.",
+      importNeedTag: "Choose a category.",
+      importErr_not_a_paper: "This PDF does not look like a traditional academic paper (need abstract / introduction / references).",
+      importErr_not_pdf: "That file is not a PDF.",
+      importErr_too_large: "That PDF is too large.",
+      importErr_too_small: "That file is too small to be a paper PDF.",
+      importErr_scanned: "That PDF looks like a scan with no extractable paper text.",
+      importErr_tag_required: "Choose a category.",
+      importErr_need_input: "Enter a URL/id or choose a PDF file.",
+      tagChips: "Tags"
     },
     zh: {
       langLabel: "语言",
@@ -377,14 +509,14 @@
       apply: "筛选",
       sortNewest: "最新优先",
       sortOldest: "最早优先",
-      meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 第 {page}/{pages} 页 · 访问 {visits} · 生成于 {when}",
+      meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 已有中文译本 {zh} 篇 · 第 {page}/{pages} 页 · 访问 {visits} · 生成于 {when}",
       pageInfo: "显示第 {from}–{to} 篇，共 {matched} 篇",
       prev: "上一页",
       next: "下一页",
       empty: "没有匹配的论文。",
       download: "下载 PDF",
       view: "打开 PDF",
-      arxiv: "arXiv",
+      source: "来源",
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
       unauthorized: "未授权 — 请先在设置页登录。",
@@ -406,25 +538,61 @@
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
       xlateBannerTitle: "正在翻译",
       xlatePolling: "自动刷新中…",
-      absTranslating: "摘要翻译中…"
+      absTranslating: "摘要翻译中…",
+      importOpen: "导入论文",
+      importTitle: "导入论文",
+      importLead: "提供 arXiv 编号/链接或上传 PDF，并选择必填分类。",
+      importURL: "arXiv 链接 / 编号或 PDF 链接",
+      importURLPh: "2504.01990 或 https://arxiv.org/abs/…",
+      importOr: "或",
+      importPDF: "上传 PDF",
+      importSourceHint: "填写链接/编号或上传 PDF。两者都填时使用上传的文件。任何导入都必须选择分类。",
+      importTag: "分类",
+      importCancel: "取消",
+      importSubmit: "导入",
+      importWorking: "正在导入…",
+      importChecking: "正在检查是否为学术论文…",
+      importUploading: "正在上传…",
+      importOk: "已导入「{title}」。",
+      importFail: "无法导入该论文。",
+      importNeedURL: "请输入 arXiv 编号、arXiv 链接或 PDF 链接。",
+      importNeedSource: "请输入链接/编号或选择 PDF 文件。",
+      importNeedTag: "请选择分类。",
+      importErr_not_a_paper: "该 PDF 不像传统学术论文（需含摘要 / 引言 / 参考文献）。",
+      importErr_not_pdf: "该文件不是 PDF。",
+      importErr_too_large: "该 PDF 体积过大。",
+      importErr_too_small: "该文件太小，不像论文 PDF。",
+      importErr_scanned: "该 PDF 像扫描件，无法提取论文正文。",
+      importErr_tag_required: "请选择分类。",
+      importErr_need_input: "请输入链接/编号或选择 PDF 文件。",
+      tagChips: "标签"
     }
   };
 
-  const TAG_KEYS = ["self-evolution", "security", "both", "llm-iot", "survey"];
+  const TAG_KEYS = [
+    "self-evolution", "security", "both", "llm-iot", "survey",
+    "llm-training", "agent-tools-memory", "other"
+  ];
   const TAG_LABELS = {
     en: {
       "self-evolution": "Agent self-evolution",
       "security": "Agent security",
       "both": "Secure self-evolution",
       "llm-iot": "LLM-based IoT",
-      "survey": "Survey"
+      "survey": "Survey",
+      "llm-training": "LLM training",
+      "agent-tools-memory": "Agent tools & memory",
+      "other": "Other"
     },
     zh: {
       "self-evolution": "agent自进化",
       "security": "agent安全",
       "both": "agent安全自进化",
       "llm-iot": "LLM based 物联网",
-      "survey": "综述"
+      "survey": "综述",
+      "llm-training": "LLM 训练",
+      "agent-tools-memory": "agent工具与记忆",
+      "other": "其它"
     }
   };
   function tagLabel(key) {
@@ -471,6 +639,14 @@
         else opt.textContent = tagLabel(opt.value);
       });
     }
+    const importTag = document.getElementById("import-tag");
+    if (importTag) {
+      Array.prototype.forEach.call(importTag.options, function (opt) {
+        if (!opt.value) opt.textContent = t("importTag");
+        else opt.textContent = tagLabel(opt.value);
+      });
+    }
+    renderTagChips();
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
     const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
@@ -740,16 +916,28 @@
     return "";
   }
 
+  function countCatalogZhPDFs(papers) {
+    const list = papers || [];
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i] || {};
+      if (p.zh_pdf || p.translate_status === "done") n++;
+    }
+    return n;
+  }
   function renderMeta() {
     const when = lastCatalog.generated_at || "—";
-    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
+    const all = lastCatalog.papers || [];
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : all.length;
     const matched = filteredPapers.length;
     const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
     const visits = typeof lastCatalog.visits === "number" ? lastCatalog.visits : 0;
+    const zh = countCatalogZhPDFs(all);
     const text = t("meta")
       .replace("{matched}", String(matched))
       .replace("{shown}", String(matched))
       .replace("{total}", String(total))
+      .replace("{zh}", String(zh))
       .replace("{page}", String(pageIndex))
       .replace("{pages}", String(pages))
       .replace("{visits}", String(visits))
@@ -825,9 +1013,9 @@
       errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
     }
     if (p.source_url) {
-      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
     } else if (p.arxiv_id) {
-      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
     }
     const abs = abstractDisplay(p);
     let briefHtml = "";
@@ -903,6 +1091,41 @@
         return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
       }).join("");
     if (cur && (present[cur] || TAG_KEYS.indexOf(cur) >= 0)) sel.value = cur;
+    fillImportTags();
+    renderTagChips();
+  }
+
+  function fillImportTags() {
+    const sel = document.getElementById("import-tag");
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">' + esc(t("importTag")) + "</option>" +
+      TAG_KEYS.map(function (tg) {
+        return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
+      }).join("");
+    if (cur && TAG_KEYS.indexOf(cur) >= 0) sel.value = cur;
+  }
+
+  function renderTagChips() {
+    const box = document.getElementById("tag-chips");
+    if (!box) return;
+    const cur = (document.getElementById("tag") || {}).value || "";
+    const chips = ['<button type="button" data-tag=""' + (cur ? "" : ' class="active"') + ">" + esc(t("tagAll")) + "</button>"];
+    TAG_KEYS.forEach(function (tg) {
+      chips.push(
+        '<button type="button" data-tag="' + esc(tg) + '"' +
+        (cur === tg ? ' class="active"' : "") + ">" + esc(tagLabel(tg)) + "</button>"
+      );
+    });
+    box.innerHTML = chips.join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const sel = document.getElementById("tag");
+        sel.value = btn.getAttribute("data-tag") || "";
+        renderTagChips();
+        renderAll(true);
+      });
+    });
   }
 
   async function load(opts) {
@@ -986,7 +1209,111 @@
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(function () { renderAll(true); }, 220);
   });
-  document.getElementById("tag").addEventListener("change", function () { renderAll(true); });
+  document.getElementById("tag").addEventListener("change", function () {
+    renderTagChips();
+    renderAll(true);
+  });
+
+  function importDialog() {
+    return document.getElementById("import-dialog");
+  }
+  function openImport() {
+    fillImportTags();
+    const st = document.getElementById("import-status");
+    st.textContent = "";
+    st.className = "";
+    const pdfEl = document.getElementById("import-pdf");
+    if (pdfEl) pdfEl.value = "";
+    const dlg = importDialog();
+    if (dlg && dlg.showModal) dlg.showModal();
+    else if (dlg) dlg.setAttribute("open", "open");
+    const urlEl = document.getElementById("import-url");
+    if (urlEl) urlEl.focus();
+  }
+  function closeImport() {
+    const dlg = importDialog();
+    if (!dlg) return;
+    if (dlg.close) dlg.close();
+    else dlg.removeAttribute("open");
+  }
+  function importErrorText(data) {
+    const code = (data && (data.error_code || data.code)) || "";
+    if (code) {
+      const key = "importErr_" + code;
+      const mapped = t(key);
+      if (mapped && mapped !== key) return mapped;
+    }
+    return (data && data.error) || t("importFail");
+  }
+  async function submitImport() {
+    const status = document.getElementById("import-status");
+    const url = document.getElementById("import-url").value.trim();
+    const tag = document.getElementById("import-tag").value;
+    const fileEl = document.getElementById("import-pdf");
+    const file = fileEl && fileEl.files && fileEl.files[0];
+    const btn = document.getElementById("import-submit");
+    // Category is mandatory for URL/id and PDF upload — never submit without a tag.
+    if (!tag) {
+      status.textContent = t("importNeedTag");
+      status.className = "err";
+      return;
+    }
+    if (!file && !url) {
+      status.textContent = t("importNeedSource");
+      status.className = "err";
+      return;
+    }
+    btn.disabled = true;
+    status.className = "";
+    try {
+      let res;
+      if (file) {
+        status.textContent = t("importChecking");
+        const fd = new FormData();
+        fd.append("tag", tag);
+        fd.append("file", file, file.name || "paper.pdf");
+        status.textContent = t("importUploading");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(false),
+          body: fd
+        });
+      } else {
+        status.textContent = t("importWorking");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(true),
+          body: JSON.stringify({ url_or_id: url, tag: tag })
+        });
+      }
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        status.textContent = importErrorText(data);
+        status.className = "err";
+        return;
+      }
+      const title = (data.paper && data.paper.title) || (file && file.name) || url;
+      status.textContent = t("importOk").replace("{title}", title);
+      status.className = "ok";
+      document.getElementById("status").textContent = t("importOk").replace("{title}", title);
+      document.getElementById("status").className = "ok";
+      closeImport();
+      await load();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  document.getElementById("import-open").addEventListener("click", openImport);
+  document.getElementById("import-cancel").addEventListener("click", closeImport);
+  document.getElementById("import-submit").addEventListener("click", submitImport);
+  document.getElementById("import-url").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); submitImport(); }
+  });
   document.getElementById("sort").addEventListener("change", function () { renderAll(true); });
   document.querySelectorAll(".pager-prev").forEach(function (btn) {
     btn.addEventListener("click", function () { goPage(-1); });
@@ -994,8 +1321,10 @@
   document.querySelectorAll(".pager-next").forEach(function (btn) {
     btn.addEventListener("click", function () { goPage(1); });
   });
+  fillImportTags();
   applyI18n();
   applyManageUI();
+  renderTagChips();
   load();
 })();
 </script>
