@@ -407,8 +407,11 @@ func translateAbstractOpenAI(ctx context.Context, client *http.Client, base, key
 func extractChatContent(body []byte) (string, error) {
 	var parsed struct {
 		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
+				Reasoning        string `json:"reasoning"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
@@ -418,7 +421,42 @@ func extractChatContent(body []byte) (string, error) {
 	if len(parsed.Choices) == 0 {
 		return "", fmt.Errorf("empty chat choices")
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	ch := parsed.Choices[0]
+	content := strings.TrimSpace(ch.Message.Content)
+	if content != "" {
+		return content, nil
+	}
+	reasoning := strings.TrimSpace(ch.Message.ReasoningContent)
+	if reasoning == "" {
+		reasoning = strings.TrimSpace(ch.Message.Reasoning)
+	}
+	if obj, ok := extractJSONObject(reasoning); ok {
+		return obj, nil
+	}
+	reason := strings.TrimSpace(ch.FinishReason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	if reasoning != "" {
+		return "", fmt.Errorf("empty chat content (finish_reason=%s; reasoning present but no JSON object)", reason)
+	}
+	return "", fmt.Errorf("empty chat content (finish_reason=%s)", reason)
+}
+
+// extractJSONObject returns the first JSON object embedded in s, if it parses.
+func extractJSONObject(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	i := strings.Index(s, "{")
+	j := strings.LastIndex(s, "}")
+	if i < 0 || j <= i {
+		return "", false
+	}
+	cand := s[i : j+1]
+	var probe any
+	if json.Unmarshal([]byte(cand), &probe) != nil {
+		return "", false
+	}
+	return cand, true
 }
 
 // briefRunes truncates by Unicode code points (better for CJK abstracts).
