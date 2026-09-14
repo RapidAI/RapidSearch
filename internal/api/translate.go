@@ -29,7 +29,31 @@ const (
 	translateDefaultConcurrency = 3
 	translateMinConcurrency     = 1
 	translateMaxConcurrency     = 8
+	// translateMaxPages is inclusive: 50-page papers may translate; 51+ must not enqueue.
+	translateMaxPages    = 50
+	translateSkipTooLong = "超过 50 页，跳过翻译"
 )
+
+func paperExceedsTranslatePageLimit(p paperEntry) bool {
+	return p.PageCount > translateMaxPages
+}
+
+func resolveTranslatePageCount(root string, p paperEntry) int {
+	if p.PageCount > 0 {
+		return p.PageCount
+	}
+	name := strings.TrimSpace(p.Filename)
+	if name == "" {
+		name = filepath.Base(strings.TrimSpace(p.PDFPath))
+	}
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return 0
+	}
+	if root == "" {
+		return 0
+	}
+	return pdfPageCountFromFile(filepath.Join(root, "pdfs", name))
+}
 
 // Translation job statuses exposed on /papers/api.
 const (
@@ -810,8 +834,8 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 			Running:    svc.runningID(),
 			RunningIDs: svc.runningIDs(),
 		}
-		if force && len(res.Queued) == 0 && len(res.Rejected) > 0 {
-			// Prefer a clear Chinese message when the only target is mid-flight.
+		if len(res.Queued) == 0 && len(res.Rejected) > 0 && (force || strings.TrimSpace(req.ID) != "") {
+			// Prefer a clear message when the only target is mid-flight or over the page cap.
 			for _, reason := range res.Rejected {
 				resp.OK = false
 				resp.Error = reason
@@ -916,6 +940,9 @@ func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 	var ids []string
 	for _, p := range papers {
 		if !p.HasLocal || p.ID == "" {
+			continue
+		}
+		if paperExceedsTranslatePageLimit(p) {
 			continue
 		}
 		// Already translated — never auto / bulk-enqueue again.

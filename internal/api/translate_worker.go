@@ -53,6 +53,12 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			out.Skipped = append(out.Skipped, id)
 			continue
 		}
+		if pages := resolveTranslatePageCount(s.root, p); pages > translateMaxPages {
+			p.PageCount = pages
+			out.Skipped = append(out.Skipped, id)
+			out.Rejected[id] = translateSkipTooLong
+			continue
+		}
 
 		running := s.running[id] || jobProcessBusy(s.root, id)
 		if jExisting, ok := s.status.Jobs[id]; ok && jExisting.Status == translateRunning {

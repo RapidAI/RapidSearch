@@ -402,6 +402,9 @@ func TestImportUploadAcademicPaper(t *testing.T) {
 	if !strings.Contains(strings.ToLower(resp.Paper.Title+resp.Paper.Abstract), "memory") {
 		t.Fatalf("expected extracted meta: %+v", resp.Paper)
 	}
+	if resp.Paper.PageCount != 2 {
+		t.Fatalf("import page_count=%d want 2", resp.Paper.PageCount)
+	}
 
 	ps := h.(*Server).papers()
 	ps.invalidateCatalog()
