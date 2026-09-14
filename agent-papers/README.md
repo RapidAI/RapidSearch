@@ -1,8 +1,8 @@
-# Agent Papers — Self-Evolution & Security
+# Agent Papers — Self-Evolution, Security & LLM-IoT
 
-搜索并下载「智能体自进化 / 自改进」与「智能体安全 / 安全自进化」相关学术论文（以 ArXiv 为主），并维护本地 **SQLite FTS5** 可检索库。
+搜索并下载「智能体自进化 / 自改进」、「智能体安全 / 安全自进化」与「LLM based 物联网」相关学术论文（以 ArXiv 为主），并维护本地 **SQLite FTS5** 可检索库。
 
-Search and download academic papers on **agent self-evolution / self-improvement** and **agent security / safe self-evolution** (ArXiv primary), with a local **SQLite FTS5** retrieval database.
+Search and download academic papers on **agent self-evolution / self-improvement**, **agent security / safe self-evolution**, and **LLM-based IoT / AIoT** (ArXiv primary), with a local **SQLite FTS5** retrieval database.
 
 ## Setup / 环境
 
@@ -99,11 +99,23 @@ Python helpers: `upsert_paper`, `rebuild_from_manifest`, `search(query, limit)`,
 
 ## Themes / 主题覆盖
 
-1. **Agent self-evolution surveys/reviews (综述)** — self-evolving / self-improving / autonomous agents, continual learning agents, agentic RL (agent-framed)
-2. **Agent security** — LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection
-3. **Safe/secure self-evolution** — intersection: safe self-evolution, secure self-improvement, alignment of self-modifying agents
+Stable English keys (storage / API); Chinese labels shown in the papers UI.
 
-Tags in manifest/index: `self-evolution`, `security`, `both`, plus `survey` when title/abstract matches survey|review|综述.
+| key | UI label | Meaning |
+|-----|----------|---------|
+| `self-evolution` | agent自进化 | self-evolving / self-improving / self-modifying / continual agents |
+| `security` | agent安全 | LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection |
+| `both` | agent安全自进化 | intersection: safe/secure self-evolution & alignment of self-modifying agents |
+| `llm-iot` | LLM based 物联网 | LLM/AIoT / LLM agents for IoT, edge, smart home/city, CPS (**not** generic IoT hardware) |
+| `survey` | 综述 | secondary chip when title/abstract matches survey\|review\|综述 |
+
+`llm-iot` is a **primary** when the paper is IoT+LLM and not clearly evolve/security; it can also attach as an **additional** tag on overlapping agent papers.
+
+Retag existing corpus (no PDF changes):
+
+```bash
+/workspace/crawl4ai-venv/bin/python search_download_papers.py --out /workspace/agent-papers --retag
+```
 
 ## Notes / 说明
 
@@ -111,35 +123,4 @@ Tags in manifest/index: `self-evolution`, `security`, `both`, plus `survey` when
 - Full search **merges** with existing `manifest.json` (does not drop known papers); PDF download skips files already on disk.
 - Sync loads existing ids from **DB + manifest**, keeps only unknown papers.
 - Crawl4AI is used only for HTML landing pages when a direct PDF URL is missing (full search path). Prefer ArXiv PDFs.
-- Relevance prefers agents + (self-evolv*/self-improv*/self-modif*/meta-learn*/continual/agentic) or (secur*/safet*/adversar*/jailbreak/alignment); surveys boosted.
-
-## Runtime data vs this directory
-
-This folder holds **scripts and docs** that live in the RapidSearch git tree.
-Downloaded PDFs, SQLite (`papers.db`), and caches are **not** committed.
-
-Point the search-service at the data directory with:
-
-```bash
-export PAPERS_DIR=/workspace/agent-papers   # default if unset
-# or: export PAPERS_DIR=./data/agent-papers
-```
-
-Expected layout under `PAPERS_DIR`:
-
-```
-manifest.json
-papers.db          # optional for scripts
-pdfs/*.pdf
-cache/             # optional script cache
-```
-
-### HTTP (search-service / public proxy)
-
-After login (same Hub global admin cookie as `/settings`) or with Bearer `SEARCH_TOKEN`:
-
-- `GET /papers` — HTML catalog (ZH/EN)
-- `GET /papers/api?q=&tag=` — JSON catalog
-- `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
-
-Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`
+- Relevance prefers agents + (self-evolv*/self-improv*/self-modif*/meta-learn*/continual/agentic) or (secur*/safet*/adversar*/jailbreak/alignment) or (IoT/AIoT/edge/smart-home/MQTT/CPS **paired with** LLM/agent); surveys boosted. Generic IoT-only hardware papers are dropped.

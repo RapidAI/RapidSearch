@@ -5,7 +5,13 @@ import argparse, json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-TAG_CN = {"self-evolution": "自进化", "security": "安全", "both": "自进化+安全", "survey": "综述"}
+TAG_CN = {
+    "self-evolution": "agent自进化",
+    "security": "agent安全",
+    "both": "agent安全自进化",
+    "llm-iot": "LLM based 物联网",
+    "survey": "综述",
+}
 
 def brief(title, abstract, tags):
     t = (title or "").lower()
@@ -23,6 +29,8 @@ def brief(title, abstract, tags):
         if any(x in t for x in ("evolv", "improv", "self-")):
             return "交叉：自改进与安全/治理。"
         return "LLM agent 安全、威胁或防护。"
+    if "llm-iot" in tags or "iot" in t or "aiot" in t or "internet of things" in t or "internet of things" in a:
+        return "LLM / agent 驱动的物联网（AIoT）系统。"
     if any(x in t for x in ("evolv", "improv", "mutab")):
         return "agent 自进化/自改进或持续适应。"
     abs0 = (abstract or "").strip().split(". ")[0]
