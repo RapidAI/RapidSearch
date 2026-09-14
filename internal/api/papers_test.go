@@ -159,6 +159,12 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "导入论文") || !strings.Contains(body, "Import paper") {
 		t.Fatal("papers page must localize the import button")
 	}
+	if !strings.Contains(body, `source: "Source"`) || !strings.Contains(body, `source: "来源"`) {
+		t.Fatal("paper card source link must use Source / 来源, not arXiv-only copy")
+	}
+	if strings.Contains(body, `t("arxiv")`) || strings.Contains(body, `arxiv: "arXiv"`) {
+		t.Fatal("card action i18n key arxiv should have been renamed to source")
+	}
 	if !strings.Contains(body, `id="tag-chips"`) {
 		t.Fatal("papers page must show tag filter chips")
 	}

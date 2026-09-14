@@ -428,7 +428,7 @@
       empty: "No papers match.",
       download: "Download PDF",
       view: "Open PDF",
-      arxiv: "arXiv",
+      source: "Source",
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
       unauthorized: "Unauthorized — sign in via Settings first.",
@@ -484,7 +484,7 @@
       empty: "没有匹配的论文。",
       download: "下载 PDF",
       view: "打开 PDF",
-      arxiv: "arXiv",
+      source: "来源",
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
       unauthorized: "未授权 — 请先在设置页登录。",
@@ -956,9 +956,9 @@
       errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
     }
     if (p.source_url) {
-      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
     } else if (p.arxiv_id) {
-      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
     }
     const abs = abstractDisplay(p);
     let briefHtml = "";
