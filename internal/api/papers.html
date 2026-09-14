@@ -1272,6 +1272,7 @@
         const fd = new FormData();
         fd.append("tag", tag);
         fd.append("file", file, file.name || "paper.pdf");
+        status.textContent = t("importUploading");
         res = await fetch(prefix + "/papers/import", {
           method: "POST",
           credentials: "same-origin",

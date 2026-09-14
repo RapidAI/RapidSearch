@@ -171,6 +171,9 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "FormData") || !strings.Contains(body, `fd.append("tag", tag)`) {
 		t.Fatal("upload path must send the required tag in multipart form")
 	}
+	if !strings.Contains(body, "importChecking") || !strings.Contains(body, "importUploading") {
+		t.Fatal("upload UI must show checking and uploading status")
+	}
 	if !strings.Contains(body, "importErr_not_a_paper") || !strings.Contains(body, "不像传统学术论文") {
 		t.Fatal("import UI must localize structure-check failures")
 	}
