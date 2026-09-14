@@ -57,6 +57,11 @@ type paperEntry struct {
 	TranslateSkipReason string `json:"translate_skip_reason,omitempty"`
 	// TranslateLane is "fast" (≤50 pages) or "slow" (51–100). Empty when skipped.
 	TranslateLane string `json:"translate_lane,omitempty"`
+
+	// Review flags for catalog cards (no rater list).
+	HasReview   bool    `json:"has_review"`
+	AvgStars    float64 `json:"avg_stars"`
+	RatingCount int     `json:"rating_count"`
 }
 
 type papersManifest struct {
@@ -104,6 +109,7 @@ type papersStore struct {
 	cat     papersCatalog
 	xlate   *translateService
 	absZH   *abstractZHService
+	reviews *reviewService
 	visits  *visitCounter
 
 	importMu          sync.Mutex
@@ -129,6 +135,7 @@ func newPapersStore(root string) *papersStore {
 		root:        root,
 		xlate:       xlate,
 		absZH:       newAbstractZHService(root, xlate),
+		reviews:     newReviewService(root, xlate),
 		visits:      newVisitCounter(root),
 		importLimit: newImportLimiter(),
 	}
@@ -178,6 +185,9 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 	overlayTranslations(out.Papers, ps.root, jobs)
 	if ps != nil && ps.absZH != nil {
 		ps.absZH.overlay(out.Papers)
+	}
+	if ps != nil && ps.reviews != nil {
+		ps.reviews.overlay(out.Papers)
 	}
 	return out, nil
 }

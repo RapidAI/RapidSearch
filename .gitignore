@@ -52,6 +52,10 @@ agent-papers/visit-stats.json
 agent-papers/translate.pause
 **/translate.pause
 
+# Paper reviews (LLM 解读 + ratings; runtime, never commit)
+agent-papers/reviews/
+**/agent-papers/reviews/
+
 # Local rebuild leftovers
 search-proxy-linux
 search-service.prev

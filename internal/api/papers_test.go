@@ -130,6 +130,18 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
 		t.Fatal("papers page must classify fast vs slow translate lanes")
 	}
+	if !strings.Contains(body, `tagChips: "Tags",`) || !strings.Contains(body, `tagChips: "标签",`) {
+		t.Fatal("tagChips i18n keys must have trailing commas before reviewView")
+	}
+	if !strings.Contains(body, `reviewView: "View review"`) || !strings.Contains(body, `reviewView: "查看解读"`) {
+		t.Fatal("review overlay i18n must follow tagChips")
+	}
+	if strings.Contains(body, "let banner =") || strings.Contains(body, "var banner =") {
+		t.Fatal("renderTranslateBanner must not redeclare the banner DOM element")
+	}
+	if !strings.Contains(body, "bannerTitle") {
+		t.Fatal("translate banner title string must use bannerTitle")
+	}
 	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
 		t.Fatal("papers page must show page-level translation progress banner")
 	}
