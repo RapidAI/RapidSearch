@@ -112,6 +112,24 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "canManage && p.has_local") {
 		t.Fatal("translate / re-translate buttons must require canManage")
 	}
+	if !strings.Contains(body, "page_count") || !strings.Contains(body, `class="pages"`) {
+		t.Fatal("papers page must render page_count near year/tags")
+	}
+	if !strings.Contains(body, "Over 100 pages — skipped translation") || !strings.Contains(body, "超过 100 页，不翻译") {
+		t.Fatal("papers page must label the over-100-pages skip reason in EN and ZH")
+	}
+	if !strings.Contains(body, "too_many_pages") || !strings.Contains(body, "TRANSLATE_MAX_PAGES") {
+		t.Fatal("papers page must hide translate when too_many_pages")
+	}
+	if !strings.Contains(body, "paperTooManyPages") || !strings.Contains(body, "xlate-skip") {
+		t.Fatal("over-limit papers must show skip reason instead of a silent skip")
+	}
+	if !strings.Contains(body, "慢速翻译队列") || !strings.Contains(body, "Slow translation queue") {
+		t.Fatal("papers page must label the 51–100 page slow lane")
+	}
+	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
+		t.Fatal("papers page must classify fast vs slow translate lanes")
+	}
 	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
 		t.Fatal("papers page must show page-level translation progress banner")
 	}

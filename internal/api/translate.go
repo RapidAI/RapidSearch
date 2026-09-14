@@ -91,6 +91,8 @@ type translateJob struct {
 	Filename  string `json:"filename,omitempty"`
 	ZhRel     string `json:"zh_pdf,omitempty"`
 	DualRel   string `json:"dual_pdf,omitempty"`
+	PageCount int    `json:"page_count,omitempty"`
+	Lane      string `json:"lane,omitempty"` // fast | slow
 }
 
 type translateStatusFile struct {
@@ -104,8 +106,10 @@ type translateService struct {
 	mu     sync.Mutex
 	cfg    translateFileConfig
 	status translateStatusFile
-	queue  []string
-	inQ    map[string]bool
+	// Dual-lane queues: fast (≤50 pages) and slow (51–100). inQ dedupes both.
+	fastQ []string
+	slowQ []string
+	inQ   map[string]bool
 	// running is the set of paper ids with an in-process runOne goroutine.
 	running map[string]bool
 	// concurrency is the max number of distinct-paper BabelDOC jobs (1–8).
@@ -195,8 +199,7 @@ func (s *translateService) recoverJobs() {
 				dirty = true
 				continue
 			}
-			s.queue = append(s.queue, id)
-			s.inQ[id] = true
+			s.pushQueuedLocked(id, j.PageCount)
 		}
 	}
 	if dirty {
@@ -206,7 +209,7 @@ func (s *translateService) recoverJobs() {
 			log.Printf("papers translate-status write: %v", err)
 		}
 	}
-	if len(s.queue) > 0 {
+	if len(s.fastQ)+len(s.slowQ) > 0 {
 		select {
 		case s.kick <- struct{}{}:
 		default:
@@ -458,8 +461,20 @@ func summarizeTranslateProgress(papers []paperEntry) *translateProgress {
 		switch paper.TranslateStatus {
 		case translateQueued:
 			p.Queued++
+			switch paperTranslateLane(paper.PageCount) {
+			case translateLaneSlow:
+				p.SlowQueued++
+			case translateLaneFast:
+				p.FastQueued++
+			}
 		case translateRunning:
 			p.Running++
+			switch paperTranslateLane(paper.PageCount) {
+			case translateLaneSlow:
+				p.SlowRunning++
+			case translateLaneFast:
+				p.FastRunning++
+			}
 			id := paper.ID
 			title := strings.TrimSpace(paper.Title)
 			if id != "" {
@@ -519,6 +534,8 @@ func overlayOne(p paperEntry, root string, jobs map[string]translateJob) paperEn
 			p.TranslateError = ""
 		}
 	}
+	p.TranslateSkipReason = paperTranslateSkipReason(p)
+	p.TranslateLane = paperTranslateLane(p.PageCount)
 	return p
 }
 
@@ -810,8 +827,9 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 			Running:    svc.runningID(),
 			RunningIDs: svc.runningIDs(),
 		}
-		if force && len(res.Queued) == 0 && len(res.Rejected) > 0 {
+		if len(res.Queued) == 0 && len(res.Rejected) > 0 && (force || hasTranslateSkipReject(res.Rejected)) {
 			// Prefer a clear Chinese message when the only target is mid-flight.
+			// Page-count rejects use the machine-readable too_many_pages reason.
 			for _, reason := range res.Rejected {
 				resp.OK = false
 				resp.Error = reason
@@ -827,7 +845,9 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 func (s *translateService) queuePublic() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pending := append([]string(nil), s.queue...)
+	fast := append([]string(nil), s.fastQ...)
+	slow := append([]string(nil), s.slowQ...)
+	pending := append(append([]string{}, fast...), slow...)
 	jobs := make(map[string]translateJob, len(s.status.Jobs))
 	for k, v := range s.status.Jobs {
 		v.Error = sanitizeUserError(v.Error)
@@ -841,6 +861,8 @@ func (s *translateService) queuePublic() map[string]any {
 	return map[string]any{
 		"ok":          true,
 		"queued":      pending,
+		"fast_queued": fast,
+		"slow_queued": slow,
 		"running":     first,
 		"running_ids": ids,
 		"concurrency": s.concurrencyLimit(),
@@ -912,10 +934,24 @@ func (s *translateService) AutoTranslate() bool {
 	return s != nil && s.snapshot().AutoTranslate
 }
 
+func hasTranslateSkipReject(rejected map[string]string) bool {
+	for _, reason := range rejected {
+		if reason == translateSkipTooManyPages {
+			return true
+		}
+	}
+	return false
+}
+
 func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 	var ids []string
 	for _, p := range papers {
 		if !p.HasLocal || p.ID == "" {
+			continue
+		}
+		// Auto-translate never spends a slot on over-long PDFs.
+		// Translate-all still includes them so enqueue can return too_many_pages.
+		if auto && paperTooManyPages(p) {
 			continue
 		}
 		// Already translated — never auto / bulk-enqueue again.

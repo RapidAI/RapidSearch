@@ -609,7 +609,7 @@ func TestEnqueueSkipsDuplicateQueued(t *testing.T) {
 	}
 	svc.mu.Lock()
 	n := 0
-	for _, id := range svc.queue {
+	for _, id := range svc.queuedIDsLocked() {
 		if id == "demo" {
 			n++
 		}
