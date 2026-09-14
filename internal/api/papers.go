@@ -37,6 +37,8 @@ type paperEntry struct {
 	DownloadStatus string   `json:"download_status,omitempty"`
 	Published      string   `json:"published,omitempty"`
 	Updated        string   `json:"updated,omitempty"`
+	QueryHits      []string `json:"query_hits,omitempty"`
+	Source         string   `json:"source,omitempty"` // "manual" for user imports
 
 	// Filled for API/HTML consumers.
 	Filename        string `json:"filename,omitempty"`
@@ -93,6 +95,12 @@ type papersStore struct {
 	xlate   *translateService
 	absZH   *abstractZHService
 	visits  *visitCounter
+
+	importMu          sync.Mutex
+	importLimit       *importLimiter
+	importClient      *http.Client
+	allowPrivateFetch bool   // tests: httptest.Server on loopback
+	arxivAPIBase      string // tests: override export.arxiv.org
 }
 
 func papersRoot() string {
@@ -107,7 +115,13 @@ func newPapersStore(root string) *papersStore {
 		root = papersRoot()
 	}
 	xlate := newTranslateService(root)
-	ps := &papersStore{root: root, xlate: xlate, absZH: newAbstractZHService(root, xlate), visits: newVisitCounter(root)}
+	ps := &papersStore{
+		root:        root,
+		xlate:       xlate,
+		absZH:       newAbstractZHService(root, xlate),
+		visits:      newVisitCounter(root),
+		importLimit: newImportLimiter(),
+	}
 	ps.xlate.start()
 	ps.absZH.start()
 	return ps
@@ -121,6 +135,16 @@ func (s *Server) papers() *papersStore {
 		s.papersStore = newPapersStore(papersRoot())
 	}
 	return s.papersStore
+}
+
+func (ps *papersStore) invalidateCatalog() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	ps.loaded = time.Time{}
+	ps.modTime = time.Time{}
 }
 
 func (ps *papersStore) catalog() (papersCatalog, error) {

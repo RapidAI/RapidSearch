@@ -5,6 +5,8 @@ and LLM-based IoT (AIoT). Primary source: ArXiv API. Optional: Semantic Scholar,
 local RapidSearch + Crawl4AI.
 
 Stable topic_tags keys: self-evolution | security | both | llm-iot | survey
+    | llm-training | agent-tools-memory | other
+Manual imports set source=manual and keep the user-chosen tag.
 """
 from __future__ import annotations
 
@@ -193,9 +195,29 @@ LLM_IOT_NEG_RE = re.compile(
 )
 
 PRIMARY_TAGS = ("both", "self-evolution", "security", "llm-iot")
+STABLE_TAGS = (
+    "self-evolution",
+    "security",
+    "both",
+    "llm-iot",
+    "survey",
+    "llm-training",
+    "agent-tools-memory",
+    "other",
+)
+MANUAL_ONLY_TAGS = frozenset({"llm-training", "agent-tools-memory", "other"})
 
 ARXIV_ID_RE = re.compile(
-    r"(?:arxiv\.org/(?:abs|pdf)/|arxiv:)?(\d{4}\.\d{4,5})(?:v\d+)?",
+    r"(?:https?://)?(?:[\w.-]+\.)?arxiv\.org/(?:abs|pdf|html|src)/"
+    r"(?:arxiv:)?(\d{4}\.\d{4,5}|[a-z\-]+(?:\.[a-zA-Z]{2})?/\d{7})(?:v\d+)?(?:\.pdf)?",
+    re.I,
+)
+ARXIV_BARE_RE = re.compile(
+    r"^(?:arxiv:)?(\d{4}\.\d{4,5}|[a-z\-]+(?:\.[a-zA-Z]{2})?/\d{7})(?:v\d+)?$",
+    re.I,
+)
+ARXIV_LOOSE_RE = re.compile(
+    r"(?:arxiv\.org/(?:abs|pdf|html|src)/|arxiv:)?(\d{4}\.\d{4,5})(?:v\d+)?",
     re.I,
 )
 DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.I)
@@ -218,6 +240,7 @@ class Paper:
     download_status: str = ""  # ok | skipped | failed | dry-run | no-pdf
     published: str = ""
     updated: str = ""
+    source: str = ""  # "manual" for user imports; empty for search/sync
 
     def dedupe_key(self) -> str:
         if self.arxiv_id:
@@ -271,8 +294,37 @@ def cache_set(cache_dir: Path, key: str, payload: Any) -> None:
 
 
 def extract_arxiv_id(text: str) -> str:
-    m = ARXIV_ID_RE.search(text or "")
-    return m.group(1) if m else ""
+    """Parse a canonical arXiv id (no version) from a bare id or abs/pdf URL."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    m = ARXIV_ID_RE.search(s)
+    if m:
+        return m.group(1)
+    m = ARXIV_BARE_RE.match(s)
+    if m:
+        return m.group(1)
+    # Loose new-style match only when the text mentions arxiv (avoid years in titles).
+    if "arxiv" in s.lower():
+        m = ARXIV_LOOSE_RE.search(s)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def validate_topic_tag(tag: str) -> Optional[str]:
+    """Return the stable tag key, or None if unknown."""
+    t = (tag or "").strip().lower()
+    if t in STABLE_TAGS:
+        return t
+    return None
+
+
+def preserve_manual_tags(paper: Paper, old_tags: Optional[list[str]] = None) -> bool:
+    tags = list(old_tags if old_tags is not None else (paper.topic_tags or []))
+    if (paper.source or "").strip().lower() == "manual":
+        return True
+    return bool(set(tags) & MANUAL_ONLY_TAGS)
 
 
 def extract_doi(text: str) -> str:
@@ -841,11 +893,12 @@ def load_existing_manifest(out: Path) -> dict[str, Paper]:
     for d in data.get("papers") or []:
         try:
             p = Paper(**{k: v for k, v in d.items() if k in Paper.__dataclass_fields__})
-            # Refresh tags/score with current heuristics (e.g. survey flag)
-            fresh_tags = tag_topics(p.title, p.abstract)
-            if fresh_tags:
-                # preserve theme, ensure survey appended if newly detected
-                p.topic_tags = fresh_tags
+            # Refresh tags/score with current heuristics (e.g. survey flag).
+            # Manual imports keep the operator-chosen category.
+            if not preserve_manual_tags(p):
+                fresh_tags = tag_topics(p.title, p.abstract)
+                if fresh_tags:
+                    p.topic_tags = fresh_tags
             p.score = max(p.score, relevance_score(p.title, p.abstract))
             out_map[p.dedupe_key()] = p
         except Exception:
@@ -914,6 +967,9 @@ def write_index(out: Path, papers: list[Paper], stats: dict) -> None:
         "- **both** — agent安全自进化: safe/secure self-evolution & alignment of self-modifying agents",
         "- **llm-iot** — LLM based 物联网: LLM/AIoT / LLM agents for IoT, edge, smart home/city, CPS (not generic IoT hardware)",
         "- **survey** — 综述: survey / review (secondary flag when detected in title/abstract)",
+        "- **llm-training** — LLM 训练 / LLM training (manual import)",
+        "- **agent-tools-memory** — agent工具与记忆 / Agent tools & memory (manual import)",
+        "- **other** — 其它 / Other (manual import)",
         "",
     ]
     theme_counts = stats.get("theme_counts") or {}
@@ -991,7 +1047,10 @@ def retag_corpus(out: Path) -> dict:
     for d in data.get("papers") or []:
         p = Paper(**{k: v for k, v in d.items() if k in Paper.__dataclass_fields__})
         old_tags = list(p.topic_tags or [])
-        p.topic_tags = tag_topics(p.title, p.abstract)
+        if preserve_manual_tags(p, old_tags):
+            p.topic_tags = old_tags
+        else:
+            p.topic_tags = tag_topics(p.title, p.abstract)
         p.score = relevance_score(p.title, p.abstract)
         if p.topic_tags != old_tags:
             changed += 1

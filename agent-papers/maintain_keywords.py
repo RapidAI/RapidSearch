@@ -261,7 +261,16 @@ def paper_on_topic(title: str, abstract: str, tags: list[str]) -> bool:
     has_iot = bool(IOT_RE.search(text))
     if tags:
         tagset = {t.lower() for t in tags}
-        if tagset & {"self-evolution", "security", "both", "survey", "llm-iot"}:
+        if tagset & {
+            "self-evolution",
+            "security",
+            "both",
+            "survey",
+            "llm-iot",
+            "llm-training",
+            "agent-tools-memory",
+            "other",
+        }:
             # still require agent or LLM framing to avoid pure ML / generic IoT
             return has_agent or has_llm
     return (has_agent or has_llm) and (evo or sec or has_iot)

@@ -11,6 +11,9 @@ TAG_CN = {
     "both": "agent安全自进化",
     "llm-iot": "LLM based 物联网",
     "survey": "综述",
+    "llm-training": "LLM 训练",
+    "agent-tools-memory": "agent工具与记忆",
+    "other": "其它",
 }
 
 def brief(title, abstract, tags):

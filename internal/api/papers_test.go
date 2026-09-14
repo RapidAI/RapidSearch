@@ -140,11 +140,32 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
 		t.Fatal("papers page must include llm-iot key and English label")
 	}
+	if !strings.Contains(body, "llm-training") || !strings.Contains(body, "LLM 训练") ||
+		!strings.Contains(body, "LLM training") {
+		t.Fatal("papers page must include llm-training key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "agent-tools-memory") || !strings.Contains(body, "agent工具与记忆") ||
+		!strings.Contains(body, "Agent tools & memory") {
+		t.Fatal("papers page must include agent-tools-memory key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `"other"`) || !strings.Contains(body, "其它") ||
+		!strings.Contains(body, "Other") {
+		t.Fatal("papers page must include other key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `id="import-open"`) || !strings.Contains(body, `id="import-dialog"`) ||
+		!strings.Contains(body, "/papers/import") {
+		t.Fatal("papers page must offer public import paper control")
+	}
+	if !strings.Contains(body, "导入论文") || !strings.Contains(body, "Import paper") {
+		t.Fatal("papers page must localize the import button")
+	}
+	if !strings.Contains(body, `id="tag-chips"`) {
+		t.Fatal("papers page must show tag filter chips")
+	}
 	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
 		t.Fatal("papers page must map stable tag keys to localized labels")
 	}
 }
-
 
 func TestPapersPageAnonymousOK(t *testing.T) {
 	h, _ := papersHandler(t)

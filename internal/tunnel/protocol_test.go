@@ -99,6 +99,9 @@ func TestPathNeedsStreamAndPassthrough(t *testing.T) {
 	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") || !PathPassthroughAuth("/papers/translate/test") {
 		t.Fatal("passthrough")
 	}
+	if !PathIsPapers("/papers/import") || !PathPassthroughAuth("/papers/import") {
+		t.Fatal("manual import must reach the search process")
+	}
 	if PathPassthroughAuth("/search") {
 		t.Fatal("search is not passthrough")
 	}

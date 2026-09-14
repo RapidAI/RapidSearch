@@ -33,9 +33,9 @@ type Server struct {
 	// hedgeAfter overrides the 3s hedged-failover delay (tests).
 	hedgeAfter time.Duration
 	// runEngine, if set, replaces mgr.Do + search.Run (unit tests).
-	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
-	cfg       *search.Store
-	auth      *proxyauth.Checker
+	runEngine   func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
+	cfg         *search.Store
+	auth        *proxyauth.Checker
 	papersStore *papersStore
 }
 
@@ -91,6 +91,7 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/papers", s.handlePapersPage)
 	s.mux.HandleFunc("/papers/{$}", s.handlePapersPage)
 	s.mux.HandleFunc("/papers/api", s.handlePapersAPI)
+	s.mux.HandleFunc("/papers/import", s.handlePapersImport)
 	s.mux.HandleFunc("/papers/translate", s.handlePapersTranslate)
 	s.mux.HandleFunc("/papers/translate/config", s.handlePapersTranslateConfig)
 	s.mux.HandleFunc("/papers/translate/test", s.handlePapersTranslateTest)

@@ -235,6 +235,54 @@
     .pager-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .pager-info { color: var(--muted); font-size: 13px; }
     .authors { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: -6px 0 14px;
+    }
+    .chips button {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+    .chips button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    #import-open { font-size: 13px; }
+    dialog#import-dialog {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      padding: 18px 18px 14px;
+      width: min(440px, calc(100vw - 32px));
+    }
+    dialog#import-dialog::backdrop { background: rgba(16, 24, 40, 0.35); }
+    dialog#import-dialog h2 { margin: 0 0 6px; }
+    dialog#import-dialog .lead { margin: 0 0 14px; font-size: 13px; }
+    dialog#import-dialog label {
+      display: block;
+      font-size: 13px;
+      margin: 0 0 4px;
+      color: var(--muted);
+    }
+    dialog#import-dialog input, dialog#import-dialog select {
+      width: 100%;
+      margin: 0 0 12px;
+    }
+    dialog#import-dialog .dlg-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    #import-status { min-height: 1.2em; font-size: 13px; margin: 0 0 8px; }
+    #import-status.err { color: var(--bad); }
+    #import-status.ok { color: var(--ok); }
   </style>
   <script>
   (function () {
@@ -260,6 +308,7 @@
 <div class="top">
   <div class="nav">
     <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
+    <button type="button" class="primary" id="import-open" data-i18n="importOpen">Import paper</button>
   </div>
   <div class="row" style="margin:0">
     <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
@@ -292,6 +341,7 @@
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
     <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
   </div>
+  <div class="chips" id="tag-chips" role="group" data-i18n-aria="tagChips" aria-label="Tags"></div>
   <p class="meta" id="meta"></p>
   <div id="xlate-banner" role="status" aria-live="polite" hidden>
     <span class="pulse" aria-hidden="true"></span>
@@ -318,6 +368,19 @@
     </div>
   </div>
 </main>
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <h2 id="import-title" data-i18n="importTitle">Import paper</h2>
+  <p class="lead" data-i18n="importLead">Paste an arXiv id, arXiv URL, or a direct PDF link, and choose a category.</p>
+  <label for="import-url" data-i18n="importURL">arXiv URL / id or PDF URL</label>
+  <input id="import-url" type="text" data-i18n-placeholder="importURLPh" placeholder="2504.01990 or https://arxiv.org/abs/…" autocomplete="off">
+  <label for="import-tag" data-i18n="importTag">Category</label>
+  <select id="import-tag" required></select>
+  <p id="import-status"></p>
+  <div class="dlg-actions">
+    <button type="button" id="import-cancel" data-i18n="importCancel">Cancel</button>
+    <button type="button" class="primary" id="import-submit" data-i18n="importSubmit">Import</button>
+  </div>
+</dialog>
 <script>
 (function () {
   const LANG_KEY = "rs_settings_lang";
@@ -364,7 +427,21 @@
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
       xlateBannerTitle: "Currently translating",
       xlatePolling: "Auto-refreshing…",
-      absTranslating: "Translating abstract…"
+      absTranslating: "Translating abstract…",
+      importOpen: "Import paper",
+      importTitle: "Import paper",
+      importLead: "Paste an arXiv id, arXiv URL, or a direct PDF link, and choose a category.",
+      importURL: "arXiv URL / id or PDF URL",
+      importURLPh: "2504.01990 or https://arxiv.org/abs/…",
+      importTag: "Category",
+      importCancel: "Cancel",
+      importSubmit: "Import",
+      importWorking: "Importing…",
+      importOk: "Imported “{title}”.",
+      importFail: "Could not import that paper.",
+      importNeedURL: "Enter an arXiv id, arXiv URL, or PDF URL.",
+      importNeedTag: "Choose a category.",
+      tagChips: "Tags"
     },
     zh: {
       langLabel: "语言",
@@ -406,25 +483,48 @@
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
       xlateBannerTitle: "正在翻译",
       xlatePolling: "自动刷新中…",
-      absTranslating: "摘要翻译中…"
+      absTranslating: "摘要翻译中…",
+      importOpen: "导入论文",
+      importTitle: "导入论文",
+      importLead: "粘贴 arXiv 编号、arXiv 链接或 PDF 直链，并选择分类。",
+      importURL: "arXiv 链接 / 编号或 PDF 链接",
+      importURLPh: "2504.01990 或 https://arxiv.org/abs/…",
+      importTag: "分类",
+      importCancel: "取消",
+      importSubmit: "导入",
+      importWorking: "正在导入…",
+      importOk: "已导入「{title}」。",
+      importFail: "无法导入该论文。",
+      importNeedURL: "请输入 arXiv 编号、arXiv 链接或 PDF 链接。",
+      importNeedTag: "请选择分类。",
+      tagChips: "标签"
     }
   };
 
-  const TAG_KEYS = ["self-evolution", "security", "both", "llm-iot", "survey"];
+  const TAG_KEYS = [
+    "self-evolution", "security", "both", "llm-iot", "survey",
+    "llm-training", "agent-tools-memory", "other"
+  ];
   const TAG_LABELS = {
     en: {
       "self-evolution": "Agent self-evolution",
       "security": "Agent security",
       "both": "Secure self-evolution",
       "llm-iot": "LLM-based IoT",
-      "survey": "Survey"
+      "survey": "Survey",
+      "llm-training": "LLM training",
+      "agent-tools-memory": "Agent tools & memory",
+      "other": "Other"
     },
     zh: {
       "self-evolution": "agent自进化",
       "security": "agent安全",
       "both": "agent安全自进化",
       "llm-iot": "LLM based 物联网",
-      "survey": "综述"
+      "survey": "综述",
+      "llm-training": "LLM 训练",
+      "agent-tools-memory": "agent工具与记忆",
+      "other": "其它"
     }
   };
   function tagLabel(key) {
@@ -471,6 +571,14 @@
         else opt.textContent = tagLabel(opt.value);
       });
     }
+    const importTag = document.getElementById("import-tag");
+    if (importTag) {
+      Array.prototype.forEach.call(importTag.options, function (opt) {
+        if (!opt.value) opt.textContent = t("importTag");
+        else opt.textContent = tagLabel(opt.value);
+      });
+    }
+    renderTagChips();
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
     const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
@@ -903,6 +1011,41 @@
         return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
       }).join("");
     if (cur && (present[cur] || TAG_KEYS.indexOf(cur) >= 0)) sel.value = cur;
+    fillImportTags();
+    renderTagChips();
+  }
+
+  function fillImportTags() {
+    const sel = document.getElementById("import-tag");
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">' + esc(t("importTag")) + "</option>" +
+      TAG_KEYS.map(function (tg) {
+        return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
+      }).join("");
+    if (cur && TAG_KEYS.indexOf(cur) >= 0) sel.value = cur;
+  }
+
+  function renderTagChips() {
+    const box = document.getElementById("tag-chips");
+    if (!box) return;
+    const cur = (document.getElementById("tag") || {}).value || "";
+    const chips = ['<button type="button" data-tag=""' + (cur ? "" : ' class="active"') + ">" + esc(t("tagAll")) + "</button>"];
+    TAG_KEYS.forEach(function (tg) {
+      chips.push(
+        '<button type="button" data-tag="' + esc(tg) + '"' +
+        (cur === tg ? ' class="active"' : "") + ">" + esc(tagLabel(tg)) + "</button>"
+      );
+    });
+    box.innerHTML = chips.join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const sel = document.getElementById("tag");
+        sel.value = btn.getAttribute("data-tag") || "";
+        renderTagChips();
+        renderAll(true);
+      });
+    });
   }
 
   async function load(opts) {
@@ -986,7 +1129,82 @@
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(function () { renderAll(true); }, 220);
   });
-  document.getElementById("tag").addEventListener("change", function () { renderAll(true); });
+  document.getElementById("tag").addEventListener("change", function () {
+    renderTagChips();
+    renderAll(true);
+  });
+
+  function importDialog() {
+    return document.getElementById("import-dialog");
+  }
+  function openImport() {
+    fillImportTags();
+    const st = document.getElementById("import-status");
+    st.textContent = "";
+    st.className = "";
+    const dlg = importDialog();
+    if (dlg && dlg.showModal) dlg.showModal();
+    else if (dlg) dlg.setAttribute("open", "open");
+    const urlEl = document.getElementById("import-url");
+    if (urlEl) urlEl.focus();
+  }
+  function closeImport() {
+    const dlg = importDialog();
+    if (!dlg) return;
+    if (dlg.close) dlg.close();
+    else dlg.removeAttribute("open");
+  }
+  async function submitImport() {
+    const status = document.getElementById("import-status");
+    const url = document.getElementById("import-url").value.trim();
+    const tag = document.getElementById("import-tag").value;
+    const btn = document.getElementById("import-submit");
+    if (!url) {
+      status.textContent = t("importNeedURL");
+      status.className = "err";
+      return;
+    }
+    if (!tag) {
+      status.textContent = t("importNeedTag");
+      status.className = "err";
+      return;
+    }
+    btn.disabled = true;
+    status.textContent = t("importWorking");
+    status.className = "";
+    try {
+      const res = await fetch(prefix + "/papers/import", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({ url_or_id: url, tag: tag })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        status.textContent = data.error || t("importFail");
+        status.className = "err";
+        return;
+      }
+      const title = (data.paper && data.paper.title) || url;
+      status.textContent = t("importOk").replace("{title}", title);
+      status.className = "ok";
+      document.getElementById("status").textContent = t("importOk").replace("{title}", title);
+      document.getElementById("status").className = "ok";
+      closeImport();
+      await load();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  document.getElementById("import-open").addEventListener("click", openImport);
+  document.getElementById("import-cancel").addEventListener("click", closeImport);
+  document.getElementById("import-submit").addEventListener("click", submitImport);
+  document.getElementById("import-url").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); submitImport(); }
+  });
   document.getElementById("sort").addEventListener("change", function () { renderAll(true); });
   document.querySelectorAll(".pager-prev").forEach(function (btn) {
     btn.addEventListener("click", function () { goPage(-1); });
@@ -994,8 +1212,10 @@
   document.querySelectorAll(".pager-next").forEach(function (btn) {
     btn.addEventListener("click", function () { goPage(1); });
   });
+  fillImportTags();
   applyI18n();
   applyManageUI();
+  renderTagChips();
   load();
 })();
 </script>
