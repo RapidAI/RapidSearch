@@ -36,6 +36,7 @@ const (
 	importHandlerTimeout = 90 * time.Second
 	importUserAgent      = "Mozilla/5.0 (compatible; AgentPapersBot/1.0; research)"
 	importQueryHit       = "manual-import"
+	importUploadQueryHit = "manual-upload"
 	importManualScore    = 5.0
 )
 
@@ -64,10 +65,11 @@ type importReq struct {
 }
 
 type importResp struct {
-	OK      bool       `json:"ok"`
-	Paper   paperEntry `json:"paper,omitempty"`
-	Updated bool       `json:"updated,omitempty"`
-	Error   string     `json:"error,omitempty"`
+	OK        bool       `json:"ok"`
+	Paper     paperEntry `json:"paper,omitempty"`
+	Updated   bool       `json:"updated,omitempty"`
+	Error     string     `json:"error,omitempty"`
+	ErrorCode string     `json:"error_code,omitempty"`
 }
 
 type importTarget struct {
@@ -212,6 +214,23 @@ func (s *Server) handlePapersImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusTooManyRequests, "too many imports from this address — try again later", "papers", nil, "")
 		return
 	}
+
+	if isMultipartImport(r) {
+		s.handlePapersImportMultipart(w, r, ps)
+		return
+	}
+	s.handlePapersImportJSON(w, r, ps)
+}
+
+func isMultipartImport(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	return strings.HasPrefix(ct, "multipart/form-data")
+}
+
+func (s *Server) handlePapersImportJSON(w http.ResponseWriter, r *http.Request, ps *papersStore) {
 	defer r.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(r.Body, importJSONMaxBytes+1))
 	if err != nil {
@@ -227,9 +246,10 @@ func (s *Server) handlePapersImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json body", search.CodeBadRequest, nil, "")
 		return
 	}
-	tag, ok := validateTopicTag(req.Tag)
-	if !ok {
-		writeErr(w, http.StatusBadRequest, "tag is required and must be a known category key", search.CodeBadRequest, nil, "")
+	// Tag is mandatory on every import path (URL/id and upload). Reject before fetch.
+	tag, err := requireImportTag(req.Tag)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errImportTag.Error(), search.CodeBadRequest, nil, "")
 		return
 	}
 	target, err := parseImportTarget(req.URLOrID)
@@ -237,14 +257,80 @@ func (s *Server) handlePapersImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error(), search.CodeBadRequest, nil, "")
 		return
 	}
+	s.finishPapersImport(w, r, ps, func(ctx context.Context) (paperEntry, bool, error) {
+		return ps.importPaper(ctx, target, tag)
+	})
+}
 
+func (s *Server) handlePapersImportMultipart(w http.ResponseWriter, r *http.Request, ps *papersStore) {
+	r.Body = http.MaxBytesReader(w, r.Body, importUploadMaxBytes+2<<20)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if isTooLargeErr(err) {
+			writeImportErr(w, http.StatusRequestEntityTooLarge, importErrTooLarge, "pdf exceeds size limit")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "invalid multipart body", search.CodeBadRequest, nil, "")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+
+	// Same rule as JSON/URL import: no ingest without a known category key.
+	tag, err := requireImportTag(firstNonBlank(r.FormValue("tag"), r.FormValue("category")))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, errImportTag.Error(), search.CodeBadRequest, nil, "")
+		return
+	}
+
+	file, hdr, ferr := r.FormFile("file")
+	if ferr != nil {
+		file, hdr, ferr = r.FormFile("pdf")
+	}
+	if ferr == nil && file != nil {
+		defer file.Close()
+		body, rerr := io.ReadAll(io.LimitReader(file, importUploadMaxBytes+1))
+		if rerr != nil {
+			writeErr(w, http.StatusBadRequest, "could not read uploaded file", search.CodeBadRequest, nil, "")
+			return
+		}
+		if len(body) > importUploadMaxBytes {
+			writeImportErr(w, http.StatusRequestEntityTooLarge, importErrTooLarge, "pdf exceeds size limit")
+			return
+		}
+		name := ""
+		if hdr != nil {
+			name = hdr.Filename
+		}
+		s.finishPapersImport(w, r, ps, func(ctx context.Context) (paperEntry, bool, error) {
+			return ps.importUploadedPaper(ctx, tag, name, body)
+		})
+		return
+	}
+
+	urlOrID := firstNonBlank(r.FormValue("url_or_id"), r.FormValue("url"))
+	target, err := parseImportTarget(urlOrID)
+	if err != nil {
+		writeImportErr(w, http.StatusBadRequest, importErrNeedInput, "provide an arXiv id/URL, a PDF URL, or a PDF file")
+		return
+	}
+	s.finishPapersImport(w, r, ps, func(ctx context.Context) (paperEntry, bool, error) {
+		return ps.importPaper(ctx, target, tag)
+	})
+}
+
+func (s *Server) finishPapersImport(w http.ResponseWriter, r *http.Request, ps *papersStore, run func(context.Context) (paperEntry, bool, error)) {
 	ctx, cancel := context.WithTimeout(r.Context(), importHandlerTimeout)
 	defer cancel()
 
-	paper, updated, err := ps.importPaper(ctx, target, tag)
+	paper, updated, err := run(ctx)
 	if err != nil {
 		log.Printf("papers import: %v", err)
-		status, msg := importErrStatus(err)
+		status, code, msg := importErrDetail(err)
+		if code != "" && code != "papers" {
+			writeImportErr(w, status, code, msg)
+			return
+		}
 		writeErr(w, status, msg, "papers", nil, "")
 		return
 	}
@@ -264,22 +350,63 @@ func (s *Server) handlePapersImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, importResp{OK: true, Paper: enriched, Updated: updated})
 }
 
-func importErrStatus(err error) (int, string) {
+func writeImportErr(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, importResp{OK: false, Error: msg, ErrorCode: code})
+}
+
+func isTooLargeErr(err error) bool {
 	if err == nil {
-		return http.StatusOK, ""
+		return false
+	}
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too large") || strings.Contains(msg, "request body too large")
+}
+
+func importErrStatus(err error) (int, string) {
+	status, _, msg := importErrDetail(err)
+	return status, msg
+}
+
+func importErrDetail(err error) (int, string, string) {
+	if err == nil {
+		return http.StatusOK, "", ""
+	}
+	var check *importCheckError
+	if errors.As(err, &check) && check != nil && check.Code != "" {
+		status := http.StatusBadRequest
+		if check.Code == importErrTooLarge {
+			status = http.StatusRequestEntityTooLarge
+		}
+		return status, check.Code, check.Error()
 	}
 	msg := err.Error()
 	switch {
+	case errors.Is(err, errImportTag):
+		return http.StatusBadRequest, importErrNeedTag, errImportTag.Error()
+	case errors.Is(err, errImportNeedSrc):
+		return http.StatusBadRequest, importErrNeedInput, "provide an arXiv id/URL, a PDF URL, or a PDF file"
 	case errors.Is(err, errBlockedFetch):
-		return http.StatusBadRequest, "that URL is not allowed"
+		return http.StatusBadRequest, "", "that URL is not allowed"
 	case errors.Is(err, errNotPDF):
-		return http.StatusBadRequest, "downloaded file is not a PDF"
+		return http.StatusBadRequest, importErrNotPDF, "downloaded file is not a PDF"
+	case errors.Is(err, errPDFTooLarge):
+		return http.StatusRequestEntityTooLarge, importErrTooLarge, "pdf exceeds size limit"
+	case errors.Is(err, errPDFTooSmall):
+		return http.StatusBadRequest, importErrTooSmall, "pdf is too small"
+	case errors.Is(err, errNotAPaper):
+		return http.StatusBadRequest, importErrNotPaper, "pdf does not look like a traditional academic paper"
+	case errors.Is(err, errScannedPDF):
+		return http.StatusBadRequest, importErrScanned, "pdf looks like a scanned image with no extractable paper text"
 	case errors.Is(err, errImportEmpty):
-		return http.StatusBadRequest, "could not resolve a paper from that URL"
+		return http.StatusBadRequest, "", "could not resolve a paper from that URL"
 	case strings.Contains(msg, "timeout") || errors.Is(err, context.DeadlineExceeded):
-		return http.StatusGatewayTimeout, "timed out fetching the paper"
+		return http.StatusGatewayTimeout, "", "timed out fetching the paper"
 	default:
-		return http.StatusBadGateway, "could not import paper: " + msg
+		return http.StatusBadGateway, "", "could not import paper: " + msg
 	}
 }
 
@@ -292,6 +419,10 @@ var (
 func (ps *papersStore) importPaper(ctx context.Context, target importTarget, tag string) (paperEntry, bool, error) {
 	if ps == nil {
 		return paperEntry{}, false, errors.New("papers store unavailable")
+	}
+	tag, err := requireImportTag(tag)
+	if err != nil {
+		return paperEntry{}, false, err
 	}
 	ps.importMu.Lock()
 	defer ps.importMu.Unlock()
@@ -333,6 +464,50 @@ func (ps *papersStore) importPaper(ctx context.Context, target importTarget, tag
 		return paperEntry{}, false, err
 	}
 
+	return ps.saveImportedPDF(p, body)
+}
+
+// importUploadedPaper stores a locally uploaded PDF after the academic-paper structure gate.
+// tag must already be a known category key — missing/unknown tags never ingest.
+func (ps *papersStore) importUploadedPaper(ctx context.Context, tag, uploadName string, body []byte) (paperEntry, bool, error) {
+	if ps == nil {
+		return paperEntry{}, false, errors.New("papers store unavailable")
+	}
+	_ = ctx
+	tag, err := requireImportTag(tag)
+	if err != nil {
+		return paperEntry{}, false, err
+	}
+	if len(body) > importUploadMaxBytes {
+		return paperEntry{}, false, importCheckErr(importErrTooLarge, "pdf exceeds size limit")
+	}
+	meta, err := inspectAcademicPaperPDF(body)
+	if err != nil {
+		return paperEntry{}, false, err
+	}
+	if title := titleFromUploadName(uploadName); title != "" && (meta.Title == "" || meta.Title == "Imported paper") {
+		meta.Title = title
+	}
+	sum := sha1.Sum(body)
+	hexid := hex.EncodeToString(sum[:])
+	p := paperEntry{
+		Title:          firstNonBlank(firstNonBlank(meta.Title, titleFromUploadName(uploadName)), "Imported paper"),
+		Authors:        meta.Authors,
+		Abstract:       meta.Abstract,
+		Year:           meta.Year,
+		TopicTags:      []string{tag},
+		Score:          importManualScore,
+		Source:         paperSourceManual,
+		QueryHits:      []string{importQueryHit, importUploadQueryHit},
+		DownloadStatus: "ok",
+		SourceURL:      "manual-upload:" + hexid[:16],
+	}
+	ps.importMu.Lock()
+	defer ps.importMu.Unlock()
+	return ps.saveImportedPDF(p, body)
+}
+
+func (ps *papersStore) saveImportedPDF(p paperEntry, body []byte) (paperEntry, bool, error) {
 	root := ps.root
 	if root == "" {
 		root = papersRoot()

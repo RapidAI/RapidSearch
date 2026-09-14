@@ -156,6 +156,24 @@ func TestPapersPageLightTheme(t *testing.T) {
 		!strings.Contains(body, "/papers/import") {
 		t.Fatal("papers page must offer public import paper control")
 	}
+	if !strings.Contains(body, `id="import-pdf"`) || !strings.Contains(body, `accept="application/pdf,.pdf"`) {
+		t.Fatal("import dialog must offer PDF upload")
+	}
+	if !strings.Contains(body, `id="import-tag" required`) && !strings.Contains(body, `id="import-tag" required>`) {
+		t.Fatal("category select must stay required for every import path")
+	}
+	if !strings.Contains(body, "importNeedTag") || !strings.Contains(body, "请选择分类") {
+		t.Fatal("import UI must keep the required-category message")
+	}
+	if !strings.Contains(body, "if (!tag)") {
+		t.Fatal("submitImport must reject a missing category before URL or upload")
+	}
+	if !strings.Contains(body, "FormData") || !strings.Contains(body, `fd.append("tag", tag)`) {
+		t.Fatal("upload path must send the required tag in multipart form")
+	}
+	if !strings.Contains(body, "importErr_not_a_paper") || !strings.Contains(body, "不像传统学术论文") {
+		t.Fatal("import UI must localize structure-check failures")
+	}
 	if !strings.Contains(body, "导入论文") || !strings.Contains(body, "Import paper") {
 		t.Fatal("papers page must localize the import button")
 	}

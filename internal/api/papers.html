@@ -282,7 +282,7 @@
       color: var(--ink);
       box-shadow: var(--shadow);
       padding: 18px 18px 14px;
-      width: min(440px, calc(100vw - 32px));
+      width: min(480px, calc(100vw - 32px));
     }
     dialog#import-dialog::backdrop { background: rgba(16, 24, 40, 0.35); }
     dialog#import-dialog h2 { margin: 0 0 6px; }
@@ -296,6 +296,21 @@
     dialog#import-dialog input, dialog#import-dialog select {
       width: 100%;
       margin: 0 0 12px;
+    }
+    dialog#import-dialog input[type="file"] {
+      font-size: 13px;
+      padding: 6px 0;
+    }
+    dialog#import-dialog .import-hint {
+      margin: -6px 0 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    dialog#import-dialog .import-or {
+      margin: -4px 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
     }
     dialog#import-dialog .dlg-actions {
       display: flex;
@@ -393,9 +408,13 @@
 </main>
 <dialog id="import-dialog" aria-labelledby="import-title">
   <h2 id="import-title" data-i18n="importTitle">Import paper</h2>
-  <p class="lead" data-i18n="importLead">Paste an arXiv id, arXiv URL, or a direct PDF link, and choose a category.</p>
+  <p class="lead" data-i18n="importLead">Provide an arXiv id/URL or a PDF file, and choose a required category.</p>
   <label for="import-url" data-i18n="importURL">arXiv URL / id or PDF URL</label>
   <input id="import-url" type="text" data-i18n-placeholder="importURLPh" placeholder="2504.01990 or https://arxiv.org/abs/…" autocomplete="off">
+  <p class="import-or" data-i18n="importOr">or</p>
+  <label for="import-pdf" data-i18n="importPDF">Upload PDF</label>
+  <input id="import-pdf" type="file" accept="application/pdf,.pdf">
+  <p class="import-hint" data-i18n="importSourceHint">Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.</p>
   <label for="import-tag" data-i18n="importTag">Category</label>
   <select id="import-tag" required></select>
   <p id="import-status"></p>
@@ -453,17 +472,30 @@
       absTranslating: "Translating abstract…",
       importOpen: "Import paper",
       importTitle: "Import paper",
-      importLead: "Paste an arXiv id, arXiv URL, or a direct PDF link, and choose a category.",
+      importLead: "Provide an arXiv id/URL or a PDF file, and choose a required category.",
       importURL: "arXiv URL / id or PDF URL",
       importURLPh: "2504.01990 or https://arxiv.org/abs/…",
+      importOr: "or",
+      importPDF: "Upload PDF",
+      importSourceHint: "Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.",
       importTag: "Category",
       importCancel: "Cancel",
       importSubmit: "Import",
       importWorking: "Importing…",
+      importChecking: "Checking that this looks like an academic paper…",
+      importUploading: "Uploading…",
       importOk: "Imported “{title}”.",
       importFail: "Could not import that paper.",
       importNeedURL: "Enter an arXiv id, arXiv URL, or PDF URL.",
+      importNeedSource: "Enter a URL/id or choose a PDF file.",
       importNeedTag: "Choose a category.",
+      importErr_not_a_paper: "This PDF does not look like a traditional academic paper (need abstract / introduction / references).",
+      importErr_not_pdf: "That file is not a PDF.",
+      importErr_too_large: "That PDF is too large.",
+      importErr_too_small: "That file is too small to be a paper PDF.",
+      importErr_scanned: "That PDF looks like a scan with no extractable paper text.",
+      importErr_tag_required: "Choose a category.",
+      importErr_need_input: "Enter a URL/id or choose a PDF file.",
       tagChips: "Tags"
     },
     zh: {
@@ -509,17 +541,30 @@
       absTranslating: "摘要翻译中…",
       importOpen: "导入论文",
       importTitle: "导入论文",
-      importLead: "粘贴 arXiv 编号、arXiv 链接或 PDF 直链，并选择分类。",
+      importLead: "提供 arXiv 编号/链接或上传 PDF，并选择必填分类。",
       importURL: "arXiv 链接 / 编号或 PDF 链接",
       importURLPh: "2504.01990 或 https://arxiv.org/abs/…",
+      importOr: "或",
+      importPDF: "上传 PDF",
+      importSourceHint: "填写链接/编号或上传 PDF。两者都填时使用上传的文件。任何导入都必须选择分类。",
       importTag: "分类",
       importCancel: "取消",
       importSubmit: "导入",
       importWorking: "正在导入…",
+      importChecking: "正在检查是否为学术论文…",
+      importUploading: "正在上传…",
       importOk: "已导入「{title}」。",
       importFail: "无法导入该论文。",
       importNeedURL: "请输入 arXiv 编号、arXiv 链接或 PDF 链接。",
+      importNeedSource: "请输入链接/编号或选择 PDF 文件。",
       importNeedTag: "请选择分类。",
+      importErr_not_a_paper: "该 PDF 不像传统学术论文（需含摘要 / 引言 / 参考文献）。",
+      importErr_not_pdf: "该文件不是 PDF。",
+      importErr_too_large: "该 PDF 体积过大。",
+      importErr_too_small: "该文件太小，不像论文 PDF。",
+      importErr_scanned: "该 PDF 像扫描件，无法提取论文正文。",
+      importErr_tag_required: "请选择分类。",
+      importErr_need_input: "请输入链接/编号或选择 PDF 文件。",
       tagChips: "标签"
     }
   };
@@ -1165,6 +1210,8 @@
     const st = document.getElementById("import-status");
     st.textContent = "";
     st.className = "";
+    const pdfEl = document.getElementById("import-pdf");
+    if (pdfEl) pdfEl.value = "";
     const dlg = importDialog();
     if (dlg && dlg.showModal) dlg.showModal();
     else if (dlg) dlg.setAttribute("open", "open");
@@ -1177,38 +1224,64 @@
     if (dlg.close) dlg.close();
     else dlg.removeAttribute("open");
   }
+  function importErrorText(data) {
+    const code = (data && (data.error_code || data.code)) || "";
+    if (code) {
+      const key = "importErr_" + code;
+      const mapped = t(key);
+      if (mapped && mapped !== key) return mapped;
+    }
+    return (data && data.error) || t("importFail");
+  }
   async function submitImport() {
     const status = document.getElementById("import-status");
     const url = document.getElementById("import-url").value.trim();
     const tag = document.getElementById("import-tag").value;
+    const fileEl = document.getElementById("import-pdf");
+    const file = fileEl && fileEl.files && fileEl.files[0];
     const btn = document.getElementById("import-submit");
-    if (!url) {
-      status.textContent = t("importNeedURL");
-      status.className = "err";
-      return;
-    }
+    // Category is mandatory for URL/id and PDF upload — never submit without a tag.
     if (!tag) {
       status.textContent = t("importNeedTag");
       status.className = "err";
       return;
     }
+    if (!file && !url) {
+      status.textContent = t("importNeedSource");
+      status.className = "err";
+      return;
+    }
     btn.disabled = true;
-    status.textContent = t("importWorking");
     status.className = "";
     try {
-      const res = await fetch(prefix + "/papers/import", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: authHeaders(true),
-        body: JSON.stringify({ url_or_id: url, tag: tag })
-      });
+      let res;
+      if (file) {
+        status.textContent = t("importChecking");
+        const fd = new FormData();
+        fd.append("tag", tag);
+        fd.append("file", file, file.name || "paper.pdf");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(false),
+          body: fd
+        });
+      } else {
+        status.textContent = t("importWorking");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(true),
+          body: JSON.stringify({ url_or_id: url, tag: tag })
+        });
+      }
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok || !data.ok) {
-        status.textContent = data.error || t("importFail");
+        status.textContent = importErrorText(data);
         status.className = "err";
         return;
       }
-      const title = (data.paper && data.paper.title) || url;
+      const title = (data.paper && data.paper.title) || (file && file.name) || url;
       status.textContent = t("importOk").replace("{title}", title);
       status.className = "ok";
       document.getElementById("status").textContent = t("importOk").replace("{title}", title);

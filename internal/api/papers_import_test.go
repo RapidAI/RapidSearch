@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -91,6 +93,20 @@ func TestImportRejectsBadTagAndURL(t *testing.T) {
 		t.Fatalf("bad tag status=%d body=%s", rr.Code, rr.Body.String())
 	}
 
+	for _, body := range []string{
+		`{"url_or_id":"2504.01990"}`,
+		`{"url_or_id":"2504.01990","tag":""}`,
+		`{"url_or_id":"2504.01990","tag":"   "}`,
+	} {
+		rr = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodPost, "/papers/import", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "tag is required") {
+			t.Fatalf("missing tag %s status=%d body=%s", body, rr.Code, rr.Body.String())
+		}
+	}
+
 	rr = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/papers/import", strings.NewReader(`{"url_or_id":"not-valid","tag":"other"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -104,6 +120,23 @@ func TestImportRejectsBadTagAndURL(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET import status=%d", rr.Code)
+	}
+}
+
+func TestImportPaperRejectsMissingTag(t *testing.T) {
+	h, _ := papersHandler(t)
+	ps := h.(*Server).papers()
+	_, _, err := ps.importPaper(context.Background(), importTarget{
+		ArxivID: "2504.01990",
+		PDFURL:  "https://arxiv.org/pdf/2504.01990.pdf",
+		Kind:    "arxiv",
+	}, "")
+	if err == nil {
+		t.Fatal("empty tag must not ingest")
+	}
+	_, _, err = ps.importUploadedPaper(context.Background(), "", "paper.pdf", academicPaperPDF())
+	if err == nil {
+		t.Fatal("upload without tag must not ingest")
 	}
 }
 
@@ -339,4 +372,138 @@ func arxivAtomFixture(id string) string {
     <arxiv:doi>10.0000/demo</arxiv:doi>
   </entry>
 </feed>`
+}
+
+func TestImportUploadAcademicPaper(t *testing.T) {
+	h, dir := papersHandler(t)
+	rr := postImportUpload(t, h, "agent-tools-memory", "agent-memory-study.pdf", academicPaperPDF())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp importResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK || resp.Paper.TopicTags[0] != "agent-tools-memory" || !resp.Paper.HasLocal {
+		t.Fatalf("%+v", resp)
+	}
+	if resp.Paper.Source != paperSourceManual {
+		t.Fatalf("source %+v", resp.Paper)
+	}
+	if !containsString(resp.Paper.QueryHits, importUploadQueryHit) {
+		t.Fatalf("query hits %+v", resp.Paper.QueryHits)
+	}
+	if resp.Paper.Filename == "" || !strings.HasSuffix(resp.Paper.Filename, ".pdf") {
+		t.Fatalf("filename %+v", resp.Paper)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "pdfs", resp.Paper.Filename)); err != nil || st.Size() == 0 {
+		t.Fatalf("missing pdf %s: %v", resp.Paper.Filename, err)
+	}
+	if !strings.Contains(strings.ToLower(resp.Paper.Title+resp.Paper.Abstract), "memory") {
+		t.Fatalf("expected extracted meta: %+v", resp.Paper)
+	}
+
+	ps := h.(*Server).papers()
+	ps.invalidateCatalog()
+	cat, err := ps.catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := filterPapers(cat.Papers, "", "agent-tools-memory")
+	if len(got) == 0 {
+		t.Fatalf("uploaded paper missing from catalog: %+v", cat.Papers)
+	}
+}
+
+func TestImportUploadRejectsNonPaperAndBadTag(t *testing.T) {
+	h, dir := papersHandler(t)
+	before := pdfCount(t, dir)
+
+	rr := postImportUpload(t, h, "other", "slides.pdf", slideDeckPDF())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("slides status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp importResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.ErrorCode != importErrNotPaper {
+		t.Fatalf("slides resp %+v", resp)
+	}
+
+	rr = postImportUpload(t, h, "survey", "note.pdf", helloWorldPDF())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("hello status=%d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = postImportUpload(t, h, "survey", "x.txt", []byte("not a pdf at all, just text"))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), importErrNotPDF) && !strings.Contains(rr.Body.String(), "not a PDF") {
+		t.Fatalf("not pdf status=%d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = postImportUpload(t, h, "", "paper.pdf", academicPaperPDF())
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "tag is required") {
+		t.Fatalf("missing tag status=%d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = postImportUpload(t, h, "nope", "paper.pdf", academicPaperPDF())
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "tag is required") {
+		t.Fatalf("unknown tag status=%d %s", rr.Code, rr.Body.String())
+	}
+
+	if pdfCount(t, dir) != before {
+		t.Fatalf("rejected uploads must not write pdfs: before=%d after=%d names=%v", before, pdfCount(t, dir), listPDFNames(t, dir))
+	}
+}
+
+func postImportUpload(t *testing.T, h http.Handler, tag, filename string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if tag != "\x00omit" {
+		if err := mw.WriteField("tag", tag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if body != nil {
+		part, err := mw.CreateFormFile("file", filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/import", bytes.NewReader(buf.Bytes()))
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+func pdfCount(t *testing.T, dir string) int {
+	t.Helper()
+	ents, err := os.ReadDir(filepath.Join(dir, "pdfs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".pdf") {
+			n++
+		}
+	}
+	return n
+}
+
+func listPDFNames(t *testing.T, dir string) []string {
+	t.Helper()
+	ents, err := os.ReadDir(filepath.Join(dir, "pdfs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return importDirNames(ents)
 }
