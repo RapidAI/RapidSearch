@@ -124,6 +124,12 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "paperTooManyPages") || !strings.Contains(body, "xlate-skip") {
 		t.Fatal("over-limit papers must show skip reason instead of a silent skip")
 	}
+	if !strings.Contains(body, "慢速翻译队列") || !strings.Contains(body, "Slow translation queue") {
+		t.Fatal("papers page must label the 51–100 page slow lane")
+	}
+	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
+		t.Fatal("papers page must classify fast vs slow translate lanes")
+	}
 	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
 		t.Fatal("papers page must show page-level translation progress banner")
 	}

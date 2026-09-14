@@ -163,6 +163,7 @@
     .status-pill.failed { color: var(--bad); border-color: var(--bad); }
     .status-pill.done { color: var(--ok); border-color: var(--ok); }
     .status-pill.skipped { color: var(--warn); border-color: var(--warn); }
+    .status-pill.slow { color: var(--accent); border-color: var(--accent); }
     .tag {
       font-size: 12px;
       background: var(--tag);
@@ -436,6 +437,7 @@
   const THEME_KEY = "rs_papers_theme";
   const PAGE_SIZE = 25;
   const TRANSLATE_MAX_PAGES = 100;
+  const TRANSLATE_FAST_MAX_PAGES = 50;
   const I18N = {
     en: {
       langLabel: "Language",
@@ -474,6 +476,8 @@
       xlatePending: "Translate pending",
       pages: "{n} pages",
       xlateSkipPages: "Over 100 pages — skipped translation",
+      xlateSlowLane: "Slow translation queue",
+      xlateBannerLanes: "fast {fast} / slow {slow}",
       queuedOk: "Queued {n} paper(s).",
       queueFail: "Could not queue translation.",
       xlateBanner: "Translation in progress: {queued} queued / {running} translating",
@@ -545,6 +549,8 @@
       xlatePending: "翻译待处理",
       pages: "{n} 页",
       xlateSkipPages: "超过 100 页，不翻译",
+      xlateSlowLane: "慢速翻译队列",
+      xlateBannerLanes: "快速 {fast} / 慢速 {slow}",
       queuedOk: "已排队 {n} 篇。",
       queueFail: "无法加入翻译队列。",
       xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
@@ -803,6 +809,10 @@
       return {
         queued: Number(p.queued) || 0,
         running: Number(p.running) || 0,
+        fast_queued: Number(p.fast_queued) || 0,
+        slow_queued: Number(p.slow_queued) || 0,
+        fast_running: Number(p.fast_running) || 0,
+        slow_running: Number(p.slow_running) || 0,
         active: !!p.active,
         running_id: p.running_id || ids[0] || "",
         running_title: p.running_title || titles[0] || "",
@@ -849,9 +859,17 @@
     }
     banner.hidden = false;
     banner.classList.add("active");
-    titleEl.textContent = t("xlateBanner")
+    let banner = t("xlateBanner")
       .replace("{queued}", String(prog.queued))
       .replace("{running}", String(prog.running));
+    const slowN = (Number(prog.slow_queued) || 0) + (Number(prog.slow_running) || 0);
+    const fastN = (Number(prog.fast_queued) || 0) + (Number(prog.fast_running) || 0);
+    if (slowN > 0 || (fastN > 0 && (prog.slow_queued || prog.slow_running))) {
+      banner += " · " + t("xlateBannerLanes")
+        .replace("{fast}", String(fastN))
+        .replace("{slow}", String(slowN));
+    }
+    titleEl.textContent = banner;
     const titles = (prog.running_titles && prog.running_titles.length)
       ? prog.running_titles
       : (prog.running_title ? [prog.running_title] : []);
@@ -933,6 +951,13 @@
     if (p.translate_skip_reason === "too_many_pages") return true;
     const n = Number(p.page_count) || 0;
     return n > TRANSLATE_MAX_PAGES;
+  }
+
+  function paperSlowLane(p) {
+    if (!p || paperTooManyPages(p)) return false;
+    if (p.translate_lane === "slow") return true;
+    const n = Number(p.page_count) || 0;
+    return n > TRANSLATE_FAST_MAX_PAGES && n <= TRANSLATE_MAX_PAGES;
   }
 
   function countCatalogZhPDFs(papers) {
@@ -1022,9 +1047,13 @@
       const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
       actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
     }
+    const slowLane = paperSlowLane(p);
     if (tooMany) {
       actions += '<span class="status-pill skipped">' + esc(t("xlateSkipPages")) + "</span>";
-    } else if (canManage && p.has_local && st !== "queued" && st !== "running") {
+    } else if (slowLane) {
+      actions += '<span class="status-pill slow">' + esc(t("xlateSlowLane")) + "</span>";
+    }
+    if (!tooMany && canManage && p.has_local && st !== "queued" && st !== "running") {
       // One button: 「翻译」 unless a completed translation exists → 「再次翻译」(force).
       // Hidden for anonymous visitors; 中文版 / 中英对照 links above stay public.
       const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);

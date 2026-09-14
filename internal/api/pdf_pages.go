@@ -11,6 +11,15 @@ import (
 // BabelDOC is not started for papers longer than this. 100 pages is allowed; 101+ is skipped.
 const translateMaxPages = 100
 
+// translateFastMaxPages is exclusive: page_count <= 50 is the fast lane;
+// 51–100 is the slow lane so long jobs do not block short papers.
+const translateFastMaxPages = 50
+
+const (
+	translateLaneFast = "fast"
+	translateLaneSlow = "slow"
+)
+
 // Machine-readable enqueue rejection when page_count > translateMaxPages.
 const translateSkipTooManyPages = "too_many_pages"
 
@@ -29,6 +38,55 @@ func paperTooManyPages(p paperEntry) bool {
 func paperTranslateSkipReason(p paperEntry) string {
 	if paperTooManyPages(p) {
 		return translateSkipTooManyPages
+	}
+	return ""
+}
+
+// paperTranslateLane classifies a page count for the dual-lane worker pool.
+// Unknown (0) counts as fast so short papers are not delayed.
+func paperTranslateLane(pageCount int) string {
+	if pageCount > translateMaxPages {
+		return ""
+	}
+	if pageCount > translateFastMaxPages {
+		return translateLaneSlow
+	}
+	return translateLaneFast
+}
+
+func paperSlowLane(p paperEntry) bool {
+	return paperTranslateLane(p.PageCount) == translateLaneSlow
+}
+
+// pickTranslateLane chooses the next worker lane.
+// When the slow queue has work, 1 of `limit` slots is reserved for it; the
+// rest prefer fast. An empty lane donates its slots (work-stealing).
+func pickTranslateLane(fastRun, slowRun, limit int, hasFast, hasSlow bool) string {
+	if limit < 1 {
+		return ""
+	}
+	if fastRun < 0 {
+		fastRun = 0
+	}
+	if slowRun < 0 {
+		slowRun = 0
+	}
+	if fastRun+slowRun >= limit {
+		return ""
+	}
+	reserveSlow := 0
+	if hasSlow {
+		reserveSlow = 1
+		if reserveSlow > limit {
+			reserveSlow = limit
+		}
+	}
+	fastCap := limit - reserveSlow
+	if hasFast && fastRun < fastCap {
+		return translateLaneFast
+	}
+	if hasSlow && (slowRun < reserveSlow || !hasFast) {
+		return translateLaneSlow
 	}
 	return ""
 }

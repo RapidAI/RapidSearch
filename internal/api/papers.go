@@ -55,6 +55,8 @@ type paperEntry struct {
 	PageCount int `json:"page_count,omitempty"`
 	// TranslateSkipReason is a machine-readable gate, e.g. too_many_pages.
 	TranslateSkipReason string `json:"translate_skip_reason,omitempty"`
+	// TranslateLane is "fast" (≤50 pages) or "slow" (51–100). Empty when skipped.
+	TranslateLane string `json:"translate_lane,omitempty"`
 }
 
 type papersManifest struct {
@@ -88,6 +90,10 @@ type translateProgress struct {
 	RunningTitle  string   `json:"running_title,omitempty"`
 	RunningIDs    []string `json:"running_ids,omitempty"`
 	RunningTitles []string `json:"running_titles,omitempty"`
+	FastQueued    int      `json:"fast_queued,omitempty"`
+	SlowQueued    int      `json:"slow_queued,omitempty"`
+	FastRunning   int      `json:"fast_running,omitempty"`
+	SlowRunning   int      `json:"slow_running,omitempty"`
 }
 
 type papersStore struct {
@@ -248,6 +254,7 @@ func enrichPaper(p paperEntry, pdfDir string) paperEntry {
 	p.ID = paperTranslateID(p)
 	p.Brief = briefText(p.Abstract, 280)
 	p.TranslateSkipReason = paperTranslateSkipReason(p)
+	p.TranslateLane = paperTranslateLane(p.PageCount)
 	// Do not leak absolute host paths in API responses.
 	p.PDFPath = ""
 	return p

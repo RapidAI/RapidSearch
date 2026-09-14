@@ -20,6 +20,51 @@ func pagesOf(n int) [][]string {
 	return out
 }
 
+func TestPaperTranslateLane(t *testing.T) {
+	if paperTranslateLane(0) != translateLaneFast {
+		t.Fatal("unknown pages are fast")
+	}
+	if paperTranslateLane(50) != translateLaneFast {
+		t.Fatal("50 is fast")
+	}
+	if paperTranslateLane(51) != translateLaneSlow {
+		t.Fatal("51 is slow")
+	}
+	if paperTranslateLane(100) != translateLaneSlow {
+		t.Fatal("100 is slow")
+	}
+	if paperTranslateLane(101) != "" {
+		t.Fatal("101 is skipped")
+	}
+}
+
+func TestPickTranslateLane(t *testing.T) {
+	// Mixed work, empty pool: fill 2 fast then reserve 1 slow.
+	if got := pickTranslateLane(0, 0, 3, true, true); got != translateLaneFast {
+		t.Fatalf("start=%s", got)
+	}
+	if got := pickTranslateLane(1, 0, 3, true, true); got != translateLaneFast {
+		t.Fatalf("second=%s", got)
+	}
+	if got := pickTranslateLane(2, 0, 3, true, true); got != translateLaneSlow {
+		t.Fatalf("reserved slow=%s", got)
+	}
+	if got := pickTranslateLane(2, 1, 3, true, true); got != "" {
+		t.Fatalf("full=%q", got)
+	}
+	// Slow empty: all 3 slots may run fast.
+	if got := pickTranslateLane(2, 0, 3, true, false); got != translateLaneFast {
+		t.Fatalf("steal fast=%s", got)
+	}
+	// Fast empty: unused slots run slow.
+	if got := pickTranslateLane(0, 1, 3, false, true); got != translateLaneSlow {
+		t.Fatalf("steal slow=%s", got)
+	}
+	if got := pickTranslateLane(0, 2, 3, false, true); got != translateLaneSlow {
+		t.Fatalf("steal slow 3=%s", got)
+	}
+}
+
 func TestPaperTranslateSkipReason(t *testing.T) {
 	if paperTooManyPages(paperEntry{PageCount: 0}) {
 		t.Fatal("unknown page count must not skip")

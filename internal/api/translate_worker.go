@@ -88,14 +88,15 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			if force {
 				// Replace: ensure a single queue entry (no duplicate spawn).
 				if !s.inQ[id] {
-					s.queue = append(s.queue, id)
-					s.inQ[id] = true
+					s.pushQueuedLocked(id, p.PageCount)
 				}
 				j := s.status.Jobs[id]
 				j.ID = id
 				j.Status = translateQueued
 				j.Error = ""
 				j.Filename = p.Filename
+				j.PageCount = p.PageCount
+				j.Lane = paperTranslateLane(p.PageCount)
 				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				if s.status.Jobs == nil {
 					s.status.Jobs = map[string]translateJob{}
@@ -120,8 +121,10 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			removeTranslatedOutputs(s.root, id)
 		}
 
-		s.queue = append(s.queue, id)
-		s.inQ[id] = true
+		if !s.pushQueuedLocked(id, p.PageCount) {
+			out.Skipped = append(out.Skipped, id)
+			continue
+		}
 		j := s.status.Jobs[id]
 		j.ID = id
 		j.Status = translateQueued
@@ -129,6 +132,8 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 		j.ZhRel = ""
 		j.DualRel = ""
 		j.Filename = p.Filename
+		j.PageCount = p.PageCount
+		j.Lane = paperTranslateLane(p.PageCount)
 		j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if s.status.Jobs == nil {
 			s.status.Jobs = map[string]translateJob{}
@@ -377,26 +382,109 @@ func (s *translateService) reconcileExternal() {
 	}
 }
 
-func (s *translateService) tryPop() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.running) >= s.concurrencyLimit() {
-		return ""
+func (s *translateService) pushQueuedLocked(id string, pages int) bool {
+	if id == "" || s.inQ[id] {
+		return false
 	}
-	for len(s.queue) > 0 {
-		id := s.queue[0]
-		s.queue = s.queue[1:]
+	lane := paperTranslateLane(pages)
+	if lane == "" {
+		return false
+	}
+	if s.inQ == nil {
+		s.inQ = map[string]bool{}
+	}
+	if lane == translateLaneSlow {
+		s.slowQ = append(s.slowQ, id)
+	} else {
+		s.fastQ = append(s.fastQ, id)
+	}
+	s.inQ[id] = true
+	return true
+}
+
+func (s *translateService) jobLaneLocked(id string) string {
+	if j, ok := s.status.Jobs[id]; ok {
+		if j.Lane == translateLaneSlow || j.Lane == translateLaneFast {
+			return j.Lane
+		}
+		if lane := paperTranslateLane(j.PageCount); lane != "" {
+			return lane
+		}
+	}
+	return translateLaneFast
+}
+
+func (s *translateService) runningLaneCountsLocked() (fast, slow int) {
+	for id := range s.running {
+		if id == "" {
+			continue
+		}
+		if s.jobLaneLocked(id) == translateLaneSlow {
+			slow++
+		} else {
+			fast++
+		}
+	}
+	return fast, slow
+}
+
+func (s *translateService) laneHasWorkLocked(lane string) bool {
+	q := s.fastQ
+	if lane == translateLaneSlow {
+		q = s.slowQ
+	}
+	for _, id := range q {
+		if id != "" && !s.running[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *translateService) popLaneLocked(lane string) string {
+	q := &s.fastQ
+	if lane == translateLaneSlow {
+		q = &s.slowQ
+	}
+	for len(*q) > 0 {
+		id := (*q)[0]
+		*q = (*q)[1:]
 		delete(s.inQ, id)
 		if id == "" || s.running[id] {
 			continue
 		}
-		if s.running == nil {
-			s.running = map[string]bool{}
-		}
-		s.running[id] = true
 		return id
 	}
 	return ""
+}
+
+func (s *translateService) queuedIDsLocked() []string {
+	return append(append([]string{}, s.fastQ...), s.slowQ...)
+}
+
+func (s *translateService) tryPop() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	limit := s.concurrencyLimit()
+	if len(s.running) >= limit {
+		return ""
+	}
+	fastRun, slowRun := s.runningLaneCountsLocked()
+	hasFast := s.laneHasWorkLocked(translateLaneFast)
+	hasSlow := s.laneHasWorkLocked(translateLaneSlow)
+	lane := pickTranslateLane(fastRun, slowRun, limit, hasFast, hasSlow)
+	if lane == "" {
+		return ""
+	}
+	id := s.popLaneLocked(lane)
+	if id == "" {
+		return ""
+	}
+	if s.running == nil {
+		s.running = map[string]bool{}
+	}
+	s.running[id] = true
+	return id
 }
 
 func (s *translateService) runOne(id string) {
