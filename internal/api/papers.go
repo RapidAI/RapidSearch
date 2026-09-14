@@ -69,6 +69,8 @@ type papersCatalog struct {
 	// CanManage is true when the caller may enqueue translations / open admin UI.
 	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
 	CanManage bool `json:"can_manage"`
+	// Visits is cumulative GET /papers page views (not API polls).
+	Visits int64 `json:"visits"`
 }
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
@@ -90,6 +92,7 @@ type papersStore struct {
 	cat     papersCatalog
 	xlate   *translateService
 	absZH   *abstractZHService
+	visits  *visitCounter
 }
 
 func papersRoot() string {
@@ -104,7 +107,7 @@ func newPapersStore(root string) *papersStore {
 		root = papersRoot()
 	}
 	xlate := newTranslateService(root)
-	ps := &papersStore{root: root, xlate: xlate, absZH: newAbstractZHService(root, xlate)}
+	ps := &papersStore{root: root, xlate: xlate, absZH: newAbstractZHService(root, xlate), visits: newVisitCounter(root)}
 	ps.xlate.start()
 	ps.absZH.start()
 	return ps
@@ -278,10 +281,16 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.Method {
-	case http.MethodGet, http.MethodHead:
+	case http.MethodGet:
+		// Count HTML page views only (not HEAD, not /papers/api polls).
+		if ps := s.papers(); ps != nil && ps.visits != nil {
+			ps.visits.Bump()
+		}
 		// Catalog page is public; Settings link always shown. Translate actions
 		// are gated in the UI via /papers/api can_manage, and mutations still
 		// require authorizeSettings. Unauthenticated /settings shows login.
+		writeSettingsHTML(w, r, papersPageHTML)
+	case http.MethodHead:
 		writeSettingsHTML(w, r, papersPageHTML)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
@@ -309,6 +318,9 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	out := cat
 	out.CanManage = canManage
 	out.TranslateProgress = progress
+	if ps := s.papers(); ps != nil && ps.visits != nil {
+		out.Visits = ps.visits.Total()
+	}
 	if q != "" || tag != "" {
 		filtered := filterPapers(cat.Papers, q, tag)
 		out.Papers = filtered

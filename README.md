@@ -66,8 +66,8 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). **Catalog + existing PDFs are public** (no login). Translate enqueue, translate config/test, and `/settings*` still require Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`. The `/papers` page always shows a **Settings** link (anonymous users get the Hub login page there). Translate / Re-translate buttons appear only when `/papers/api` returns `can_manage: true`. Defaults to a **light (white)** theme.
 
-- `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible.
-- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`). No API keys / translate-config.
+- `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述).
+- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`). `tag=` matches stable English keys. No API keys / translate-config.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.

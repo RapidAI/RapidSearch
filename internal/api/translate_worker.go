@@ -159,6 +159,10 @@ func removeTranslatedOutputs(root, id string) {
 		// Also remove canonical names in case Abs lookup already failed mid-replace.
 		_ = os.Remove(filepath.Join(root, "pdfs", kind, id+"."+kind+".pdf"))
 	}
+	// Drop BabelDOC workdir so a force re-translate does not reuse stale mono/dual.
+	if root != "" {
+		_ = os.RemoveAll(filepath.Join(root, "translate-work", id))
+	}
 }
 
 func (s *translateService) loop() {
@@ -176,11 +180,30 @@ func (s *translateService) loop() {
 	}
 }
 
+// translatePaused reports whether PAPERS_DIR/translate.pause exists.
+// When set, the drain loop must not start new BabelDOC jobs (Hub 429 etc.).
+func translatePaused(root string) bool {
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(root, "translate.pause"))
+	return err == nil
+}
+
 // startAvailable pops and launches jobs until the concurrency limit is reached
 // or the queue is empty. Each job runs in its own goroutine.
 func (s *translateService) startAvailable() int {
+	if s == nil {
+		return 0
+	}
+	if translatePaused(s.root) {
+		return 0
+	}
 	started := 0
 	for {
+		if translatePaused(s.root) {
+			return started
+		}
 		if s.occupiedSlots() >= s.concurrencyLimit() {
 			return started
 		}
@@ -272,6 +295,18 @@ func (s *translateService) reconcileExternal() {
 		// Process gone: promote outputs or mark interrupted.
 		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
 			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
+				enPDF := sourcePDFForCompleteness(s.root, id)
+				if vErr := verifyInstalledTranslation(s.root, id, enPDF); vErr != nil {
+					j.Status = translateFailed
+					j.Error = sanitizeUserError(vErr.Error())
+					j.ZhRel = ""
+					j.DualRel = ""
+					j.Finished = now
+					j.UpdatedAt = now
+					s.status.Jobs[id] = j
+					dirty = true
+					continue
+				}
 				j.Status = translateDone
 				j.Error = ""
 				j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
@@ -288,6 +323,18 @@ func (s *translateService) reconcileExternal() {
 		if mono != "" || dual != "" {
 			zhRel, dualRel, err := installTranslatedPDFs(s.root, id, mono, dual)
 			if err == nil && zhRel != "" && dualRel != "" {
+				enPDF := sourcePDFForCompleteness(s.root, id)
+				if vErr := verifyInstalledTranslation(s.root, id, enPDF); vErr != nil {
+					j.Status = translateFailed
+					j.Error = sanitizeUserError(vErr.Error())
+					j.ZhRel = ""
+					j.DualRel = ""
+					j.Finished = now
+					j.UpdatedAt = now
+					s.status.Jobs[id] = j
+					dirty = true
+					continue
+				}
 				j.Status = translateDone
 				j.Error = ""
 				j.ZhRel = zhRel
@@ -369,6 +416,14 @@ func (s *translateService) runOne(id string) {
 	// Already produced both outputs (e.g. copied in while queued).
 	if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
 		if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
+			if err := verifyInstalledTranslation(s.root, id, src); err != nil {
+				log.Printf("papers translate id=%s status=fail completeness=%s", id, sanitizeUserError(err.Error()))
+				j.Status = translateFailed
+				j.Error = sanitizeUserError(err.Error())
+				j.Finished = time.Now().UTC().Format(time.RFC3339)
+				s.putJob(j)
+				return
+			}
 			j.Status = translateDone
 			j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
 			j.DualRel = filepath.ToSlash(filepath.Join("pdfs", translateKindDual, filepath.Base(dual)))
@@ -393,6 +448,13 @@ func (s *translateService) runOne(id string) {
 		s.waitForProcess(id)
 		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
 			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
+				if err := verifyInstalledTranslation(s.root, id, src); err != nil {
+					j.Status = translateFailed
+					j.Error = sanitizeUserError(err.Error())
+					j.Finished = time.Now().UTC().Format(time.RFC3339)
+					s.putJob(j)
+					return
+				}
 				j.Status = translateDone
 				j.Error = ""
 				j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
@@ -405,6 +467,15 @@ func (s *translateService) runOne(id string) {
 		mono, dual := collectBabelOutputs(translateWorkDir(s.root, id))
 		zhRel, dualRel, err := installTranslatedPDFs(s.root, id, mono, dual)
 		if err == nil && zhRel != "" && dualRel != "" {
+			if err := verifyInstalledTranslation(s.root, id, src); err != nil {
+				j.Status = translateFailed
+				j.Error = sanitizeUserError(err.Error())
+				j.ZhRel = ""
+				j.DualRel = ""
+				j.Finished = time.Now().UTC().Format(time.RFC3339)
+				s.putJob(j)
+				return
+			}
 			j.Status = translateDone
 			j.Error = ""
 			j.ZhRel = zhRel
@@ -453,6 +524,16 @@ func (s *translateService) runOne(id string) {
 		j.Error = "babeldoc produced incomplete output (need both zh and dual)"
 		j.ZhRel = zhRel
 		j.DualRel = dualRel
+		j.Finished = time.Now().UTC().Format(time.RFC3339)
+		s.putJob(j)
+		return
+	}
+	if err := verifyInstalledTranslation(s.root, id, src); err != nil {
+		log.Printf("papers translate id=%s status=fail completeness=%s", id, sanitizeUserError(err.Error()))
+		j.Status = translateFailed
+		j.Error = sanitizeUserError(err.Error())
+		j.ZhRel = ""
+		j.DualRel = ""
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
 		s.putJob(j)
 		return
@@ -555,6 +636,10 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 	if job.Cfg.QPS > 0 {
 		args = append(args, "--qps", fmt.Sprintf("%d", job.Cfg.QPS))
 	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("PAPERS_TRANSLATE_IGNORE_CACHE"))) {
+	case "1", "true", "yes", "on":
+		args = append(args, "--ignore-cache")
+	}
 	cmd := exec.CommandContext(ctx, py, args...)
 	env := os.Environ()
 	if job.Cfg.APIKey != "" {
@@ -572,13 +657,7 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 		_ = writeTranslatePID(job.Root, job.ID, cmd.Process.Pid)
 	}
 	defer clearTranslatePID(job.Root, job.ID)
-	if err := cmd.Wait(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
-		}
-		return "", "", fmt.Errorf("translate worker: %s", sanitizeUserError(msg))
-	}
+	waitErr := cmd.Wait()
 	var out struct {
 		OK    bool   `json:"ok"`
 		Zh    string `json:"zh"`
@@ -586,6 +665,25 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 		Error string `json:"error"`
 	}
 	line := lastJSONLine(stdout.Bytes())
+	if waitErr != nil {
+		// Prefer structured JSON error from the worker over stderr noise
+		// (e.g. false "watermark rejected" log lines).
+		if err := json.Unmarshal(line, &out); err == nil {
+			if !out.OK {
+				msg := out.Error
+				if msg == "" {
+					msg = "worker reported failure"
+				}
+				return "", "", fmt.Errorf("%s", sanitizeUserError(msg))
+			}
+			// ok:true with non-zero exit is unexpected; still surface wait error.
+		}
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = waitErr.Error()
+		}
+		return "", "", fmt.Errorf("translate worker: %s", sanitizeUserError(msg))
+	}
 	if err := json.Unmarshal(line, &out); err != nil {
 		return "", "", fmt.Errorf("translate worker: invalid json (%s)", sanitizeUserError(err.Error()))
 	}
@@ -608,6 +706,40 @@ func lastJSONLine(b []byte) []byte {
 		return bytes.TrimSpace(b[i+1:])
 	}
 	return b
+}
+
+func writeBabelDOCAPIKeyConfig(apiKey string) (path string, cleanup func(), err error) {
+	f, err := os.CreateTemp("", "babeldoc-*.toml")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path = f.Name()
+	cleanup = func() { _ = os.Remove(path) }
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	esc := strings.ReplaceAll(apiKey, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	if _, err := fmt.Fprintf(f, "[babeldoc]\nopenai-api-key = \"%s\"\n", esc); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return path, cleanup, nil
+}
+
+func watermarkArgRejected(errText string) bool {
+	low := strings.ToLower(errText)
+	if !strings.Contains(low, "watermark") {
+		return false
+	}
+	return strings.Contains(low, "unrecognized arguments") || strings.Contains(low, "invalid choice")
 }
 
 func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) {
@@ -634,11 +766,25 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 	if job.Cfg.QPS > 0 {
 		args = append(args, "--qps", fmt.Sprintf("%d", job.Cfg.QPS))
 	}
+	cleanup := func() {}
+	if job.Cfg.APIKey != "" {
+		// BabelDOC 0.6.4 does not read OPENAI_API_KEY from the environment;
+		// pass a temp TOML --config (preferred) or --openai-api-key.
+		cfgPath, cfgCleanup, cfgErr := writeBabelDOCAPIKeyConfig(job.Cfg.APIKey)
+		if cfgErr != nil {
+			args = append(args, "--openai-api-key", job.Cfg.APIKey)
+		} else {
+			cleanup = cfgCleanup
+			args = append(args, "--config", cfgPath)
+		}
+	}
+	defer cleanup()
+
 	run := func(a []string) error {
 		cmd := exec.CommandContext(ctx, bin, a...)
 		env := os.Environ()
 		if job.Cfg.APIKey != "" {
-			// Prefer env over CLI so `ps` does not leak the key.
+			// Keep env set as a belt-and-suspenders; CLI/config is required.
 			env = append(env, "OPENAI_API_KEY="+job.Cfg.APIKey)
 		}
 		cmd.Env = env
@@ -651,7 +797,7 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 		return nil
 	}
 	if err := run(args); err != nil {
-		if strings.Contains(err.Error(), "watermark-output-mode") || strings.Contains(err.Error(), "unrecognized") {
+		if watermarkArgRejected(err.Error()) {
 			stripped := stripFlagPrefix(args, "--watermark-output-mode")
 			if err2 := run(stripped); err2 != nil {
 				return "", "", err2

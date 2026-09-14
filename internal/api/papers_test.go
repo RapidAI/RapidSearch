@@ -40,6 +40,7 @@ func TestFilterPapers(t *testing.T) {
 	in := []paperEntry{
 		{Title: "Alpha Security", TopicTags: []string{"security"}, Abstract: "foo", ArxivID: "1.2"},
 		{Title: "Beta Survey", TopicTags: []string{"survey"}, Abstract: "bar", ArxivID: "3.4"},
+		{Title: "Gamma AIoT", TopicTags: []string{"llm-iot"}, Abstract: "llm iot", ArxivID: "5.6"},
 	}
 	got := filterPapers(in, "alpha", "")
 	if len(got) != 1 || got[0].Title != "Alpha Security" {
@@ -48,6 +49,10 @@ func TestFilterPapers(t *testing.T) {
 	got = filterPapers(in, "", "survey")
 	if len(got) != 1 || got[0].Title != "Beta Survey" {
 		t.Fatalf("%+v", got)
+	}
+	got = filterPapers(in, "", "llm-iot")
+	if len(got) != 1 || got[0].Title != "Gamma AIoT" {
+		t.Fatalf("llm-iot filter: %+v", got)
 	}
 }
 
@@ -127,6 +132,16 @@ func TestPapersPageLightTheme(t *testing.T) {
 	}
 	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
 		t.Fatal("search placeholder should cover title/authors/abstract/tags")
+	}
+	if !strings.Contains(body, "agent自进化") || !strings.Contains(body, "agent安全") ||
+		!strings.Contains(body, "agent安全自进化") || !strings.Contains(body, "LLM based 物联网") {
+		t.Fatal("papers page must show Chinese category labels")
+	}
+	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
+		t.Fatal("papers page must include llm-iot key and English label")
+	}
+	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
+		t.Fatal("papers page must map stable tag keys to localized labels")
 	}
 }
 

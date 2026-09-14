@@ -29,6 +29,7 @@ from search_download_papers import (
     download_pdf,
     ensure_dirs,
     is_relevant,
+    load_search_queries,
     log,
     merge_papers,
     tag_topics,
@@ -198,38 +199,8 @@ def write_sync_reports(
     (out / "sync_latest.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
-    default_out = Path(__file__).resolve().parent
-    p = argparse.ArgumentParser(description="Incrementally sync NEW agent papers")
-    p.add_argument("--out", type=Path, default=default_out)
-    p.add_argument("--db", type=Path, default=None, help="SQLite DB path (default: OUT/papers.db)")
-    p.add_argument("--max-new", type=int, default=30, help="Max new papers to keep/download")
-    p.add_argument("--days", type=int, default=7, help="Lookback days for ArXiv submittedDate")
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--queries", type=str, default="", help="; -separated ArXiv query overrides")
-    p.add_argument("--per-query", type=int, default=15, help="max_results per ArXiv query")
-    return p.parse_args(argv)
-
-
-def main(argv: Optional[list[str]] = None) -> int:
-    args = parse_args(argv)
-    paths = ensure_dirs(args.out)
-    db_path = args.db or (args.out / "papers.db")
-    queries = (
-        [q.strip() for q in args.queries.split(";") if q.strip()]
-        if args.queries
-        else list(DEFAULT_QUERIES)
-    )
-
-    # Ensure DB exists / schema ready
-    conn = connect(db_path)
-    init_db(conn)
-    conn.close()
-
-    known = existing_ids(args.out, db_path)
-    log(f"Known paper ids (DB+manifest): {len(known)}")
-    log(f"DB rows before: {count_papers(db_path)}")
-
+def run_one_round(args, paths, db_path, queries, known: set[str]) -> tuple[list, list[dict], dict, set[str]]:
+    """Search/download one batch of new papers. Returns (selected, failures, stats, updated_known)."""
     lo, hi = submitted_window(args.days)
     log(f"ArXiv submittedDate window: {lo} → {hi} (days={args.days})")
 
@@ -247,7 +218,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             submitted_to=hi,
         )
         searched += len(papers)
-        # Keep only unknown
         fresh = [p for p in papers if not paper_already_known(p, known)]
         n = merge_papers(pool, fresh, f"sync-arxiv:{i}")
         log(f"  got {len(papers)}, unknown {len(fresh)}, merged new {n}, pool={len(pool)}")
@@ -262,10 +232,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if p.arxiv_id and not p.pdf_url:
             p.pdf_url = f"https://arxiv.org/pdf/{p.arxiv_id}.pdf"
         log(f"PDF [{i}/{len(selected)}]: {p.title[:70]}…")
-        if not args.dry_run:
-            download_pdf(p, paths["pdfs"], dry_run=False)
-        else:
-            download_pdf(p, paths["pdfs"], dry_run=True)
+        download_pdf(p, paths["pdfs"], dry_run=args.dry_run)
         if p.download_status == "ok":
             downloaded += 1
         elif p.download_status in ("skipped", "dry-run"):
@@ -288,15 +255,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         "failures": fail_n,
         "dry_run": args.dry_run,
         "new_count": len(selected),
+        "candidate_count": len(candidates),
         "days": args.days,
         "max_new": args.max_new,
         "db_rows": count_papers(db_path),
     }
 
-    if args.dry_run:
-        log("Dry-run: skipping DB upsert / manifest merge (reports only)")
-        write_sync_reports(args.out, selected, failures, sync_stats)
-    else:
+    if not args.dry_run and selected:
         conn = connect(db_path)
         try:
             for p in selected:
@@ -306,14 +271,143 @@ def main(argv: Optional[list[str]] = None) -> int:
         existing_manifest = load_manifest_papers(args.out / "manifest.json")
         merge_manifest_and_write(args.out, existing_manifest, selected, sync_stats)
         sync_stats["db_rows"] = count_papers(db_path)
-        write_sync_reports(args.out, selected, failures, sync_stats)
+        # Expand known set so the next round skips these
+        for p in selected:
+            known.add(
+                paper_id_from_fields(
+                    arxiv_id=p.arxiv_id,
+                    doi=p.doi,
+                    title=p.title,
+                    dedupe_key=p.dedupe_key(),
+                )
+            )
+            if p.arxiv_id:
+                known.add(p.arxiv_id)
+    elif args.dry_run:
+        log("Dry-run: skipping DB upsert / manifest merge (reports only)")
+
+    return selected, failures, sync_stats, known
+
+
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    default_out = Path(__file__).resolve().parent
+    p = argparse.ArgumentParser(description="Incrementally sync NEW agent papers")
+    p.add_argument("--out", type=Path, default=default_out)
+    p.add_argument("--db", type=Path, default=None, help="SQLite DB path (default: OUT/papers.db)")
+    p.add_argument("--max-new", type=int, default=30, help="Max new papers per round")
+    p.add_argument("--days", type=int, default=7, help="Lookback days for ArXiv submittedDate")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--queries", type=str, default="", help="; -separated ArXiv query overrides")
+    p.add_argument("--per-query", type=int, default=15, help="max_results per ArXiv query")
+    p.add_argument(
+        "--until-exhausted",
+        action="store_true",
+        help="Repeat rounds until a round finds 0 new papers (or max-rounds)",
+    )
+    p.add_argument(
+        "--max-rounds",
+        type=int,
+        default=40,
+        help="Safety cap on rounds when --until-exhausted (default 40)",
+    )
+    p.add_argument(
+        "--refresh-keywords",
+        action="store_true",
+        help="Run maintain_keywords.py before sync (rebuild search_keywords.json)",
+    )
+    p.add_argument(
+        "--no-refresh-keywords",
+        action="store_true",
+        help="With --until-exhausted, skip the default one-shot keyword refresh at start",
+    )
+    return p.parse_args(argv)
+
+
+def refresh_keywords(out: Path, db_path: Path) -> None:
+    """Rebuild search_keywords.json from corpus (topic-gated)."""
+    from maintain_keywords import maintain
+
+    log("Refreshing search keywords from corpus…")
+    payload = maintain(out, db_path)
+    log(
+        f"Keywords refreshed: terms={len(payload.get('terms') or [])} "
+        f"auto={len(payload.get('auto_queries') or [])} "
+        f"merged={len(payload.get('merged_queries') or [])}"
+    )
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(argv)
+    paths = ensure_dirs(args.out)
+    db_path = args.db or (args.out / "papers.db")
+
+    # Keyword maintain: explicit --refresh-keywords, or once at start of exhaust sync (default on).
+    should_refresh = args.refresh_keywords or (
+        args.until_exhausted and not args.no_refresh_keywords
+    )
+    if should_refresh and not args.queries:
+        refresh_keywords(args.out, db_path)
+
+    if args.queries:
+        queries = [q.strip() for q in args.queries.split(";") if q.strip()]
+    else:
+        queries = load_search_queries(args.out)
+    log(f"Using {len(queries)} search queries "
+        f"({'CLI override' if args.queries else 'load_search_queries / keywords file or DEFAULT'})")
+
+    conn = connect(db_path)
+    init_db(conn)
+    conn.close()
+
+    known = existing_ids(args.out, db_path)
+    log(f"Known paper ids (DB+manifest): {len(known)}")
+    log(f"DB rows before: {count_papers(db_path)}")
+
+    all_selected: list[Paper] = []
+    all_failures: list[dict] = []
+    rounds = 0
+    max_rounds = args.max_rounds if args.until_exhausted else 1
+
+    while rounds < max_rounds:
+        rounds += 1
+        log(f"=== SYNC ROUND {rounds}/{max_rounds} ===")
+        selected, failures, sync_stats, known = run_one_round(
+            args, paths, db_path, queries, known
+        )
+        all_selected.extend(selected)
+        all_failures.extend(failures)
+        if not args.until_exhausted:
+            break
+        if sync_stats.get("new_count", 0) == 0:
+            log("No new papers this round — exhausted for now")
+            break
+        # If we got a full batch, there may be more; continue.
+        # If we got fewer than max_new, remaining candidates were empty → stop.
+        if sync_stats.get("new_count", 0) < args.max_new:
+            log("Partial batch (< max-new) — treating as exhausted")
+            break
+        time.sleep(2.0)
+
+    total_stats = {
+        "searched_rounds": rounds,
+        "downloaded": sum(1 for p in all_selected if p.download_status == "ok"),
+        "skipped": sum(1 for p in all_selected if p.download_status in ("skipped", "dry-run")),
+        "failures": len(all_failures),
+        "dry_run": args.dry_run,
+        "new_count": len(all_selected),
+        "days": args.days,
+        "max_new": args.max_new,
+        "until_exhausted": args.until_exhausted,
+        "db_rows": count_papers(db_path),
+    }
+    write_sync_reports(args.out, all_selected, all_failures, total_stats)
 
     log("=== SYNC DONE ===")
-    log(json.dumps(sync_stats, indent=2))
+    log(json.dumps(total_stats, indent=2))
     log(f"sync_report: {args.out / 'sync_report.json'}")
     log(f"sync_latest: {args.out / 'sync_latest.md'}")
-    log(f"db: {db_path} ({sync_stats['db_rows']} rows)")
-    return 0  # always 0 for cron
+    log(f"db: {db_path} ({total_stats['db_rows']} rows)")
+    return 0
 
 
 if __name__ == "__main__":

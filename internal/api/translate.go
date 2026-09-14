@@ -605,8 +605,8 @@ func sanitizeUserError(s string) string {
 		}
 	}
 	out := strings.Join(fields, " ")
-	if len(out) > 240 {
-		out = out[:240] + "…"
+	if len(out) > 480 {
+		out = out[:480] + "…"
 	}
 	return out
 }
