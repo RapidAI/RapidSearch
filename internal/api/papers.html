@@ -235,9 +235,7 @@
       color: inherit;
       opacity: 0.88;
       font-size: 13px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      white-space: pre-line;
     }
     #xlate-banner .banner-meta {
       flex: 0 0 auto;
@@ -1013,6 +1011,14 @@
     };
   }
 
+  function formatRunningBannerList(items) {
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+      lines.push((i + 1) + ". " + items[i]);
+    }
+    return t("xlateBannerTitle") + "：\n" + lines.join("\n");
+  }
+
   function renderTranslateBanner() {
     const banner = document.getElementById("xlate-banner");
     const titleEl = document.getElementById("xlate-banner-title");
@@ -1046,11 +1052,9 @@
     const ids = (prog.running_ids && prog.running_ids.length)
       ? prog.running_ids
       : (prog.running_id ? [prog.running_id] : []);
-    if (titles.length) {
-      detailEl.textContent = t("xlateBannerTitle") + "：" + titles.join(" · ");
-      detailEl.hidden = false;
-    } else if (ids.length) {
-      detailEl.textContent = t("xlateBannerTitle") + "：" + ids.join(" · ");
+    const runningList = titles.length ? titles : ids;
+    if (runningList.length) {
+      detailEl.textContent = formatRunningBannerList(runningList);
       detailEl.hidden = false;
     } else {
       detailEl.textContent = "";
