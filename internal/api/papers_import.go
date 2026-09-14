@@ -392,6 +392,9 @@ func (ps *papersStore) httpClient() *http.Client {
 	if ps != nil && ps.importClient != nil {
 		return ps.importClient
 	}
+	if ps != nil && ps.allowPrivateFetch {
+		return &http.Client{Timeout: importPDFTimeout}
+	}
 	return defaultImportHTTPClient()
 }
 

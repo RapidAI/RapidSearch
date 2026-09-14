@@ -122,6 +122,9 @@ func newPapersStore(root string) *papersStore {
 		visits:      newVisitCounter(root),
 		importLimit: newImportLimiter(),
 	}
+	if strings.TrimSpace(os.Getenv("PAPERS_IMPORT_ALLOW_PRIVATE")) == "1" {
+		ps.allowPrivateFetch = true
+	}
 	ps.xlate.start()
 	ps.absZH.start()
 	return ps
