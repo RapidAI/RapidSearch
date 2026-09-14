@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,18 +44,20 @@ func main() {
 		},
 	}
 
-	log.Printf("search-relay backend=%s tunnel=%s", backend, tun)
-	backoff := time.Second
+	log.Printf("search-relay backend=%s tunnel=%s keepalive ping=%s pong_wait=%s read_idle=%s tcp_keepalive=%s",
+		backend, tun, tunnel.PingInterval, tunnel.PongTimeout, tunnel.ReadIdleTimeout, tunnel.TCPKeepAlivePeriod)
+	backoff := tunnel.ReconnectMin
 	for ctx.Err() == nil {
 		connectedAt := time.Now()
 		err := runOnce(ctx, tun, token, backend, client)
 		if ctx.Err() != nil {
 			break
 		}
-		if time.Since(connectedAt) > 10*time.Second {
-			backoff = time.Second
+		alive := time.Since(connectedAt)
+		if alive > tunnel.HealthyResetAfter {
+			backoff = tunnel.ReconnectMin
 		}
-		log.Printf("tunnel dropped: %v; reconnect in %s", err, backoff)
+		log.Printf("tunnel reconnect: reason=%v alive=%s backoff=%s", err, alive.Truncate(time.Millisecond), backoff)
 		t := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -64,12 +65,7 @@ func main() {
 			return
 		case <-t.C:
 		}
-		if backoff < 30*time.Second {
-			backoff *= 2
-			if backoff > 30*time.Second {
-				backoff = 30 * time.Second
-			}
-		}
+		backoff = tunnel.NextReconnectBackoff(backoff)
 	}
 }
 
@@ -106,12 +102,13 @@ func parseTunnelAddr(s string) (string, error) {
 }
 
 func runOnce(ctx context.Context, addr, token, backend string, client *http.Client) error {
-	d := net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+	d := tunnel.Dialer(15 * time.Second)
 	c, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	tunnel.EnableTCPKeepAlive(c)
 
 	_ = c.SetDeadline(time.Now().Add(15 * time.Second))
 	if _, err := c.Write([]byte("AUTH " + token + "\n")); err != nil {
@@ -132,61 +129,62 @@ func runOnce(ctx context.Context, addr, token, backend string, client *http.Clie
 	write := func(f tunnel.Frame) error {
 		wmu.Lock()
 		defer wmu.Unlock()
-		_ = c.SetWriteDeadline(time.Now().Add(30 * time.Second))
+		_ = tunnel.SetWriteIdle(c)
 		err := tunnel.WriteFrame(c, f)
-		_ = c.SetWriteDeadline(time.Time{})
+		tunnel.ClearWriteDeadline(c)
 		return err
 	}
 
-	stopPing := make(chan struct{})
-	go func() {
-		t := time.NewTicker(25 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopPing:
-				return
-			case <-t.C:
-				if err := write(tunnel.Frame{Type: "ping"}); err != nil {
-					_ = c.Close()
-					return
-				}
-			}
-		}
-	}()
-	defer func() { close(stopPing); _ = c.Close() }()
+	var closeOnce sync.Once
+	closeConn := func() { closeOnce.Do(func() { _ = c.Close() }) }
+	defer closeConn()
 
-	for {
+	errCh := make(chan error, 1)
+	die := func(err error) {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case errCh <- err:
 		default:
 		}
-		_ = c.SetReadDeadline(time.Now().Add(90 * time.Second))
+		closeConn()
+	}
+
+	onPong, stopKA := tunnel.StartKeepalive(ctx, tunnel.DefaultKeepalive(), write, die)
+	defer stopKA()
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		var f tunnel.Frame
-		if err := tunnel.ReadFrame(br, &f); err != nil {
-			return err
+		if err := tunnel.ReadFrameRefreshing(c, br, &f); err != nil {
+			select {
+			case kerr := <-errCh:
+				return tunnel.ClassifyReadError(kerr)
+			default:
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return tunnel.ClassifyReadError(err)
 		}
 		switch f.Type {
-		case "ping":
-			_ = write(tunnel.Frame{Type: "pong", ID: f.ID})
-		case "pong":
-			// keepalive
+		case tunnel.TypePing:
+			_ = write(tunnel.Frame{Type: tunnel.TypePong, ID: f.ID})
+		case tunnel.TypePong:
+			onPong()
 		case tunnel.TypeReq:
 			go func(f tunnel.Frame) {
 				if tunnel.PathNeedsStream(f.Path) {
 					if err := streamBackend(ctx, client, backend, f, write); err != nil {
 						log.Printf("stream download id=%s: %v", f.ID, err)
-						_ = c.Close()
+						die(fmt.Errorf("stream write: %w", err))
 					}
 					return
 				}
 				resp := doBackend(ctx, client, backend, f)
 				if err := write(resp); err != nil {
 					log.Printf("write resp id=%s: %v", f.ID, err)
-					_ = c.Close()
+					die(fmt.Errorf("resp write: %w", err))
 				}
 			}(f)
 		}

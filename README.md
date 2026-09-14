@@ -323,7 +323,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" http://PUBLIC_IP:18780/settings/confi
 # equivalently ?token= on the query string
 ```
 
-If no relay is connected, the proxy returns `503 {"error":"search backend offline","code":"offline"}`. Tunnel protocol: TCP, `AUTH <SEARCH_TOKEN>` then length-prefixed JSON request/response frames (bodies base64). Latest tunnel connection wins. Hub tokens are not used in that handshake.
+If no relay is connected, the proxy returns `503 {"error":"search backend offline","code":"offline"}`. Tunnel protocol: TCP, `AUTH <SEARCH_TOKEN>` then length-prefixed JSON request/response frames (bodies base64). Latest tunnel connection wins. Hub tokens are not used in that handshake. Both ends ping every 12s, treat a missing pong within 45s as dead, refresh a 60s read deadline on every frame (including ping/pong), enable 15s TCP keepalive, and the relay reconnects from 500ms up to 10s.
 
 Binaries: `go build -o search-proxy ./cmd/proxy` and `go build -o search-relay ./cmd/relay`. Copy them to the VPS; they are static-ish Go binaries (same module).
 
