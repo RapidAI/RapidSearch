@@ -200,6 +200,9 @@ AMBIGUOUS_ALONE = frozenset(
         "pre-training",
         "post-training",
         "instruction tuning",
+        "lora",
+        "qlora",
+        "peft",
         "tool use",
         "function calling",
     }

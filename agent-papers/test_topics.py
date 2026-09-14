@@ -71,6 +71,13 @@ class TestAutoTopicTags(unittest.TestCase):
             3.0,
         )
 
+    def test_llm_training_lora(self):
+        tags = tag_topics(
+            "LoRA for large language models",
+            "Parameter-efficient fine-tuning (PEFT) of an LLM with QLoRA.",
+        )
+        self.assertIn("llm-training", tags)
+
     def test_agent_tools_memory(self):
         tags = tag_topics(
             "Tool-using language agents with long-term memory",

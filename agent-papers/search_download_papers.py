@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 Search & download academic papers on agent self-evolution, agent security,
-and LLM-based IoT (AIoT). Primary source: ArXiv API. Optional: Semantic Scholar,
-local RapidSearch + Crawl4AI.
+LLM-based IoT (AIoT), LLM training, and agent tools/memory.
+Primary source: ArXiv API. Optional: Semantic Scholar, local RapidSearch + Crawl4AI.
 
 Stable topic_tags keys: self-evolution | security | both | llm-iot | survey
     | llm-training | agent-tools-memory | other
 Auto search/sync tags llm-training and agent-tools-memory. `other` is
 manual-import only. Manual imports set source=manual and keep the user-chosen tag.
+There is no checked-in search_keywords.json — daily exhaust uses DEFAULT_QUERIES
+and/or a runtime file produced by maintain_keywords.py (seed = DEFAULT_QUERIES).
 """
 from __future__ import annotations
 
@@ -97,13 +99,16 @@ DEFAULT_QUERIES = [
     'all:"supervised fine-tuning" AND (all:LLM OR all:"language model")',
     'all:RLHF AND (all:LLM OR all:"language model")',
     'all:"continued pre-training" OR all:"continual pretraining" AND (all:LLM OR all:"language model")',
+    'all:"continual learning" AND (all:LLM OR all:"language model") AND (all:SFT OR all:pretraining OR all:"fine-tuning")',
     'all:"LLM training" OR all:"language model" AND all:"fine-tuning" AND (all:SFT OR all:alignment OR all:preference)',
+    'all:LLM AND (all:LoRA OR all:QLoRA OR all:PEFT OR all:"parameter-efficient")',
     # Agent tools & memory (tool use / function calling / agent memory / RAG-for-agents)
     'all:"LLM agent" AND (all:"tool use" OR all:"tool calling" OR all:"function calling")',
     'all:"language agent" AND (all:memory OR all:RAG OR all:"tool use")',
     'all:"tool-using agent" OR all:"function calling" AND (all:"LLM agent" OR all:agentic)',
     'all:"agent memory" OR all:"long-term memory" AND (all:"LLM agent" OR all:"language agent")',
     'all:RAG AND (all:"LLM agent" OR all:"language agent" OR all:agentic)',
+    'all:"tool calling" AND (all:LLM OR all:"language model") AND (all:agent OR all:agentic OR all:memory)',
 ]
 
 # Broader web/RapidSearch queries (human phrasing)
@@ -127,6 +132,7 @@ WEB_QUERIES = [
     "LLM SFT RLHF instruction tuning paper",
     "large language model pretraining post-training arxiv",
     "supervised fine-tuning language model",
+    "LLM LoRA PEFT continual learning fine-tuning",
     "LLM agent tool use function calling",
     "language agent memory RAG tool calling",
     "agent long-term memory LLM paper",
@@ -225,7 +231,9 @@ TRAINING_RE = re.compile(
     r"post[\s-]?train\w*|mid[\s-]?train\w*|"
     r"fine[\s-]?tun\w*|finetun\w*|"
     r"preference[\s-]?tun\w*|preference[\s-]?optim\w*|"
-    r"llm[\s-]?train\w*|language[\s-]?model[\s-]?train\w*"
+    r"llm[\s-]?train\w*|language[\s-]?model[\s-]?train\w*|"
+    r"lora|qlora|peft|parameter[\s-]?efficient|"
+    r"knowledge[\s-]?distill\w*"
     r")\b",
     re.I,
 )
