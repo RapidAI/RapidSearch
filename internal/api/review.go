@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -96,14 +97,21 @@ type reviewService struct {
 	root  string
 	xlate *translateService
 
-	mu      sync.Mutex
-	index   map[string]reviewSummary
-	indexOK bool
-	locks   map[string]*sync.Mutex
+	mu         sync.Mutex
+	index      map[string]reviewSummary
+	indexOK    bool
+	locks      map[string]*sync.Mutex
+	generating map[string]chan struct{}
 
 	client     *http.Client
 	generateFn reviewGenerateFn
 }
+
+var (
+	errReviewLLMNotReady = fmt.Errorf("translation LLM is not configured")
+	errReviewNotReady    = fmt.Errorf("review is not ready")
+	errReviewGenerating  = fmt.Errorf("review is still generating")
+)
 
 func reviewsDir(root string) string {
 	return filepath.Join(root, reviewsDirName)
@@ -118,12 +126,48 @@ func newReviewService(root string, xlate *translateService) *reviewService {
 		root = papersRoot()
 	}
 	return &reviewService{
-		root:   root,
-		xlate:  xlate,
-		index:  map[string]reviewSummary{},
-		locks:  map[string]*sync.Mutex{},
-		client: nil,
+		root:       root,
+		xlate:      xlate,
+		index:      map[string]reviewSummary{},
+		locks:      map[string]*sync.Mutex{},
+		generating: map[string]chan struct{}{},
+		client:     nil,
 	}
+}
+
+func (s *reviewService) isGenerating(id string) bool {
+	if s == nil || id == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.generating[id]
+	return ok
+}
+
+func (s *reviewService) beginGenerate(id string) (wait <-chan struct{}, already bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.generating == nil {
+		s.generating = map[string]chan struct{}{}
+	}
+	if ch, ok := s.generating[id]; ok {
+		return ch, true
+	}
+	ch := make(chan struct{})
+	s.generating[id] = ch
+	return ch, false
+}
+
+func (s *reviewService) endGenerate(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch, ok := s.generating[id]
+	if !ok {
+		return
+	}
+	delete(s.generating, id)
+	close(ch)
 }
 
 func (s *reviewService) lockID(id string) *sync.Mutex {
@@ -350,12 +394,20 @@ func (s *reviewService) rate(id, userKey string, stars int) (paperReviewFile, er
 	if stars < reviewMinStars || stars > reviewMaxStars {
 		return paperReviewFile{}, fmt.Errorf("stars must be %d–%d", reviewMinStars, reviewMaxStars)
 	}
+	// Fail closed immediately while generate owns this id — do not wait on
+	// the persist lock (that lock is only for short file writes).
+	if s.isGenerating(id) {
+		return paperReviewFile{}, errReviewGenerating
+	}
 	m := s.lockID(id)
 	m.Lock()
 	defer m.Unlock()
+	if s.isGenerating(id) {
+		return paperReviewFile{}, errReviewGenerating
+	}
 	rec, ok := s.load(id)
 	if !ok || !rec.hasAnalysis() {
-		return paperReviewFile{}, os.ErrNotExist
+		return paperReviewFile{}, errReviewNotReady
 	}
 	rec.Ratings = upsertRating(rec.Ratings, userKey, stars, time.Now().UTC().Format(time.RFC3339))
 	if err := s.persist(&rec); err != nil {
@@ -378,7 +430,39 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 
 	m := s.lockID(id)
 	m.Lock()
-	defer m.Unlock()
+	if rec, ok := s.load(id); ok && rec.hasAnalysis() && !force {
+		m.Unlock()
+		return rec, true, nil
+	}
+	m.Unlock()
+
+	wait, already := s.beginGenerate(id)
+	if already {
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return paperReviewFile{}, false, ctx.Err()
+		}
+		if rec, ok := s.load(id); ok && rec.hasAnalysis() && !force {
+			return rec, true, nil
+		}
+		if !force {
+			return paperReviewFile{}, false, errReviewNotReady
+		}
+		wait, already = s.beginGenerate(id)
+		if already {
+			select {
+			case <-wait:
+			case <-ctx.Done():
+				return paperReviewFile{}, false, ctx.Err()
+			}
+			if rec, ok := s.load(id); ok && rec.hasAnalysis() {
+				return rec, true, nil
+			}
+			return paperReviewFile{}, false, errReviewNotReady
+		}
+	}
+	defer s.endGenerate(id)
 
 	if rec, ok := s.load(id); ok && rec.hasAnalysis() && !force {
 		return rec, true, nil
@@ -392,6 +476,7 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 		return paperReviewFile{}, false, errReviewLLMNotReady
 	}
 
+	// LLM call without the persist lock so rate can fail closed immediately.
 	analysis, model, err := s.callGenerate(ctx, snap, paper)
 	if err != nil {
 		return paperReviewFile{}, false, err
@@ -403,6 +488,8 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 		model = snap.Model
 	}
 
+	m.Lock()
+	defer m.Unlock()
 	rec, _ := s.load(id)
 	rec.PaperID = id
 	if title := strings.TrimSpace(paper.Title); title != "" {
@@ -419,8 +506,6 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 	}
 	return rec, false, nil
 }
-
-var errReviewLLMNotReady = fmt.Errorf("translation LLM is not configured")
 
 func (s *reviewService) callGenerate(ctx context.Context, snap translateSnapshot, paper paperEntry) (paperReviewAnalysis, string, error) {
 	if s != nil && s.generateFn != nil {
@@ -699,8 +784,12 @@ func (s *Server) handlePapersReviewRate(w http.ResponseWriter, r *http.Request) 
 	}
 	rec, err := rev.rate(id, rater, req.Stars)
 	if err != nil {
-		if os.IsNotExist(err) {
-			writeErr(w, http.StatusNotFound, "review not found", "papers", nil, "")
+		if errors.Is(err, errReviewGenerating) {
+			writeErr(w, http.StatusConflict, errReviewGenerating.Error(), search.CodeBusy, nil, "")
+			return
+		}
+		if errors.Is(err, errReviewNotReady) || os.IsNotExist(err) {
+			writeErr(w, http.StatusConflict, errReviewNotReady.Error(), search.CodeBusy, nil, "")
 			return
 		}
 		log.Printf("papers review rate id=%s: %v", id, err)

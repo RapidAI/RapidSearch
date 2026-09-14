@@ -323,7 +323,9 @@
       cursor: pointer;
     }
     .star-btn.on { color: #e3a008; }
-    .star-btn:disabled { cursor: default; }
+    .star-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+    .review-rate.locked .star-btn { pointer-events: none; }
+    .review-rate-hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
     .review-avg { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
     .review-status { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
     .review-status.err { color: var(--bad); }
@@ -438,11 +440,12 @@
           <h3 data-i18n="reviewSec4">论文质量总评</h3>
           <p id="rev-quality"></p>
         </section>
-        <div class="review-rate">
-          <p class="review-rate-label" data-i18n="reviewRate">Rate this review</p>
-          <div class="star-row" id="review-stars" role="radiogroup" data-i18n-aria="reviewRate" aria-label="Rate this review"></div>
-          <p class="review-avg" id="review-avg"></p>
-        </div>
+      </div>
+      <div class="review-rate" id="review-rate" hidden>
+        <p class="review-rate-label" data-i18n="reviewRate">Rate this review</p>
+        <div class="star-row" id="review-stars" role="radiogroup" data-i18n-aria="reviewRate" aria-label="Rate this review"></div>
+        <p class="review-avg" id="review-avg"></p>
+        <p class="review-rate-hint" id="review-rate-hint" data-i18n="reviewRateLocked" hidden>Rating unlocks after the review is generated.</p>
       </div>
     </div>
   </div>
@@ -508,6 +511,8 @@
       reviewClose: "Close",
       reviewGenFail: "Could not generate review.",
       reviewRateFail: "Could not save rating.",
+      reviewRateLocked: "Rating unlocks after the review is generated.",
+      reviewNotReady: "Review is not ready yet.",
       reviewNeedLLM: "Configure the translation LLM in Settings first.",
       reviewLoadFail: "Failed to load review."
     },
@@ -566,6 +571,8 @@
       reviewClose: "关闭",
       reviewGenFail: "无法生成解读。",
       reviewRateFail: "无法保存评分。",
+      reviewRateLocked: "解读生成完成后即可评分。",
+      reviewNotReady: "解读尚未生成完成。",
       reviewNeedLLM: "请先在设置中配置翻译 LLM。",
       reviewLoadFail: "加载解读失败。"
     }
@@ -1178,20 +1185,51 @@
     el.className = "review-status" + (kind ? " " + kind : "");
   }
 
-  function renderStars(myStars) {
+  function renderStars(myStars, enabled) {
     const row = document.getElementById("review-stars");
     const mine = Number(myStars) || 0;
     let html = "";
     for (let i = 1; i <= 5; i++) {
       html += '<button type="button" class="star-btn' + (i <= mine ? " on" : "") +
-        '" data-stars="' + i + '" aria-label="' + i + '">★</button>';
+        '" data-stars="' + i + '" aria-label="' + i + '"' +
+        (enabled ? "" : " disabled") + ">★</button>";
     }
     row.innerHTML = html;
+    if (!enabled) return;
     row.querySelectorAll(".star-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         rateOpenReview(Number(btn.getAttribute("data-stars")) || 0);
       });
     });
+  }
+
+  function setReviewRatingEnabled(enabled, data) {
+    const box = document.getElementById("review-rate");
+    const hint = document.getElementById("review-rate-hint");
+    const avg = document.getElementById("review-avg");
+    box.hidden = false;
+    box.classList.toggle("locked", !enabled);
+    if (openReview) openReview.ready = !!enabled;
+    if (!enabled) {
+      renderStars(0, false);
+      avg.hidden = true;
+      avg.textContent = "";
+      hint.hidden = false;
+      hint.textContent = t("reviewRateLocked");
+      return;
+    }
+    hint.hidden = true;
+    avg.hidden = false;
+    renderStars(data && data.my_stars ? data.my_stars : 0, true);
+    renderReviewAvg(data);
+  }
+
+  function hideReviewRating() {
+    const box = document.getElementById("review-rate");
+    box.hidden = true;
+    box.classList.remove("locked");
+    document.getElementById("review-stars").innerHTML = "";
+    if (openReview) openReview.ready = false;
   }
 
   function renderReviewAvg(data) {
@@ -1214,8 +1252,9 @@
     const has = !!(data && data.has_review);
     document.getElementById("review-body").hidden = !has;
     if (has) {
-      renderStars(data.my_stars || 0);
-      renderReviewAvg(data);
+      setReviewRatingEnabled(true, data);
+    } else {
+      hideReviewRating();
     }
   }
 
@@ -1223,6 +1262,7 @@
     const modal = document.getElementById("review-modal");
     modal.hidden = true;
     openReview = null;
+    hideReviewRating();
     setReviewStatus("", "");
   }
 
@@ -1236,9 +1276,10 @@
   async function openReviewPanel(id) {
     if (!id || generating[id]) return;
     const paper = findCatalogPaper(id) || { id: id, title: id, has_review: false };
-    openReview = { id: id, title: paper.title || id };
+    openReview = { id: id, title: paper.title || id, ready: false };
     showReviewModal(openReview.title);
     document.getElementById("review-body").hidden = true;
+    hideReviewRating();
     if (paper.has_review) {
       setReviewStatus("", "");
       try {
@@ -1256,8 +1297,11 @@
       }
     }
     generating[id] = true;
+    if (openReview) openReview.ready = false;
     renderList();
     showReviewModal(openReview.title);
+    document.getElementById("review-body").hidden = true;
+    setReviewRatingEnabled(false);
     setReviewStatus(t("reviewGenerating"), "busy");
     try {
       const res = await fetch(reviewURL(id, "/generate"), {
@@ -1272,6 +1316,7 @@
           ? t("reviewNeedLLM")
           : (data && data.error ? String(data.error) : t("reviewGenFail"));
         setReviewStatus(msg, "err");
+        hideReviewRating();
         return;
       }
       setReviewStatus("", "");
@@ -1286,7 +1331,8 @@
   }
 
   async function rateOpenReview(stars) {
-    if (!openReview || !openReview.id || !stars) return;
+    if (!openReview || !openReview.id || !openReview.ready || !stars) return;
+    if (generating[openReview.id]) return;
     try {
       const res = await fetch(reviewURL(openReview.id, "/rate"), {
         method: "POST",
@@ -1296,7 +1342,12 @@
       });
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok || !data.ok) {
-        setReviewStatus(data && data.error ? String(data.error) : t("reviewRateFail"), "err");
+        const err = data && data.error ? String(data.error) : "";
+        if (err === "review is still generating" || err === "review is not ready") {
+          setReviewStatus(t("reviewNotReady"), "err");
+        } else {
+          setReviewStatus(err || t("reviewRateFail"), "err");
+        }
         return;
       }
       setReviewStatus("", "");

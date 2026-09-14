@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func sampleAnalysis() paperReviewAnalysis {
@@ -174,6 +175,140 @@ func TestGenerateSkipIfExists(t *testing.T) {
 	}
 }
 
+func TestRateBeforeReviewError(t *testing.T) {
+	h, dir := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/rate", strings.NewReader(`{"stars":4}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: raterCookieName, Value: "dddddddddddddddd"})
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("rate-before-review status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "review is not ready") {
+		t.Fatalf("want clear not-ready error, got %s", rr.Body.String())
+	}
+	if _, err := os.Stat(reviewFilePath(dir, "2401.05459")); !os.IsNotExist(err) {
+		t.Fatal("rate must not create a ratings-only stub")
+	}
+}
+
+func TestGenerateThenRateOK(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	ps := srv.papers()
+	ps.xlate.cfg.APIKey = "k"
+	ps.xlate.cfg.Model = "m"
+	ps.reviews.generateFn = func(ctx context.Context, snap translateSnapshot, paper paperEntry) (paperReviewAnalysis, string, error) {
+		return sampleAnalysis(), "m", nil
+	}
+
+	gen := httptest.NewRecorder()
+	greq := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/generate", strings.NewReader(`{}`))
+	greq.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(gen, greq)
+	if gen.Code != http.StatusOK {
+		t.Fatalf("generate status=%d %s", gen.Code, gen.Body.String())
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/rate", strings.NewReader(`{"stars":4}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: raterCookieName, Value: "eeeeeeeeeeeeeeee"})
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("rate after generate status=%d %s", rr.Code, rr.Body.String())
+	}
+	var view paperReviewView
+	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasReview || view.AvgStars != 4 || view.RatingCount != 1 || view.MyStars != 4 {
+		t.Fatalf("after generate+rate: %+v", view)
+	}
+	if _, err := os.Stat(reviewFilePath(dir, "2401.05459")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRateWhileGenerateInFlightFailsClosed(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	ps := srv.papers()
+	ps.xlate.cfg.APIKey = "k"
+	ps.xlate.cfg.Model = "m"
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ps.reviews.generateFn = func(ctx context.Context, snap translateSnapshot, paper paperEntry) (paperReviewAnalysis, string, error) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return paperReviewAnalysis{}, "", ctx.Err()
+		}
+		return sampleAnalysis(), "m", nil
+	}
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/generate", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(rr, req)
+		done <- rr
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("generate did not start")
+	}
+
+	rateDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/rate", strings.NewReader(`{"stars":5}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: raterCookieName, Value: "ffffffffffffffff"})
+		h.ServeHTTP(rr, req)
+		rateDone <- rr
+	}()
+	var rateRR *httptest.ResponseRecorder
+	select {
+	case rateRR = <-rateDone:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("rate blocked on in-flight generate; must fail closed")
+	}
+	if rateRR.Code != http.StatusConflict {
+		t.Fatalf("in-flight rate status=%d body=%s", rateRR.Code, rateRR.Body.String())
+	}
+	if !strings.Contains(rateRR.Body.String(), "review is still generating") {
+		t.Fatalf("want generating error, got %s", rateRR.Body.String())
+	}
+	if _, err := os.Stat(reviewFilePath(dir, "2401.05459")); !os.IsNotExist(err) {
+		t.Fatal("in-flight rate must not write a ratings stub")
+	}
+
+	close(release)
+	var genRR *httptest.ResponseRecorder
+	select {
+	case genRR = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("generate did not finish")
+	}
+	if genRR.Code != http.StatusOK {
+		t.Fatalf("generate status=%d %s", genRR.Code, genRR.Body.String())
+	}
+
+	after := httptest.NewRecorder()
+	areq := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/rate", strings.NewReader(`{"stars":5}`))
+	areq.Header.Set("Content-Type", "application/json")
+	areq.AddCookie(&http.Cookie{Name: raterCookieName, Value: "ffffffffffffffff"})
+	h.ServeHTTP(after, areq)
+	if after.Code != http.StatusOK {
+		t.Fatalf("rate after generate completed status=%d %s", after.Code, after.Body.String())
+	}
+}
+
 func TestGenerateAnonymousWorksWhenLLMConfigured(t *testing.T) {
 	h, _ := papersHandler(t)
 	srv := h.(*Server)
@@ -310,6 +445,10 @@ func TestPapersPageReviewUI(t *testing.T) {
 		"实验完整性",
 		"论文质量总评",
 		"reviewGenerating",
+		"reviewRateLocked",
+		"setReviewRatingEnabled",
+		"openReview.ready",
+		"disabled",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("papers.html missing %q", want)
