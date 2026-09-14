@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en" data-accept-lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Papers</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --ink: #e8eef6;
+      --muted: #8b9bb0;
+      --line: #2a3a4f;
+      --accent: #4ea1ff;
+      --ok: #3dcc8a;
+      --bad: #f07178;
+      --btn: #243044;
+      --tag: #243a28;
+      --tag-ink: #9ad4a0;
+    }
+    html:not([data-i18n-ready]) body { visibility: hidden; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 16px 18px 0;
+      flex-wrap: wrap;
+    }
+    .lang-switch { display: flex; gap: 4px; }
+    .lang-switch button.active { background: #1d4e89; border-color: #2d6cb5; }
+    main { max-width: 960px; margin: 0 auto; padding: 12px 18px 48px; }
+    h1 { font-size: 1.45rem; margin: 0 0 6px; }
+    p.lead { color: var(--muted); margin: 0 0 18px; }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+      align-items: center;
+    }
+    input[type="search"] {
+      flex: 1 1 220px;
+      min-width: 180px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      color: var(--ink);
+      font: inherit;
+    }
+    select {
+      padding: 9px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      color: var(--ink);
+      font: inherit;
+    }
+    button {
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    a.btn {
+      display: inline-block;
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
+    a.btn:hover { filter: brightness(1.08); }
+    .meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+    .meta strong { color: var(--ink); }
+    article.paper {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px 14px;
+      margin-bottom: 12px;
+    }
+    article.paper h2 {
+      font-size: 1.05rem;
+      margin: 0 0 8px;
+      line-height: 1.35;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .year {
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .tag {
+      font-size: 12px;
+      background: var(--tag);
+      color: var(--tag-ink);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    #status.err { color: var(--bad); }
+    .empty { color: var(--muted); padding: 24px 0; }
+    .nav a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  </style>
+  <script>
+  (function () {
+    var KEY = "rs_settings_lang";
+    var lang = "";
+    try { lang = localStorage.getItem(KEY) || ""; } catch (e) {}
+    if (lang !== "zh" && lang !== "en") {
+      var nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
+      var acc = document.documentElement.getAttribute("data-accept-lang") || "";
+      lang = (nav.indexOf("zh") === 0 || acc.indexOf("zh") === 0) ? "zh" : "en";
+    }
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+  })();
+  </script>
+</head>
+<body>
+<div class="top">
+  <div class="nav">
+    <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
+  </div>
+  <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
+    <button type="button" id="lang-zh" data-lang="zh">中文</button>
+    <button type="button" id="lang-en" data-lang="en">EN</button>
+  </div>
+</div>
+<main>
+  <h1 data-i18n="heading">Agent papers</h1>
+  <p class="lead" data-i18n="lead">Browse the local catalog and download already-cached PDFs.</p>
+
+  <div class="toolbar">
+    <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, arXiv id…" autocomplete="off">
+    <select id="tag">
+      <option value="" data-i18n="tagAll">All tags</option>
+    </select>
+    <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+  </div>
+  <p class="meta" id="meta"></p>
+  <p id="status"></p>
+  <div id="list"></div>
+</main>
+<script>
+(function () {
+  const KEY = "rs_settings_lang";
+  const I18N = {
+    en: {
+      langLabel: "Language",
+      heading: "Agent papers",
+      lead: "Browse the local catalog and download already-cached PDFs.",
+      settingsLink: "Settings",
+      searchPh: "Search title, authors, arXiv id…",
+      tagAll: "All tags",
+      apply: "Filter",
+      meta: "{shown} shown · {total} in catalog · generated {when}",
+      empty: "No papers match.",
+      download: "Download PDF",
+      view: "Open PDF",
+      arxiv: "arXiv",
+      noLocal: "No local PDF",
+      loadErr: "Failed to load catalog",
+      unauthorized: "Unauthorized — sign in via Settings first."
+    },
+    zh: {
+      langLabel: "语言",
+      heading: "Agent 论文库",
+      lead: "浏览本地目录并下载已缓存的 PDF（不重新从 ArXiv 拉取）。",
+      settingsLink: "设置",
+      searchPh: "搜索标题、作者、arXiv 编号…",
+      tagAll: "全部标签",
+      apply: "筛选",
+      meta: "显示 {shown} 篇 · 目录共 {total} 篇 · 生成于 {when}",
+      empty: "没有匹配的论文。",
+      download: "下载 PDF",
+      view: "打开 PDF",
+      arxiv: "arXiv",
+      noLocal: "无本地 PDF",
+      loadErr: "加载目录失败",
+      unauthorized: "未授权 — 请先在设置页登录。"
+    }
+  };
+
+  function currentLang() {
+    return document.documentElement.getAttribute("data-lang") === "zh" ? "zh" : "en";
+  }
+  function t(k) {
+    const lang = currentLang();
+    return (I18N[lang] && I18N[lang][k]) || (I18N.en[k] || k);
+  }
+  function applyI18n() {
+    const lang = currentLang();
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      const k = el.getAttribute("data-i18n");
+      if (k) el.textContent = t(k);
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(function (el) {
+      const k = el.getAttribute("data-i18n-placeholder");
+      if (k) el.setAttribute("placeholder", t(k));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+      const k = el.getAttribute("data-i18n-aria");
+      if (k) el.setAttribute("aria-label", t(k));
+    });
+    document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
+    document.getElementById("lang-en").classList.toggle("active", lang === "en");
+    document.documentElement.setAttribute("data-i18n-ready", "1");
+  }
+  function setLang(lang) {
+    if (lang !== "zh" && lang !== "en") lang = "en";
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.documentElement.setAttribute("data-lang", lang);
+    applyI18n();
+    renderMeta();
+    renderList();
+  }
+
+  function appPrefix() {
+    let p = location.pathname || "";
+    const markers = ["/papers", "/settings", "/search", "/download"];
+    for (let i = 0; i < markers.length; i++) {
+      const m = markers[i];
+      const idx = p.indexOf(m);
+      if (idx >= 0) return p.slice(0, idx);
+    }
+    return "";
+  }
+  const prefix = appPrefix();
+  document.getElementById("settings-link").href = prefix + "/settings";
+
+  function apiURL(q, tag) {
+    let u = prefix + "/papers/api";
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (tag) params.set("tag", tag);
+    const s = params.toString();
+    return s ? u + "?" + s : u;
+  }
+  function pdfURL(localPath, download) {
+    let u = prefix + localPath;
+    if (download) u += (u.indexOf("?") >= 0 ? "&" : "?") + "download=1";
+    return u;
+  }
+
+  let lastCatalog = { count: 0, papers: [], generated_at: "" };
+  let lastShown = 0;
+
+  function renderMeta() {
+    const when = lastCatalog.generated_at || "—";
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
+    const text = t("meta")
+      .replace("{shown}", String(lastShown))
+      .replace("{total}", String(total))
+      .replace("{when}", when);
+    document.getElementById("meta").innerHTML = text;
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderList() {
+    const list = document.getElementById("list");
+    const papers = lastCatalog.papers || [];
+    lastShown = papers.length;
+    renderMeta();
+    if (!papers.length) {
+      list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
+      return;
+    }
+    list.innerHTML = papers.map(function (p) {
+      const tags = (p.topic_tags || []).map(function (tg) {
+        return '<span class="tag">' + esc(tg) + "</span>";
+      }).join("");
+      const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
+      let actions = "";
+      if (p.has_local && p.local_pdf) {
+        actions += '<a class="btn primary" href="' + esc(pdfURL(p.local_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("view")) + "</a>";
+        actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
+      } else {
+        actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+      }
+      if (p.source_url) {
+        actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      } else if (p.arxiv_id) {
+        actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
+      }
+      const brief = p.brief || "";
+      return (
+        '<article class="paper">' +
+          "<h2>" + esc(p.title || "") + "</h2>" +
+          '<div class="row">' + year + tags + "</div>" +
+          (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
+          '<div class="actions">' + actions + "</div>" +
+        "</article>"
+      );
+    }).join("");
+  }
+
+  function fillTags(papers) {
+    const sel = document.getElementById("tag");
+    const cur = sel.value;
+    const set = {};
+    (papers || []).forEach(function (p) {
+      (p.topic_tags || []).forEach(function (tg) {
+        if (tg) set[tg] = true;
+      });
+    });
+    const tags = Object.keys(set).sort();
+    sel.innerHTML = '<option value="">' + esc(t("tagAll")) + "</option>" +
+      tags.map(function (tg) {
+        return '<option value="' + esc(tg) + '">' + esc(tg) + "</option>";
+      }).join("");
+    if (cur && set[cur]) sel.value = cur;
+  }
+
+  async function load() {
+    const status = document.getElementById("status");
+    status.textContent = "";
+    status.className = "";
+    const q = document.getElementById("q").value.trim();
+    const tag = document.getElementById("tag").value;
+    try {
+      const res = await fetch(apiURL(q, tag), { credentials: "same-origin" });
+      if (res.status === 401) {
+        status.textContent = t("unauthorized");
+        status.className = "err";
+        location.href = prefix + "/settings";
+        return;
+      }
+      if (!res.ok) {
+        status.textContent = t("loadErr") + " (" + res.status + ")";
+        status.className = "err";
+        return;
+      }
+      const data = await res.json();
+      // Keep full tag list from unfiltered load when filtering.
+      if (!q && !tag) fillTags(data.papers || []);
+      lastCatalog = data;
+      renderList();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    }
+  }
+
+  document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
+  document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
+  document.getElementById("apply").addEventListener("click", load);
+  document.getElementById("q").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); load(); }
+  });
+  document.getElementById("tag").addEventListener("change", load);
+  applyI18n();
+  load();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+httpx>=0.27
+requests>=2.31
+# feedparser optional; stdlib xml.etree used for ArXiv Atom
+# crawl4ai provided by /workspace/crawl4ai-venv

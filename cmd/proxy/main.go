@@ -61,6 +61,8 @@ func main() {
 	mux.HandleFunc("/download", hub.serveHTTP)
 	mux.HandleFunc("/settings", hub.serveHTTP)
 	mux.HandleFunc("/settings/", hub.serveHTTP)
+	mux.HandleFunc("/papers", hub.serveHTTP)
+	mux.HandleFunc("/papers/", hub.serveHTTP)
 
 	hs := &http.Server{
 		Addr:              publicAddr,
@@ -180,10 +182,10 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", "bad_request")
 		return
 	}
-	// Settings login/page/config are enforced on the search process so an
+	// Settings and papers UIs are enforced on the search process so an
 	// unauthenticated browser can receive the HTML login page. /search still
 	// requires Bearer or ?token= here (cookie is not enough).
-	if !tunnel.PathIsSettings(r.URL.Path) && !h.authorized(r) {
+	if !tunnel.PathPassthroughAuth(r.URL.Path) && !h.authorized(r) {
 		writeErr(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
 		return
 	}
@@ -219,7 +221,7 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	// on the search process. Forward bearer and Cookie so login and
 	// /settings/config work through the tunnel. Authorization is a hop
 	// header and must be restored.
-	if tunnel.PathIsSettings(path) {
+	if tunnel.PathPassthroughAuth(path) {
 		if a := r.Header.Get("Authorization"); a != "" {
 			hdrs["Authorization"] = a
 		}
@@ -240,7 +242,7 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	if tunnel.PathIsDownload(path) {
+	if tunnel.PathNeedsStream(path) {
 		h.serveStream(ctx, w, s, fr)
 		return
 	}

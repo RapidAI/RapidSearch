@@ -73,3 +73,30 @@ func TestStreamFrames(t *testing.T) {
 		}
 	}
 }
+
+func TestPathIsPapers(t *testing.T) {
+	if !PathIsPapers("/papers") || !PathIsPapers("/papers/") || !PathIsPapers("/papers/api") {
+		t.Fatal("papers path")
+	}
+	if !PathIsPapers("/papers/pdf/x.pdf") || !PathIsPapersPDF("/papers/pdf/x.pdf?download=1") {
+		t.Fatal("papers pdf path")
+	}
+	if PathIsPapers("/search") || PathIsPapers("/papersx") || PathIsPapersPDF("/papers/api") {
+		t.Fatal("not papers")
+	}
+}
+
+func TestPathNeedsStreamAndPassthrough(t *testing.T) {
+	if !PathNeedsStream("/download") || !PathNeedsStream("/papers/pdf/a.pdf") {
+		t.Fatal("need stream")
+	}
+	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api") {
+		t.Fatal("html/api should not stream")
+	}
+	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") {
+		t.Fatal("passthrough")
+	}
+	if PathPassthroughAuth("/search") {
+		t.Fatal("search is not passthrough")
+	}
+}

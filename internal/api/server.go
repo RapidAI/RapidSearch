@@ -36,6 +36,7 @@ type Server struct {
 	runEngine func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
 	cfg       *search.Store
 	auth      *proxyauth.Checker
+	papersStore *papersStore
 }
 
 type engineTransport int
@@ -85,6 +86,10 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/settings/logout", s.handleSettingsLogout)
 	s.mux.HandleFunc("/cache/stats", s.handleCacheStats)
 	s.mux.HandleFunc("/download", s.handleDownload)
+	s.mux.HandleFunc("/papers", s.handlePapersPage)
+	s.mux.HandleFunc("/papers/{$}", s.handlePapersPage)
+	s.mux.HandleFunc("/papers/api", s.handlePapersAPI)
+	s.mux.HandleFunc("/papers/pdf/{name...}", s.handlePapersPDF)
 	return s
 }
 
