@@ -95,6 +95,11 @@
     #status.err { color: var(--bad); }
     #status.ok { color: var(--ok); }
     .check { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
+    .engine-pick { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+    .engine-pick label.check { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #0d1218; }
+    .engine-pick label.check.active { border-color: #2d6cb5; background: #152033; }
+    .engine-pick input { accent-color: var(--accent); }
+    #hub-fields.dim { opacity: 0.72; }
     code { font-size: 12px; background: #0d1218; padding: 1px 5px; border-radius: 4px; }
     input[type="number"] {
       width: 100%;
@@ -167,11 +172,26 @@
   </section>
 
   <section aria-labelledby="llm-heading">
-    <h2 id="llm-heading" data-i18n="llmHeading">Translation LLM</h2>
-    <p class="hint"><span data-i18n="llmHint">OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.</span>
+    <h2 id="llm-heading" data-i18n="llmHeading">Paper translation</h2>
+    <p class="hint"><span data-i18n="llmHint">PDF translation engine and Hub LLM settings. Leave a key empty to keep the stored value. Keys are never returned in full.</span>
       <code id="xlate-cfgpath">translate-config.json</code>
       <span id="babel-badge" class="badge" hidden></span>
+      <span id="xlate-engine-badge" class="badge ok" hidden></span>
     </p>
+    <p class="hint" data-i18n="engineXlateHint">PDF jobs use the selected engine. Abstract ZH, paper review, and Hugging Face daily trend still use the Hub / OpenAI-compatible LLM below.</p>
+    <div class="engine-pick" role="radiogroup" data-i18n-aria="xlateEngineLabel" aria-label="Translation engine">
+      <label class="check" id="engine-hub-wrap"><input type="radio" name="xlate-engine" id="engine-hub" value="hub" checked> <span data-i18n="engineHub">Hub / OpenAI-compatible LLM</span></label>
+      <label class="check" id="engine-google-wrap"><input type="radio" name="xlate-engine" id="engine-google" value="google"> <span data-i18n="engineGoogle">Google 翻译 / Google Translate</span></label>
+    </div>
+    <p class="hint" id="google-hint" data-i18n="googleHint">Google is usually faster and cheaper for full-PDF translation. Quality and layout may differ from the Hub LLM. Optional Cloud Translation API key below; without it RapidSearch uses the public Google Translate web endpoint (same family as pdf2zh-next). Not used for abstracts, reviews, or HF daily trend.</p>
+    <label class="field" id="google-key-field"><span data-i18n="googleApiKey">Google Cloud Translation API key (optional)</span>
+      <input id="google-api-key" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-i18n-placeholder="pasteKey" placeholder="Paste key to replace">
+    </label>
+    <div class="row" id="google-key-row">
+      <span id="google-key-state" class="badge">not configured</span>
+      <label class="check"><input type="checkbox" id="clear-google-key"> <span data-i18n="clearGoogleKey">Clear saved Google key</span></label>
+    </div>
+    <div id="hub-fields">
     <div class="grid2">
       <label class="field"><span data-i18n="baseUrl">Base URL</span>
         <input id="base-url" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://api.openai.com/v1">
@@ -191,6 +211,7 @@
       </label>
     </div>
     <label class="check"><input type="checkbox" id="auto-xlate"> <span data-i18n="autoXlate">Auto-translate new papers when the catalog is listed</span></label>
+    </div>
     <div class="actions">
       <button type="button" class="primary" id="save-xlate" data-i18n="saveXlate">Save translation settings</button>
       <button type="button" id="test-xlate" data-i18n="testXlate">Test</button>
@@ -256,12 +277,21 @@
       hint_duckduckgo_html: "HTTP only · no Chrome slot",
       hint_duckduckgo: "Chrome fallback after HTML",
       hint_google: "Chrome only · disabled on auto by default; captcha breaker if enabled",
-      llmHeading: "Translation LLM",
-      llmHint: "OpenAI-compatible settings for BabelDOC. Leave the key empty to keep the stored value. Keys are never returned in full.",
+      llmHeading: "Paper translation",
+      llmHint: "PDF translation engine and Hub LLM settings. Leave a key empty to keep the stored value. Keys are never returned in full.",
+      engineXlateHint: "PDF jobs use the selected engine. Abstract ZH, paper review, and Hugging Face daily trend still use the Hub / OpenAI-compatible LLM below.",
+      xlateEngineLabel: "Translation engine",
+      engineHub: "Hub / OpenAI-compatible LLM",
+      engineGoogle: "Google Translate",
+      engineActiveHub: "active: Hub LLM",
+      engineActiveGoogle: "active: Google Translate",
+      googleHint: "Google is usually faster and cheaper for full-PDF translation. Quality and layout may differ from the Hub LLM. Optional Cloud Translation API key below; without it RapidSearch uses the public Google Translate web endpoint (same family as pdf2zh-next). Not used for abstracts, reviews, or HF daily trend.",
+      googleApiKey: "Google Cloud Translation API key (optional)",
+      clearGoogleKey: "Clear saved Google key",
       baseUrl: "Base URL",
       model: "Model",
-      apiKey: "API key",
-      clearKey: "Clear saved key",
+      apiKey: "Hub / OpenAI API key",
+      clearKey: "Clear saved Hub key",
       qps: "QPS",
       autoXlate: "Auto-translate new papers when the catalog is listed",
       saveXlate: "Save translation settings",
@@ -269,8 +299,8 @@
       xlateSaving: "Saving…",
       xlateSaved: "Translation settings saved.",
       xlateTesting: "Testing…",
-      xlateTestOk: "LLM test succeeded ({via}).",
-      xlateTestFail: "LLM test failed: {err}",
+      xlateTestOk: "Test succeeded ({via}).",
+      xlateTestFail: "Test failed: {err}",
       babelOk: "babeldoc on PATH",
       babelMissing: "babeldoc missing",
       papersLink: "MaClaw Selected papers →"
@@ -319,12 +349,21 @@
       hint_duckduckgo_html: "仅 HTTP · 不占用 Chrome",
       hint_duckduckgo: "HTML 之后的 Chrome 兜底",
       hint_google: "仅 Chrome · 默认不参与自动搜索；启用后仍受验证码熔断约束",
-      llmHeading: "翻译模型",
-      llmHint: "供 BabelDOC 使用的 OpenAI 兼容接口。API key 留空则保留已保存值；接口不会返回完整密钥。",
+      llmHeading: "论文翻译",
+      llmHint: "PDF 翻译引擎与 Hub LLM 设置。密钥留空则保留已保存值；接口不会返回完整密钥。",
+      engineXlateHint: "PDF 翻译使用所选引擎。中文摘要、论文解读、Hugging Face 每日趋势综述仍走下方 Hub / OpenAI 兼容 LLM。",
+      xlateEngineLabel: "翻译引擎",
+      engineHub: "Hub / OpenAI 兼容 LLM",
+      engineGoogle: "Google 翻译 / Google Translate",
+      engineActiveHub: "当前：Hub LLM",
+      engineActiveGoogle: "当前：Google 翻译",
+      googleHint: "Google 通常比 Hub LLM 更快、更省额度。译文质量与版式可能不同。下方可选填 Google Cloud Translation API key；不填则走公开 Google 翻译网页接口（与 pdf2zh-next 同类）。不用于摘要、解读或 HF 每日综述。",
+      googleApiKey: "Google Cloud Translation API key（可选）",
+      clearGoogleKey: "清除已保存的 Google key",
       baseUrl: "接口地址",
       model: "模型",
-      apiKey: "API key",
-      clearKey: "清除已保存的 key",
+      apiKey: "Hub / OpenAI API key",
+      clearKey: "清除已保存的 Hub key",
       qps: "QPS",
       autoXlate: "列出目录时自动翻译尚未完成的论文",
       saveXlate: "保存翻译设置",
@@ -332,8 +371,8 @@
       xlateSaving: "保存中…",
       xlateSaved: "翻译设置已保存。",
       xlateTesting: "测试中…",
-      xlateTestOk: "LLM 测试成功（{via}）。",
-      xlateTestFail: "LLM 测试失败：{err}",
+      xlateTestOk: "测试成功（{via}）。",
+      xlateTestFail: "测试失败：{err}",
       babelOk: "已检测到 babeldoc",
       babelMissing: "未安装 babeldoc",
       papersLink: "码卡龙论文精选 →"
@@ -543,17 +582,46 @@
     el.className = cls || "";
   }
 
+  function selectedEngine() {
+    const g = document.getElementById("engine-google");
+    return (g && g.checked) ? "google" : "hub";
+  }
+
+  function setEngine(engine) {
+    const google = engine === "google";
+    const hubEl = document.getElementById("engine-hub");
+    const googleEl = document.getElementById("engine-google");
+    if (hubEl) hubEl.checked = !google;
+    if (googleEl) googleEl.checked = google;
+    const hubWrap = document.getElementById("engine-hub-wrap");
+    const googleWrap = document.getElementById("engine-google-wrap");
+    if (hubWrap) hubWrap.classList.toggle("active", !google);
+    if (googleWrap) googleWrap.classList.toggle("active", google);
+    const hubFields = document.getElementById("hub-fields");
+    if (hubFields) hubFields.classList.toggle("dim", google);
+    const engBadge = document.getElementById("xlate-engine-badge");
+    if (engBadge) {
+      engBadge.hidden = false;
+      engBadge.textContent = google ? t("engineActiveGoogle") : t("engineActiveHub");
+      engBadge.className = "badge ok";
+    }
+  }
+
   function renderXlateState(cfg) {
     lastXlate = cfg || lastXlate;
     const el = document.getElementById("xlate-key-state");
     const key = (lastXlate && lastXlate.api_key) || {};
     keyBadge(el, key.configured ? key : null);
+    const gEl = document.getElementById("google-key-state");
+    const gkey = (lastXlate && lastXlate.google_api_key) || {};
+    keyBadge(gEl, gkey.configured ? gkey : null);
     const badge = document.getElementById("babel-badge");
     if (lastXlate && typeof lastXlate.babeldoc === "boolean") {
       badge.hidden = false;
       badge.textContent = lastXlate.babeldoc ? t("babelOk") : t("babelMissing");
       badge.className = "badge" + (lastXlate.babeldoc ? " ok" : "");
     }
+    setEngine((lastXlate && lastXlate.engine) || selectedEngine());
   }
 
   async function loadXlate() {
@@ -568,6 +636,9 @@
       if (cfg.config_path) document.getElementById("xlate-cfgpath").textContent = cfg.config_path;
       document.getElementById("api-key").value = "";
       document.getElementById("clear-key").checked = false;
+      document.getElementById("google-api-key").value = "";
+      document.getElementById("clear-google-key").checked = false;
+      setEngine(cfg.engine || "hub");
       renderXlateState(cfg);
     } catch (e) {}
   }
@@ -575,14 +646,18 @@
   async function saveXlate() {
     xlateStatus(t("xlateSaving"));
     const body = {
+      engine: selectedEngine(),
       base_url: document.getElementById("base-url").value.trim(),
       model: document.getElementById("model").value.trim(),
       qps: parseInt(document.getElementById("qps").value, 10) || 4,
       auto_translate: document.getElementById("auto-xlate").checked,
-      clear_api_key: document.getElementById("clear-key").checked
+      clear_api_key: document.getElementById("clear-key").checked,
+      clear_google_api_key: document.getElementById("clear-google-key").checked
     };
     const key = document.getElementById("api-key").value.trim();
     if (key) body.api_key = key;
+    const gkey = document.getElementById("google-api-key").value.trim();
+    if (gkey) body.google_api_key = gkey;
     try {
       const res = await fetch(translateConfigURL(), {
         method: "PUT",
@@ -601,11 +676,14 @@
       }
       document.getElementById("api-key").value = "";
       document.getElementById("clear-key").checked = false;
+      document.getElementById("google-api-key").value = "";
+      document.getElementById("clear-google-key").checked = false;
       if (data.base_url !== undefined) document.getElementById("base-url").value = data.base_url || "";
       if (data.model !== undefined) document.getElementById("model").value = data.model || "";
       if (data.qps !== undefined) document.getElementById("qps").value = data.qps || 4;
       if (data.auto_translate !== undefined) document.getElementById("auto-xlate").checked = !!data.auto_translate;
       if (data.config_path) document.getElementById("xlate-cfgpath").textContent = data.config_path;
+      if (data.engine) setEngine(data.engine);
       renderXlateState(data);
       xlateStatus(t("xlateSaved"), "ok");
     } catch (e) {
@@ -616,11 +694,14 @@
   async function testXlate() {
     xlateStatus(t("xlateTesting"));
     const body = {
+      engine: selectedEngine(),
       base_url: document.getElementById("base-url").value.trim(),
       model: document.getElementById("model").value.trim()
     };
     const key = document.getElementById("api-key").value.trim();
     if (key) body.api_key = key;
+    const gkey = document.getElementById("google-api-key").value.trim();
+    if (gkey) body.google_api_key = gkey;
     try {
       const res = await fetch(translateTestURL(), {
         method: "POST",
@@ -746,6 +827,12 @@
   });
   document.getElementById("test-xlate").addEventListener("click", function () {
     testXlate().catch(function (e) { xlateStatus(String(e), "err"); });
+  });
+  document.getElementById("engine-hub").addEventListener("change", function () {
+    if (this.checked) setEngine("hub");
+  });
+  document.getElementById("engine-google").addEventListener("change", function () {
+    if (this.checked) setEngine("google");
   });
 
   applyI18n();

@@ -434,9 +434,9 @@ func (s *translateService) runOne(id string) {
 	}
 
 	cfg := s.snapshot()
-	if !cfg.ready() {
+	if !cfg.pdfReady() {
 		j.Status = translateFailed
-		j.Error = "LLM settings incomplete (need api_key and model)"
+		j.Error = cfg.pdfNotReadyError()
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
 		s.putJob(j)
 		return
@@ -497,7 +497,7 @@ func (s *translateService) runOne(id string) {
 	if runner == nil {
 		runner = defaultTranslateRunner
 	}
-	log.Printf("papers translate id=%s status=start model=%s", id, cfg.Model)
+	log.Printf("papers translate id=%s status=start engine=%s model=%s", id, cfg.pdfEngine(), cfg.Model)
 	zhRel, dualRel, err := runner(ctx, translateRun{
 		ID:       id,
 		InputPDF: src,
@@ -629,6 +629,7 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 		"--model", job.Cfg.Model,
 		"--lang-in", "en",
 		"--lang-out", "zh-CN",
+		"--engine", job.Cfg.pdfEngine(),
 	}
 	if job.Cfg.BaseURL != "" {
 		args = append(args, "--base-url", job.Cfg.BaseURL)
@@ -645,6 +646,9 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 	if job.Cfg.APIKey != "" {
 		// Prefer env; never put the key on argv (process list).
 		env = append(env, "OPENAI_API_KEY="+job.Cfg.APIKey)
+	}
+	if job.Cfg.GoogleAPIKey != "" {
+		env = append(env, "GOOGLE_TRANSLATE_API_KEY="+job.Cfg.GoogleAPIKey)
 	}
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -751,28 +755,51 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return "", "", err
 	}
+	model := job.Cfg.Model
+	baseURL := job.Cfg.BaseURL
+	apiKey := job.Cfg.APIKey
+	shimCleanup := func() {}
+	if job.Cfg.pdfEngine() == translateEngineGoogle {
+		// Current BabelDOC only exposes --openai. Point it at a local
+		// OpenAI-compatible shim that calls Google Translate (Cloud API
+		// when a key is set, otherwise the public web endpoint).
+		shimURL, stop, shimErr := startGoogleOpenAIShim(ctx, nil, job.Cfg.GoogleAPIKey, "en", "zh-CN")
+		if shimErr != nil {
+			return "", "", fmt.Errorf("google translate shim: %s", sanitizeUserError(shimErr.Error()))
+		}
+		shimCleanup = stop
+		baseURL = shimURL
+		apiKey = "google-translate-shim"
+		if model == "" {
+			model = "google-translate"
+		}
+	}
+	defer shimCleanup()
 	args := []string{
 		"--openai",
-		"--openai-model", job.Cfg.Model,
+		"--openai-model", model,
 		"--files", job.InputPDF,
 		"--lang-in", "en",
 		"--lang-out", "zh-CN",
 		"--output", work,
 		"--watermark-output-mode=no_watermark",
 	}
-	if job.Cfg.BaseURL != "" {
-		args = append(args, "--openai-base-url", job.Cfg.BaseURL)
+	if job.Cfg.pdfEngine() == translateEngineGoogle {
+		args = append(args, "--no-auto-extract-glossary")
+	}
+	if baseURL != "" {
+		args = append(args, "--openai-base-url", baseURL)
 	}
 	if job.Cfg.QPS > 0 {
 		args = append(args, "--qps", fmt.Sprintf("%d", job.Cfg.QPS))
 	}
 	cleanup := func() {}
-	if job.Cfg.APIKey != "" {
+	if apiKey != "" {
 		// BabelDOC 0.6.4 does not read OPENAI_API_KEY from the environment;
 		// pass a temp TOML --config (preferred) or --openai-api-key.
-		cfgPath, cfgCleanup, cfgErr := writeBabelDOCAPIKeyConfig(job.Cfg.APIKey)
+		cfgPath, cfgCleanup, cfgErr := writeBabelDOCAPIKeyConfig(apiKey)
 		if cfgErr != nil {
-			args = append(args, "--openai-api-key", job.Cfg.APIKey)
+			args = append(args, "--openai-api-key", apiKey)
 		} else {
 			cleanup = cfgCleanup
 			args = append(args, "--config", cfgPath)
@@ -783,9 +810,9 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 	run := func(a []string) error {
 		cmd := exec.CommandContext(ctx, bin, a...)
 		env := os.Environ()
-		if job.Cfg.APIKey != "" {
+		if apiKey != "" {
 			// Keep env set as a belt-and-suspenders; CLI/config is required.
-			env = append(env, "OPENAI_API_KEY="+job.Cfg.APIKey)
+			env = append(env, "OPENAI_API_KEY="+apiKey)
 		}
 		cmd.Env = env
 		var stderr bytes.Buffer

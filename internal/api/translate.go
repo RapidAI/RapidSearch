@@ -42,43 +42,48 @@ const (
 
 type translateFileConfig struct {
 	Version       int    `json:"version"`
+	Engine        string `json:"engine,omitempty"`
 	BaseURL       string `json:"base_url"`
 	APIKey        string `json:"api_key,omitempty"`
 	Model         string `json:"model"`
 	QPS           int    `json:"qps,omitempty"`
 	AutoTranslate bool   `json:"auto_translate"`
+	GoogleAPIKey  string `json:"google_api_key,omitempty"`
 }
 
 type translateSnapshot struct {
+	Engine        string
 	BaseURL       string
 	APIKey        string
 	Model         string
 	QPS           int
 	AutoTranslate bool
-}
-
-func (s translateSnapshot) ready() bool {
-	return strings.TrimSpace(s.APIKey) != "" && strings.TrimSpace(s.Model) != ""
+	GoogleAPIKey  string
 }
 
 type TranslatePublicView struct {
 	OK            bool             `json:"ok"`
 	ConfigPath    string           `json:"config_path"`
+	Engine        string           `json:"engine"`
 	BaseURL       string           `json:"base_url"`
 	Model         string           `json:"model"`
 	QPS           int              `json:"qps"`
 	AutoTranslate bool             `json:"auto_translate"`
 	APIKey        search.MaskedKey `json:"api_key"`
+	GoogleAPIKey  search.MaskedKey `json:"google_api_key"`
 	BabelDOC      bool             `json:"babeldoc"`
 }
 
 type translateConfigPatch struct {
-	BaseURL       *string `json:"base_url"`
-	APIKey        *string `json:"api_key"`
-	Model         *string `json:"model"`
-	QPS           *int    `json:"qps"`
-	AutoTranslate *bool   `json:"auto_translate"`
-	ClearAPIKey   bool    `json:"clear_api_key"`
+	Engine            *string `json:"engine"`
+	BaseURL           *string `json:"base_url"`
+	APIKey            *string `json:"api_key"`
+	Model             *string `json:"model"`
+	QPS               *int    `json:"qps"`
+	AutoTranslate     *bool   `json:"auto_translate"`
+	ClearAPIKey       bool    `json:"clear_api_key"`
+	GoogleAPIKey      *string `json:"google_api_key"`
+	ClearGoogleAPIKey bool    `json:"clear_google_api_key"`
 }
 
 type translateJob struct {
@@ -264,11 +269,17 @@ func (s *translateService) loadConfig() error {
 	if fc.QPS <= 0 {
 		fc.QPS = translateDefaultQPS
 	}
+	if eng, err := normalizeTranslateEngine(fc.Engine); err == nil {
+		fc.Engine = eng
+	} else {
+		fc.Engine = translateEngineHub
+	}
 	s.mu.Lock()
 	s.cfg = fc
 	s.mu.Unlock()
-	log.Printf("papers translate-config loaded path=%s key=%s model=%s auto=%v",
-		translateConfigPath(s.root), boolWord(strings.TrimSpace(fc.APIKey) != ""), strings.TrimSpace(fc.Model), fc.AutoTranslate)
+	log.Printf("papers translate-config loaded path=%s engine=%s key=%s google_key=%s model=%s auto=%v",
+		translateConfigPath(s.root), fc.Engine, boolWord(strings.TrimSpace(fc.APIKey) != ""),
+		boolWord(strings.TrimSpace(fc.GoogleAPIKey) != ""), strings.TrimSpace(fc.Model), fc.AutoTranslate)
 	return nil
 }
 
@@ -308,12 +319,15 @@ func (s *translateService) snapshot() translateSnapshot {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	eng, _ := normalizeTranslateEngine(s.cfg.Engine)
 	return translateSnapshot{
+		Engine:        eng,
 		BaseURL:       strings.TrimSpace(s.cfg.BaseURL),
 		APIKey:        s.cfg.APIKey,
 		Model:         strings.TrimSpace(s.cfg.Model),
 		QPS:           s.cfg.QPS,
 		AutoTranslate: s.cfg.AutoTranslate,
+		GoogleAPIKey:  s.cfg.GoogleAPIKey,
 	}
 }
 
@@ -330,11 +344,13 @@ func (s *translateService) public() TranslatePublicView {
 	return TranslatePublicView{
 		OK:            true,
 		ConfigPath:    path,
+		Engine:        snap.pdfEngine(),
 		BaseURL:       snap.BaseURL,
 		Model:         snap.Model,
 		QPS:           qps,
 		AutoTranslate: snap.AutoTranslate,
 		APIKey:        maskAPIKey(snap.APIKey),
+		GoogleAPIKey:  maskAPIKey(snap.GoogleAPIKey),
 		BabelDOC:      babeldocOnPath(),
 	}
 }
@@ -345,6 +361,13 @@ func (s *translateService) applyPatch(p translateConfigPatch) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if p.Engine != nil {
+		eng, err := normalizeTranslateEngine(*p.Engine)
+		if err != nil {
+			return err
+		}
+		s.cfg.Engine = eng
+	}
 	if p.BaseURL != nil {
 		s.cfg.BaseURL = strings.TrimSpace(*p.BaseURL)
 	}
@@ -353,6 +376,13 @@ func (s *translateService) applyPatch(p translateConfigPatch) error {
 	} else if p.APIKey != nil {
 		if v := strings.TrimSpace(*p.APIKey); v != "" {
 			s.cfg.APIKey = v
+		}
+	}
+	if p.ClearGoogleAPIKey {
+		s.cfg.GoogleAPIKey = ""
+	} else if p.GoogleAPIKey != nil {
+		if v := strings.TrimSpace(*p.GoogleAPIKey); v != "" {
+			s.cfg.GoogleAPIKey = v
 		}
 	}
 	if p.Model != nil {
@@ -379,6 +409,11 @@ func (s *translateService) applyPatch(p translateConfigPatch) error {
 	if s.cfg.Version == 0 {
 		s.cfg.Version = 1
 	}
+	if eng, err := normalizeTranslateEngine(s.cfg.Engine); err == nil {
+		s.cfg.Engine = eng
+	} else {
+		s.cfg.Engine = translateEngineHub
+	}
 	if strings.TrimSpace(s.cfg.Model) == "" {
 		s.cfg.Model = "gpt-4o-mini"
 	}
@@ -388,8 +423,9 @@ func (s *translateService) applyPatch(p translateConfigPatch) error {
 	if err := s.persistConfigLocked(); err != nil {
 		return err
 	}
-	log.Printf("papers translate-config saved path=%s key=%s model=%s auto=%v",
-		translateConfigPath(s.root), boolWord(s.cfg.APIKey != ""), s.cfg.Model, s.cfg.AutoTranslate)
+	log.Printf("papers translate-config saved path=%s engine=%s key=%s google_key=%s model=%s auto=%v",
+		translateConfigPath(s.root), s.cfg.Engine, boolWord(s.cfg.APIKey != ""),
+		boolWord(s.cfg.GoogleAPIKey != ""), s.cfg.Model, s.cfg.AutoTranslate)
 	return nil
 }
 
@@ -694,9 +730,11 @@ func (s *Server) handlePapersTranslateTest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body struct {
-		BaseURL string `json:"base_url"`
-		APIKey  string `json:"api_key"`
-		Model   string `json:"model"`
+		Engine       string `json:"engine"`
+		BaseURL      string `json:"base_url"`
+		APIKey       string `json:"api_key"`
+		Model        string `json:"model"`
+		GoogleAPIKey string `json:"google_api_key"`
 	}
 	if len(strings.TrimSpace(string(raw))) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
@@ -705,6 +743,40 @@ func (s *Server) handlePapersTranslateTest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	snap := svc.snapshot()
+	engine := strings.TrimSpace(body.Engine)
+	if engine == "" {
+		engine = snap.pdfEngine()
+	}
+	eng, err := normalizeTranslateEngine(engine)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error(), search.CodeBadRequest, nil, "")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if eng == translateEngineGoogle {
+		gkey := strings.TrimSpace(body.GoogleAPIKey)
+		if gkey == "" {
+			gkey = snap.GoogleAPIKey
+		}
+		via, err := pingGoogleTranslate(ctx, svc.httpClient(), gkey, "en", "zh-CN")
+		if err != nil {
+			log.Printf("papers translate-test fail via=%s: %s", via, sanitizeUserError(err.Error()))
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"ok":     false,
+				"error":  sanitizeUserError(err.Error()),
+				"via":    via,
+				"engine": translateEngineGoogle,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"via":    via,
+			"engine": translateEngineGoogle,
+		})
+		return
+	}
 	base := strings.TrimSpace(body.BaseURL)
 	if base == "" {
 		base = snap.BaseURL
@@ -725,23 +797,23 @@ func (s *Server) handlePapersTranslateTest(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusBadRequest, "base_url is required", search.CodeBadRequest, nil, "")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
 	via, usedModel, err := svc.pingLLM(ctx, base, key, model)
 	if err != nil {
 		log.Printf("papers translate-test fail via=%s: %s", via, sanitizeUserError(err.Error()))
 		writeJSON(w, http.StatusBadGateway, map[string]any{
-			"ok":    false,
-			"error": sanitizeUserError(err.Error()),
-			"via":   via,
-			"model": usedModel,
+			"ok":     false,
+			"error":  sanitizeUserError(err.Error()),
+			"via":    via,
+			"model":  usedModel,
+			"engine": translateEngineHub,
 		})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":    true,
-		"via":   via,
-		"model": usedModel,
+		"ok":     true,
+		"via":    via,
+		"model":  usedModel,
+		"engine": translateEngineHub,
 	})
 }
 
