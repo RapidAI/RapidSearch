@@ -665,16 +665,19 @@ func (ps *papersStore) findPaper(id string) (paperEntry, bool) {
 	if ps == nil || id == "" {
 		return paperEntry{}, false
 	}
-	cat, err := ps.catalogBase()
-	if err != nil {
-		return paperEntry{}, false
-	}
-	for _, p := range cat.Papers {
-		pid := p.ID
-		if pid == "" {
-			pid = paperTranslateID(p)
+	if cat, err := ps.catalogBase(); err == nil {
+		for _, p := range cat.Papers {
+			pid := p.ID
+			if pid == "" {
+				pid = paperTranslateID(p)
+			}
+			if pid == id {
+				return p, true
+			}
 		}
-		if pid == id {
+	}
+	if ps.daily != nil {
+		if p, ok := ps.daily.findCached(id); ok {
 			return p, true
 		}
 	}

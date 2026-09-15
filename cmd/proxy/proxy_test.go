@@ -65,6 +65,8 @@ func TestProxyPapersSkipsBearerSoLoginCanRender(t *testing.T) {
 		"/papers/translate", "/papers/translate/config",
 		"/papers/review/2401.05459", "/papers/review/2401.05459/generate",
 		"/papers/review/2401.05459/rate",
+		"/papers/daily/dates", "/papers/daily/2026-09-14",
+		"/papers/daily/2026-09-14/trend",
 	} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)

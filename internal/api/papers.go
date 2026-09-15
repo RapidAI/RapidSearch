@@ -99,6 +99,7 @@ type papersStore struct {
 	absZH   *abstractZHService
 	reviews *reviewService
 	visits  *visitCounter
+	daily   *hfDailyService
 }
 
 func papersRoot() string {
@@ -120,6 +121,7 @@ func newPapersStore(root string) *papersStore {
 		reviews: newReviewService(root, xlate),
 		visits:  newVisitCounter(root),
 	}
+	ps.daily = newHFDailyService(ps)
 	ps.xlate.start()
 	ps.absZH.start()
 	return ps
@@ -146,18 +148,35 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 		Count:       base.Count,
 		Papers:      append([]paperEntry(nil), base.Papers...),
 	}
+	ps.decoratePapers(out.Papers)
+	return out, nil
+}
+
+func (ps *papersStore) decoratePapers(papers []paperEntry) {
+	if ps == nil || len(papers) == 0 {
+		return
+	}
 	var jobs map[string]translateJob
-	if ps != nil && ps.xlate != nil {
+	if ps.xlate != nil {
 		jobs = ps.xlate.jobsCopy()
 	}
-	overlayTranslations(out.Papers, ps.root, jobs)
-	if ps != nil && ps.absZH != nil {
-		ps.absZH.overlay(out.Papers)
+	overlayTranslations(papers, ps.root, jobs)
+	if ps.absZH != nil {
+		ps.absZH.overlay(papers)
 	}
-	if ps != nil && ps.reviews != nil {
-		ps.reviews.overlay(out.Papers)
+	if ps.reviews != nil {
+		ps.reviews.overlay(papers)
 	}
-	return out, nil
+}
+
+func (ps *papersStore) invalidateCatalog() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	ps.loaded = time.Time{}
+	ps.modTime = time.Time{}
+	ps.mu.Unlock()
 }
 
 func (ps *papersStore) catalogBase() (papersCatalog, error) {
