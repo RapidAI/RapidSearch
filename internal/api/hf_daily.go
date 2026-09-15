@@ -206,6 +206,10 @@ func (s *hfDailyService) fetchRaw(ctx context.Context, date string) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+		// HF returns 400/404 when a day has not been published yet.
+		return []byte("[]"), nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("huggingface daily_papers HTTP %d", resp.StatusCode)
 	}

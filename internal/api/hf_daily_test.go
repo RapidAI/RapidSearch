@@ -64,6 +64,44 @@ func TestParseHFDailyDate(t *testing.T) {
 	}
 }
 
+func TestHFDailyHTTP400IsEmptyList(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+	t.Setenv("HF_DAILY_API", ts.URL)
+	s := newHFDailyService(nil)
+	raw, err := s.fetchRaw(context.Background(), "2026-09-15")
+	if err != nil || string(raw) != "[]" {
+		t.Fatalf("raw=%q err=%v", raw, err)
+	}
+}
+
+func TestHFDailyUnpublishedDayIsEmpty(t *testing.T) {
+	h, _ := papersHandler(t)
+	srv := h.(*Server)
+	ps := srv.papers()
+	ps.daily.fetchFn = func(ctx context.Context, date string) ([]byte, error) {
+		return []byte("[]"), nil
+	}
+	ps.daily.downloadFn = func(ctx context.Context, p paperEntry) (string, error) {
+		return "", nil
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/daily/2026-09-15", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var day hfDailyDayResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &day); err != nil {
+		t.Fatal(err)
+	}
+	if !day.OK || day.Count != 0 || len(day.Papers) != 0 {
+		t.Fatalf("%+v", day)
+	}
+}
+
 func TestParseHFDailyPapers(t *testing.T) {
 	papers, err := parseHFDailyPapers([]byte(hfDailyFixture), "2026-09-14")
 	if err != nil {
