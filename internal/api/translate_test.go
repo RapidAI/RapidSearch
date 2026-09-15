@@ -505,7 +505,10 @@ func TestPapersAPIIncludesTranslateProgress(t *testing.T) {
 		t.Fatalf("handler type %T", h)
 	}
 	svc := srv.papers().translate()
-	svc.putJob(translateJob{ID: "2401.05459", Status: translateRunning})
+	svc.putJob(translateJob{
+		ID: "2401.05459", Status: translateRunning,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 	svc.putJob(translateJob{ID: "queued-other", Status: translateQueued})
 	svc.mu.Lock()
 	svc.running["2401.05459"] = true // prevent reconcileExternal from clearing synthetic running
