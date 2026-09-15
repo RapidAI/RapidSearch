@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -36,6 +37,7 @@ type Server struct {
 	runEngine   func(ctx context.Context, engine, query string, limit int) ([]search.Result, error)
 	cfg         *search.Store
 	auth        *proxyauth.Checker
+	papersMu    sync.Mutex
 	papersStore *papersStore
 }
 
