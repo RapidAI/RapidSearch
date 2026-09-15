@@ -10,10 +10,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
-const translateJobTimeout = 2 * time.Hour
+// Lane-specific hang limits live in translate_timeout.go
+// (PAPERS_TRANSLATE_FAST_TIMEOUT / PAPERS_TRANSLATE_SLOW_TIMEOUT).
 
 // enqueueResult carries per-id rejection reasons (e.g. already running).
 type enqueueResult struct {
@@ -97,6 +99,7 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 				j.Filename = p.Filename
 				j.PageCount = p.PageCount
 				j.Lane = paperTranslateLane(p.PageCount)
+				j.TimeoutCount = 0
 				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				if s.status.Jobs == nil {
 					s.status.Jobs = map[string]translateJob{}
@@ -134,6 +137,7 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 		j.Filename = p.Filename
 		j.PageCount = p.PageCount
 		j.Lane = paperTranslateLane(p.PageCount)
+		j.TimeoutCount = 0
 		j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if s.status.Jobs == nil {
 			s.status.Jobs = map[string]translateJob{}
@@ -187,6 +191,9 @@ func removeTranslatedOutputs(root, id string) {
 
 func (s *translateService) loop() {
 	for {
+		// Watchdog first so a hung BabelDOC/Google worker frees its slot
+		// before we adopt leftovers or start the next paper.
+		s.reapTimedOut()
 		s.reconcileExternal()
 		started := s.startAvailable()
 		wait := 3 * time.Second
@@ -511,7 +518,7 @@ func (s *translateService) runOne(id string) {
 		j.Status = translateFailed
 		j.Error = "source PDF not found"
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 	j.Filename = filepath.Base(src)
@@ -534,14 +541,14 @@ func (s *translateService) runOne(id string) {
 				j.Status = translateFailed
 				j.Error = sanitizeUserError(err.Error())
 				j.Finished = time.Now().UTC().Format(time.RFC3339)
-				s.putJob(j)
+				s.putJobIfStillRunning(j)
 				return
 			}
 			j.Status = translateDone
 			j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
 			j.DualRel = filepath.ToSlash(filepath.Join("pdfs", translateKindDual, filepath.Base(dual)))
 			j.Finished = time.Now().UTC().Format(time.RFC3339)
-			s.putJob(j)
+			s.putJobIfStillRunning(j)
 			return
 		}
 	}
@@ -551,7 +558,7 @@ func (s *translateService) runOne(id string) {
 		j.Status = translateFailed
 		j.Error = "LLM settings incomplete (need api_key and model)"
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 
@@ -559,13 +566,17 @@ func (s *translateService) runOne(id string) {
 	if jobProcessBusy(s.root, id) {
 		log.Printf("papers translate id=%s status=adopt existing process", id)
 		s.waitForProcess(id)
+		s.reapTimedOut()
+		if !s.stillRunning(id) {
+			return
+		}
 		if zh, e1 := translatedPDFAbs(s.root, translateKindZH, id); e1 == nil {
 			if dual, e2 := translatedPDFAbs(s.root, translateKindDual, id); e2 == nil {
 				if err := verifyInstalledTranslation(s.root, id, src); err != nil {
 					j.Status = translateFailed
 					j.Error = sanitizeUserError(err.Error())
 					j.Finished = time.Now().UTC().Format(time.RFC3339)
-					s.putJob(j)
+					s.putJobIfStillRunning(j)
 					return
 				}
 				j.Status = translateDone
@@ -573,7 +584,7 @@ func (s *translateService) runOne(id string) {
 				j.ZhRel = filepath.ToSlash(filepath.Join("pdfs", translateKindZH, filepath.Base(zh)))
 				j.DualRel = filepath.ToSlash(filepath.Join("pdfs", translateKindDual, filepath.Base(dual)))
 				j.Finished = time.Now().UTC().Format(time.RFC3339)
-				s.putJob(j)
+				s.putJobIfStillRunning(j)
 				return
 			}
 		}
@@ -586,7 +597,7 @@ func (s *translateService) runOne(id string) {
 				j.ZhRel = ""
 				j.DualRel = ""
 				j.Finished = time.Now().UTC().Format(time.RFC3339)
-				s.putJob(j)
+				s.putJobIfStillRunning(j)
 				return
 			}
 			j.Status = translateDone
@@ -594,17 +605,18 @@ func (s *translateService) runOne(id string) {
 			j.ZhRel = zhRel
 			j.DualRel = dualRel
 			j.Finished = time.Now().UTC().Format(time.RFC3339)
-			s.putJob(j)
+			s.putJobIfStillRunning(j)
 			return
 		}
 		j.Status = translateFailed
 		j.Error = "existing translate process exited without outputs"
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), translateJobTimeout)
+	limit := translateLaneTimeout(s.jobLane(id))
+	ctx, cancel := context.WithTimeout(context.Background(), limit+translateTimeoutGrace)
 	defer cancel()
 	runner := s.runner
 	if runner == nil {
@@ -618,18 +630,22 @@ func (s *translateService) runOne(id string) {
 		Cfg:      cfg,
 	})
 	if err != nil {
+		s.reapTimedOut()
+		if !s.stillRunning(id) {
+			return
+		}
 		log.Printf("papers translate id=%s status=fail err=%s", id, sanitizeUserError(err.Error()))
 		j.Status = translateFailed
 		j.Error = sanitizeUserError(err.Error())
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 	if zhRel == "" && dualRel == "" {
 		j.Status = translateFailed
 		j.Error = "babeldoc produced no output PDFs"
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 	if zhRel == "" || dualRel == "" {
@@ -638,7 +654,7 @@ func (s *translateService) runOne(id string) {
 		j.ZhRel = zhRel
 		j.DualRel = dualRel
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 	if err := verifyInstalledTranslation(s.root, id, src); err != nil {
@@ -648,7 +664,7 @@ func (s *translateService) runOne(id string) {
 		j.ZhRel = ""
 		j.DualRel = ""
 		j.Finished = time.Now().UTC().Format(time.RFC3339)
-		s.putJob(j)
+		s.putJobIfStillRunning(j)
 		return
 	}
 	log.Printf("papers translate id=%s status=done", id)
@@ -657,11 +673,17 @@ func (s *translateService) runOne(id string) {
 	j.ZhRel = zhRel
 	j.DualRel = dualRel
 	j.Finished = time.Now().UTC().Format(time.RFC3339)
-	s.putJob(j)
+	s.putJobIfStillRunning(j)
 }
 
 func (s *translateService) waitForProcess(id string) {
-	deadline := time.Now().Add(translateJobTimeout)
+	lane := s.jobLane(id)
+	deadline := time.Now().Add(translateLaneTimeout(lane))
+	if j, ok := s.job(id); ok {
+		if started, ok := parseJobStartedAt(j.StartedAt); ok {
+			deadline = started.Add(translateLaneTimeout(lane))
+		}
+	}
 	for time.Now().Before(deadline) {
 		if !jobProcessBusy(s.root, id) {
 			return
@@ -754,6 +776,7 @@ func runPythonWorker(ctx context.Context, py, script string, job translateRun) (
 		args = append(args, "--ignore-cache")
 	}
 	cmd := exec.CommandContext(ctx, py, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	env := os.Environ()
 	if job.Cfg.APIKey != "" {
 		// Prefer env; never put the key on argv (process list).
@@ -895,6 +918,7 @@ func runBabelDOC(ctx context.Context, job translateRun) (string, string, error) 
 
 	run := func(a []string) error {
 		cmd := exec.CommandContext(ctx, bin, a...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		env := os.Environ()
 		if job.Cfg.APIKey != "" {
 			// Keep env set as a belt-and-suspenders; CLI/config is required.

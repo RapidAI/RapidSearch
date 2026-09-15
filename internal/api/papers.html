@@ -599,6 +599,7 @@
       queued: "Queued",
       running: "Translating…",
       failed: "Failed",
+      skipped: "Skipped",
       reXlate: "Re-translate",
       xlateBusy: "Translation already in progress",
       xlateErrPrefix: "Error: ",
@@ -690,6 +691,7 @@
       queued: "排队中",
       running: "翻译中…",
       failed: "失败",
+      skipped: "已跳过",
       reXlate: "再次翻译",
       xlateBusy: "正在翻译中",
       xlateErrPrefix: "错误：",
@@ -1117,6 +1119,7 @@
     if (st === "queued") return t("queued");
     if (st === "running") return t("running");
     if (st === "failed") return t("failed");
+    if (st === "skipped") return t("skipped");
     return "";
   }
 
@@ -1240,7 +1243,7 @@
     let errHtml = "";
     if (tooMany) {
       errHtml = '<p class="xlate-skip">' + esc(t("xlateSkipPages")) + "</p>";
-    } else if (st === "failed" && p.translate_error) {
+    } else if ((st === "failed" || st === "skipped" || st === "queued") && p.translate_error) {
       errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
     }
     if (p.source_url) {
