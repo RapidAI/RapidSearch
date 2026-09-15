@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -313,6 +316,41 @@ func TestKillTranslateJobTreeUsesPidfile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(translateWorkDir(dir, "demo"), "worker.pid")); !os.IsNotExist(err) {
 		t.Fatalf("pidfile should be cleared: %v", err)
+	}
+}
+
+func TestPapersAPISurfacesTimeoutSkipError(t *testing.T) {
+	h, _ := papersHandler(t)
+	srv, ok := h.(*Server)
+	if !ok {
+		t.Fatalf("handler type %T", h)
+	}
+	svc := srv.papers().translate()
+	svc.putJob(translateJob{
+		ID: "2401.05459", Status: translateSkipped, TimeoutCount: 3,
+		Error: translateTimeoutSkipError(3), Lane: translateLaneFast, PageCount: 23,
+	})
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if len(cat.Papers) == 0 {
+		t.Fatal("no papers")
+	}
+	p := cat.Papers[0]
+	if p.TranslateStatus != translateSkipped {
+		t.Fatalf("status=%s", p.TranslateStatus)
+	}
+	if p.TranslateError != translateTimeoutSkipError(3) {
+		t.Fatalf("error=%q", p.TranslateError)
 	}
 }
 
