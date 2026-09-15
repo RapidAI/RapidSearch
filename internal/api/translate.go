@@ -38,6 +38,10 @@ const (
 	translateRunning = "running"
 	translateDone    = "done"
 	translateFailed  = "failed"
+	// translateSkipped is a permanent hang-timeout outcome. Auto-translate
+	// and translate-all will not pick the paper up again; a manual
+	// POST /papers/translate for that id resets timeout_count and requeues.
+	translateSkipped = "skipped"
 )
 
 type translateFileConfig struct {
@@ -82,17 +86,18 @@ type translateConfigPatch struct {
 }
 
 type translateJob struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Error     string `json:"error,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
-	Finished  string `json:"finished_at,omitempty"`
-	Filename  string `json:"filename,omitempty"`
-	ZhRel     string `json:"zh_pdf,omitempty"`
-	DualRel   string `json:"dual_pdf,omitempty"`
-	PageCount int    `json:"page_count,omitempty"`
-	Lane      string `json:"lane,omitempty"` // fast | slow
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+	Finished     string `json:"finished_at,omitempty"`
+	Filename     string `json:"filename,omitempty"`
+	ZhRel        string `json:"zh_pdf,omitempty"`
+	DualRel      string `json:"dual_pdf,omitempty"`
+	PageCount    int    `json:"page_count,omitempty"`
+	Lane         string `json:"lane,omitempty"` // fast | slow
+	TimeoutCount int    `json:"timeout_count,omitempty"`
 }
 
 type translateStatusFile struct {
@@ -175,6 +180,7 @@ func (s *translateService) recoverJobs() {
 		return
 	}
 	s.reconcileExternal()
+	s.reapTimedOut()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -447,6 +453,32 @@ func (s *translateService) putJob(j translateJob) {
 	}
 }
 
+// putJobIfStillRunning writes a terminal runOne result only when the watchdog
+// has not already requeued or skipped this id.
+func (s *translateService) putJobIfStillRunning(j translateJob) bool {
+	if s == nil || j.ID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.status.Jobs[j.ID]
+	if !ok || cur.Status != translateRunning {
+		return false
+	}
+	j.TimeoutCount = cur.TimeoutCount
+	if s.status.Jobs == nil {
+		s.status.Jobs = map[string]translateJob{}
+	}
+	j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	s.status.Jobs[j.ID] = j
+	s.status.UpdatedAt = j.UpdatedAt
+	s.status.Version = 1
+	if err := s.persistStatusLocked(); err != nil {
+		log.Printf("papers translate-status write: %v", err)
+	}
+	return true
+}
+
 func (s *translateService) persistStatusLocked() error {
 	b, err := json.MarshalIndent(s.status, "", "  ")
 	if err != nil {
@@ -518,10 +550,13 @@ func overlayOne(p paperEntry, root string, jobs map[string]translateJob) paperEn
 	}
 	if j, ok := jobs[id]; ok {
 		p.TranslateStatus = j.Status
-		if j.Status == translateFailed {
-			p.TranslateError = sanitizeUserError(j.Error)
-		} else {
+		switch j.Status {
+		case translateDone, translateRunning:
 			p.TranslateError = ""
+		default:
+			// Surface timeout / skip reasons on queued and skipped jobs so
+			// the yellow banner and card error stay visible to admins.
+			p.TranslateError = sanitizeUserError(j.Error)
 		}
 	}
 	// On-disk outputs mean done only when not actively queued/running (force re-translate).
@@ -960,6 +995,10 @@ func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 		}
 		switch p.TranslateStatus {
 		case translateQueued, translateRunning:
+			continue
+		case translateSkipped:
+			// Permanent hang skip — only a manual POST /papers/translate for
+			// this id (which resets timeout_count) may requeue it.
 			continue
 		case translateFailed:
 			if auto {

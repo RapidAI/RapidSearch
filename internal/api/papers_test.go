@@ -127,6 +127,9 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "慢速翻译队列") || !strings.Contains(body, "Slow translation queue") {
 		t.Fatal("papers page must label the 51–100 page slow lane")
 	}
+	if !strings.Contains(body, `skipped: "Skipped"`) || !strings.Contains(body, `skipped: "已跳过"`) {
+		t.Fatal("papers page must label permanently skipped timeout jobs")
+	}
 	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
 		t.Fatal("papers page must classify fast vs slow translate lanes")
 	}
