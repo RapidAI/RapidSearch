@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -202,7 +201,7 @@ func (s *hfDailyService) callTrend(ctx context.Context, snap translateSnapshot, 
 	if s != nil && s.generateFn != nil {
 		return s.generateFn(ctx, snap, date, papers)
 	}
-	return generateHFDailyTrendOpenAI(ctx, s.httpClient(), snap, date, papers)
+	return generateHFDailyTrendOpenAI(ctx, &http.Client{Timeout: hfDailyTrendHTTPTimeout}, snap, date, papers)
 }
 
 const hfDailyTrendSystemPrompt = `你是资深 AI 研究分析师，擅长从一天的论文列表中提炼技术趋势。
@@ -280,10 +279,6 @@ func generateHFDailyTrendOpenAI(ctx context.Context, client *http.Client, snap t
 	if client == nil {
 		client = &http.Client{Timeout: hfDailyTrendHTTPTimeout}
 	}
-	urls := []string{base + "/chat/completions"}
-	if !strings.HasSuffix(base, "/v1") {
-		urls = append(urls, base+"/v1/chat/completions")
-	}
 	payload, err := json.Marshal(map[string]any{
 		"model": model,
 		"messages": []map[string]string{
@@ -296,44 +291,20 @@ func generateHFDailyTrendOpenAI(ctx context.Context, client *http.Client, snap t
 	if err != nil {
 		return empty, err
 	}
-	var last error
-	for _, u := range urls {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
-		if err != nil {
-			last = err
-			continue
-		}
-		req.Header.Set("Authorization", "Bearer "+snap.APIKey)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := client.Do(req)
-		if err != nil {
-			last = err
-			continue
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		_ = resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			last = fmt.Errorf("chat HTTP %d", resp.StatusCode)
-			if resp.StatusCode == http.StatusNotFound {
-				continue
-			}
-			return empty, last
-		}
-		text, err := extractChatContent(body)
-		if err != nil {
-			return empty, err
-		}
-		trend, err := parseHFDailyTrend(text)
-		if err != nil {
-			return empty, err
-		}
-		trend.Model = model
-		return trend, nil
+	body, err := postHubChat(ctx, client, base, snap.APIKey, payload)
+	if err != nil {
+		return empty, err
 	}
-	if last == nil {
-		last = fmt.Errorf("chat trend failed")
+	text, err := extractChatContent(body)
+	if err != nil {
+		return empty, err
 	}
-	return empty, last
+	trend, err := parseHFDailyTrend(text)
+	if err != nil {
+		return empty, err
+	}
+	trend.Model = model
+	return trend, nil
 }
 
 func parseHFDailyTrend(raw string) (hfDailyTrend, error) {
@@ -424,12 +395,8 @@ func (s *Server) handleHFDailyTrend(w http.ResponseWriter, r *http.Request) {
 		}
 		rec, skipped, err := daily.generateTrend(ctx, parsed, papers, req.Force)
 		if err != nil {
-			if err == errReviewLLMNotReady {
-				writeErr(w, http.StatusServiceUnavailable, err.Error(), search.CodeEngine, nil, "")
-				return
-			}
 			log.Printf("papers hf-daily trend date=%s: %v", parsed, err)
-			writeErr(w, http.StatusBadGateway, "could not generate trend summary", search.CodeEngine, nil, "")
+			writePapersLLMErr(w, "could not generate trend summary", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, rec.public(skipped))
