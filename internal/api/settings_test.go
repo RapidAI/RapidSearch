@@ -207,14 +207,17 @@ func TestSettingsPageHTMLAuthenticated(t *testing.T) {
 	if !strings.Contains(html, `id="base-url"`) || !strings.Contains(html, `id="save-xlate"`) || !strings.Contains(html, `id="test-xlate"`) {
 		t.Fatal("settings page missing Translation LLM controls")
 	}
-	if strings.Contains(html, `id="api-key" type="password"`) {
+	if !strings.Contains(html, `id="engine-hub"`) || !strings.Contains(html, `id="engine-google"`) || !strings.Contains(html, `id="google-api-key"`) {
+		t.Fatal("settings page missing PDF translation engine controls")
+	}
+	if strings.Contains(html, `id="api-key" type="password"`) || strings.Contains(html, `id="google-api-key" type="password"`) {
 		t.Fatal("translate API key field must not be type=password")
 	}
 	if !strings.Contains(html, "/papers/translate/config") || !strings.Contains(html, "/papers/translate/test") {
 		t.Fatal("settings page should reuse papers translate config/test APIs")
 	}
-	if !strings.Contains(html, "翻译模型") || !strings.Contains(html, "llmHeading") {
-		t.Fatal("settings page missing Translation LLM i18n")
+	if !strings.Contains(html, "论文翻译") || !strings.Contains(html, "llmHeading") || !strings.Contains(html, "engineGoogle") {
+		t.Fatal("settings page missing Translation LLM / Google engine i18n")
 	}
 }
 

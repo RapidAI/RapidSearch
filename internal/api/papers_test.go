@@ -91,7 +91,7 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `id="llm-settings-link"`) || !strings.Contains(body, `href="/settings"`) {
 		t.Fatal("papers page should link Translation LLM settings to /settings")
 	}
-	if !strings.Contains(body, "Configure the translation LLM in") || !strings.Contains(body, "中配置翻译 LLM") {
+	if !strings.Contains(body, "Configure the PDF translation engine") || !strings.Contains(body, "中配置 PDF 翻译引擎") {
 		t.Fatal("papers page missing EN/ZH note pointing at Settings")
 	}
 	if !strings.Contains(body, "hasOwnProperty.call(table, k)") {
@@ -147,7 +147,6 @@ func TestPapersPageLightTheme(t *testing.T) {
 		t.Fatal("papers page must map stable tag keys to localized labels")
 	}
 }
-
 
 func TestPapersPageAnonymousOK(t *testing.T) {
 	h, _ := papersHandler(t)

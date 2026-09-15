@@ -48,12 +48,12 @@ Environment / 环境变量:
 
 HTML + JSON on the search process. Open `https://hub.maclaw.top/searchproxy/settings` in a browser and sign in — no `Authorization` header required after login.
 
-- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority, plus BabelDOC / OpenAI-compatible translation LLM). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
+- `GET /settings` — if signed in (Hub **global admin** cookie, or operator/admin Bearer / `?token=`): HTML form (Serper / Brave keys, enable + drag or ↑↓ priority, plus paper PDF translation engine and Hub / OpenAI-compatible LLM). If not signed in: **HTML login page** (HTTP 200), not JSON 401. Login and settings UI are **Chinese / English**: default from `navigator.language` or `Accept-Language` (`zh*` → Chinese, else English); on-page ZH/EN toggle stored in `localStorage` key `rs_settings_lang`.
 - `POST /settings/login` (also `POST /settings`) — Hub **global admin** username + password only (`POST {HUB}/api/admin/login` with `tenant` omitted or `"__global__"`). Parses `access_token` and rejects the login unless the returned `admin` is a **global** admin (not tenant-scoped). Then checks `GET {HUB}/api/admin/users` (2xx). Sets HttpOnly cookie `rs_settings` (`Path=/`, `SameSite=Lax`, `Secure` when HTTPS). No token paste field. Login never accepts or displays the operator `SEARCH_TOKEN` / `proxy.token`.
 - `POST /settings/logout` — clears the cookie.
 - `GET /settings/config` — masked JSON (`configured` yes/no, optional `last4`). Never returns raw keys. Unauthenticated → **JSON 401** (API stays machine-readable).
 - `PUT /settings/config` — update keys and/or priority. An empty key string **does not wipe** a stored key; send `"clear_serper": true` / `"clear_brave": true` to delete.
-- `GET` / `PUT /settings/translate` — BabelDOC LLM (`base_url`, masked `api_key`, `model`, `qps`, `auto_translate`). Separate from Serper/Brave; empty `api_key` does not wipe.
+- `GET` / `PUT /settings/translate` — paper translation settings (`engine` = `hub` | `google`, Hub `base_url` / masked `api_key` / `model`, optional masked `google_api_key`, `qps`, `auto_translate`). Separate from Serper/Brave; empty key fields do not wipe.
 - `POST /settings/translate/test` — models / chat ping. Never returns the raw key.
 
 Hub global admin tokens are validated by Hub admin middleware (`Authenticate`), **not** by `GET /api/llm/v1/models`. A models-only viewer token is not enough for `/settings`. Tenant-scoped admins are rejected at login. There is no captcha on Hub admin login.
@@ -73,8 +73,8 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `GET` / `POST /papers/daily/{YYYY-MM-DD}/trend` — public: persisted Chinese tech-trend 综述 via the same Hub LLM as paper reviews (`translate-config`). POST `{ "force": true }` regenerates. Stored at `$PAPERS_DIR/hf-daily/{date}.trend.json`.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
-- `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
-- `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: ping `/models` or a tiny `/chat/completions`. Never returns the raw key.
+- `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: PDF translation engine (`hub` or `google`) plus Hub OpenAI-compatible LLM (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`) and optional `google_api_key` (masked). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty key fields do not wipe; send `"clear_api_key": true` / `"clear_google_api_key": true` to delete. `engine=google` applies only to **new** BabelDOC / paper PDF jobs (no redeploy). Abstract ZH, paper review, and HF daily trend still use the Hub LLM snapshot.
+- `POST /settings/translate/test` (also `/papers/translate/test`) — **auth required**: Hub engine pings `/models` or a tiny `/chat/completions`; Google engine pings Cloud Translation API (if a key is saved) or the public Google Translate web endpoint. Never returns the raw key.
 - `POST /papers/translate` — **auth required**: enqueue one `{ "id": "…" }` or all pending `{ "all": true }`. Background worker runs up to `PAPERS_TRANSLATE_CONCURRENCY` BabelDOC jobs in parallel (default 3, clamp 1–8) for different paper ids; the same id cannot double-run. Authed catalog GETs also auto-enqueue when `auto_translate` is on (anonymous GETs do not). `GET /papers/translate` returns `running` (first id, backward compatible), `running_ids`, and `concurrency`.
 - `GET /papers/review/{id}` — public: structured Chinese 解读 (if generated) plus average stars. No raw rater list. Sets a stable anonymous `rs_papers_rater` cookie when the caller is not a Hub session.
 - `POST /papers/review/{id}/generate` — public if translate-config LLM is ready: generate 精读+评审 sections via the same Hub OpenAI-compatible LLM as BabelDOC. Idempotent when a review already exists unless `{ "force": true }`. Ratings are kept on regenerate.
@@ -86,7 +86,7 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 pdfs/*.pdf                 # originals
 pdfs/zh/{id}.zh.pdf        # Chinese-only (mono)
 pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
-translate-config.json      # LLM settings (secrets; not in git)
+translate-config.json      # PDF engine + Hub LLM + optional Google Cloud key (secrets; not in git)
 translate_status.json      # queue/job status
 reviews/{id}.json          # 解读 + ratings (runtime; not in git)
 hf-daily/{date}.json       # HF Daily Papers cache (runtime; not in git)

@@ -11,8 +11,12 @@ BabelDOC CLI (must be on PATH):
 
     uv tool install --python 3.12 BabelDOC
 
-This helper is spawned by RapidSearch. The API key is read from
-OPENAI_API_KEY (never printed). Stdout is a single JSON object.
+This helper is spawned by RapidSearch. Hub LLM keys are read from
+OPENAI_API_KEY (never printed). Google Cloud Translation keys are read
+from GOOGLE_TRANSLATE_API_KEY. Stdout is a single JSON object.
+
+PDF engine (``--engine hub|google``) is independent of abstract_zh /
+review / HF daily, which always use the Hub OpenAI-compatible snapshot.
 
 After install, a completeness check compares EN vs ZH page counts and
 per-page CJK / Latin density so near-blank body pages and still-English
@@ -35,6 +39,11 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from google_translate import GoogleOpenAIShim, google_preflight  # noqa: E402
 
 
 # Heuristics for near-empty / still-English translated pages
@@ -105,6 +114,7 @@ def build_quality_extra_args(
     custom_system_prompt: str | None = None,
     glossary_path: Path | None = None,
     min_text_length: int | None = None,
+    engine: str = "hub",
 ) -> list[str]:
     """Default BabelDOC quality flags for academic paper ZH translation.
 
@@ -112,6 +122,9 @@ def build_quality_extra_args(
     """
     extra: list[str] = []
     quality_on = not _env_truthy("PAPERS_BABELDOC_NO_QUALITY", False)
+    use_google = (engine or "hub").strip().lower() == "google"
+    if use_google:
+        extra.append("--no-auto-extract-glossary")
 
     if enhance_compatibility or _env_truthy("PAPERS_BABELDOC_ENHANCE_COMPAT"):
         extra.append("--enhance-compatibility")
@@ -136,13 +149,13 @@ def build_quality_extra_args(
         extra.append("--disable-same-text-fallback")
 
     prompt = custom_system_prompt
-    if prompt is None:
+    if prompt is None and not use_google:
         env_prompt = os.environ.get("PAPERS_BABELDOC_SYSTEM_PROMPT", "").strip()
         if env_prompt:
             prompt = env_prompt
         elif quality_on and not _env_truthy("PAPERS_BABELDOC_NO_SYSTEM_PROMPT"):
             prompt = DEFAULT_ACADEMIC_SYSTEM_PROMPT
-    if prompt:
+    if prompt and not use_google:
         extra.extend(["--custom-system-prompt", prompt])
 
     gloss = glossary_path
@@ -732,6 +745,12 @@ def main() -> int:
     p.add_argument("--out-root", type=Path, default=None, help="PAPERS_DIR root")
     p.add_argument("--base-url", default="", help="OpenAI-compatible base URL")
     p.add_argument("--model", default="gpt-4o-mini")
+    p.add_argument(
+        "--engine",
+        default="hub",
+        choices=("hub", "google", "openai", "llm"),
+        help="PDF translation backend: hub (OpenAI-compatible LLM) or google",
+    )
     p.add_argument("--qps", type=int, default=4)
     p.add_argument("--lang-in", default="en")
     p.add_argument("--lang-out", default="zh-CN")
@@ -779,6 +798,10 @@ def main() -> int:
         return 2
 
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    google_key = os.environ.get("GOOGLE_TRANSLATE_API_KEY", "").strip()
+    engine = (args.engine or "hub").strip().lower()
+    if engine in ("openai", "llm"):
+        engine = "hub"
     work = root / "translate-work" / pid
     extra = build_quality_extra_args(
         script_dir=Path(__file__).resolve().parent,
@@ -789,6 +812,7 @@ def main() -> int:
         custom_system_prompt=(getattr(args, "custom_system_prompt", "") or "").strip() or None,
         glossary_path=getattr(args, "glossary", None),
         min_text_length=getattr(args, "min_text_length", None),
+        engine=engine,
     )
 
     if translation_paused(root):
@@ -803,27 +827,51 @@ def main() -> int:
         )
         return 1
 
-    ok_pf, pf_msg = llm_preflight(
-        base_url=args.base_url.strip(),
-        model=args.model,
-        api_key=api_key,
-    )
-    if not ok_pf:
-        log(pf_msg)
-        emit({"ok": False, "error": pf_msg})
-        return 1
+    shim: GoogleOpenAIShim | None = None
+    run_base_url = args.base_url.strip()
+    run_model = args.model
+    run_api_key = api_key
+    if engine == "google":
+        ok_pf, pf_msg = google_preflight(
+            api_key=google_key,
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+        )
+        if not ok_pf:
+            log(pf_msg)
+            emit({"ok": False, "error": pf_msg})
+            return 1
+        log(f"google preflight ok via={pf_msg}")
+        shim = GoogleOpenAIShim(
+            api_key=google_key,
+            lang_in=args.lang_in,
+            lang_out=args.lang_out,
+        )
+        run_base_url = shim.start()
+        run_model = "google-translate"
+        run_api_key = "google-translate-shim"
+    else:
+        ok_pf, pf_msg = llm_preflight(
+            base_url=args.base_url.strip(),
+            model=args.model,
+            api_key=api_key,
+        )
+        if not ok_pf:
+            log(pf_msg)
+            emit({"ok": False, "error": pf_msg})
+            return 1
 
     try:
         def run_once(run_extra: list[str]) -> tuple[str, str, bool, str, dict]:
             run_babeldoc(
                 inp,
                 work,
-                model=args.model,
-                base_url=args.base_url.strip(),
+                model=run_model,
+                base_url=run_base_url,
                 qps=args.qps,
                 lang_in=args.lang_in,
                 lang_out=args.lang_out,
-                api_key=api_key,
+                api_key=run_api_key,
                 extra_args=run_extra or None,
             )
             mono, dual = collect_outputs(work)
@@ -896,6 +944,9 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 — surface to Go as JSON
         emit({"ok": False, "error": str(e)})
         return 1
+    finally:
+        if shim is not None:
+            shim.stop()
 
 
 if __name__ == "__main__":
