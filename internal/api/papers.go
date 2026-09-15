@@ -74,7 +74,8 @@ type papersCatalog struct {
 	// CanManage is true when the caller may enqueue translations / open admin UI.
 	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
 	CanManage bool `json:"can_manage"`
-	// Visits is cumulative GET /papers page views (not API polls).
+	// Visits is unique GET /papers HTML opens (one per visitor cookie
+	// per 12h window). Not API polls, HEAD, PDFs, or obvious bots.
 	Visits int64 `json:"visits"`
 }
 
@@ -131,6 +132,8 @@ func (s *Server) papers() *papersStore {
 	if s == nil {
 		return nil
 	}
+	s.papersMu.Lock()
+	defer s.papersMu.Unlock()
 	if s.papersStore == nil {
 		s.papersStore = newPapersStore(papersRoot())
 	}
@@ -316,9 +319,9 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		// Count HTML page views only (not HEAD, not /papers/api polls).
+		// Count HTML catalog opens only (not HEAD, not /papers/api polls).
 		if ps := s.papers(); ps != nil && ps.visits != nil {
-			ps.visits.Bump()
+			ps.visits.Hit(w, r)
 		}
 		// Catalog page is public; Settings link always shown. Translate actions
 		// are gated in the UI via /papers/api can_manage, and mutations still
@@ -355,6 +358,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	if ps := s.papers(); ps != nil && ps.visits != nil {
 		out.Visits = ps.visits.Total()
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	if q != "" || tag != "" {
 		filtered := filterPapers(cat.Papers, q, tag)
 		out.Papers = filtered
