@@ -1417,6 +1417,8 @@
     currentSection = section === "daily" ? "daily" : "catalog";
     if (date) dailyDate = date;
     setHash(currentSection, currentSection === "daily" ? dailyDate : "");
+    const q = document.getElementById("q");
+    if (q) q.value = "";
     applyManageUI();
     pageIndex = 1;
     if (currentSection === "daily") {

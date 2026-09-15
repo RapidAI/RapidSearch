@@ -468,6 +468,7 @@ func TestPapersPageHFDailyUI(t *testing.T) {
 		"hf-daily",
 		"openTrendPanel",
 		"selectDailyDate",
+		`if (q) q.value = ""`,
 		"renderPaperCard",
 		"/papers/review/",
 		"/papers/translate",
