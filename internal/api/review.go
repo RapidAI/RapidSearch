@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -579,10 +578,6 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 	if client == nil {
 		client = &http.Client{Timeout: reviewHTTPTimeout}
 	}
-	urls := []string{base + "/chat/completions"}
-	if !strings.HasSuffix(base, "/v1") {
-		urls = append(urls, base+"/v1/chat/completions")
-	}
 	payload, err := json.Marshal(map[string]any{
 		"model": model,
 		"messages": []map[string]string{
@@ -595,43 +590,19 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 	if err != nil {
 		return empty, "", err
 	}
-	var last error
-	for _, u := range urls {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
-		if err != nil {
-			last = err
-			continue
-		}
-		req.Header.Set("Authorization", "Bearer "+snap.APIKey)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := client.Do(req)
-		if err != nil {
-			last = err
-			continue
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		_ = resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			last = fmt.Errorf("chat HTTP %d", resp.StatusCode)
-			if resp.StatusCode == http.StatusNotFound {
-				continue
-			}
-			return empty, "", last
-		}
-		text, err := extractChatContent(body)
-		if err != nil {
-			return empty, "", err
-		}
-		analysis, err := parseReviewAnalysis(text)
-		if err != nil {
-			return empty, "", err
-		}
-		return analysis, model, nil
+	body, err := postHubChat(ctx, client, base, snap.APIKey, payload)
+	if err != nil {
+		return empty, "", err
 	}
-	if last == nil {
-		last = fmt.Errorf("chat review failed")
+	text, err := extractChatContent(body)
+	if err != nil {
+		return empty, "", err
 	}
-	return empty, "", last
+	analysis, err := parseReviewAnalysis(text)
+	if err != nil {
+		return empty, "", err
+	}
+	return analysis, model, nil
 }
 
 func parseReviewAnalysis(raw string) (paperReviewAnalysis, error) {
@@ -745,12 +716,8 @@ func (s *Server) handlePapersReviewGenerate(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	rec, skipped, err := ps.reviews.generate(ctx, paper, req.Force)
 	if err != nil {
-		if err == errReviewLLMNotReady {
-			writeErr(w, http.StatusServiceUnavailable, err.Error(), search.CodeEngine, nil, "")
-			return
-		}
 		log.Printf("papers review generate id=%s: %v", id, err)
-		writeErr(w, http.StatusBadGateway, "could not generate review", search.CodeEngine, nil, "")
+		writePapersLLMErr(w, "could not generate review", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rec.public(rater, skipped))
