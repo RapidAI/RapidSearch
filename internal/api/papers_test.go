@@ -140,6 +140,9 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
 		t.Fatal("papers page must include llm-iot key and English label")
 	}
+	if !strings.Contains(body, "hf-daily") || !strings.Contains(body, "HF 每日论文") {
+		t.Fatal("papers page must include hf-daily tag")
+	}
 	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
 		t.Fatal("papers page must map stable tag keys to localized labels")
 	}

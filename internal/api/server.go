@@ -100,6 +100,9 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/papers/review/{id}/generate", s.handlePapersReviewGenerate)
 	s.mux.HandleFunc("/papers/review/{id}/rate", s.handlePapersReviewRate)
 	s.mux.HandleFunc("/papers/review/{id}", s.handlePapersReview)
+	s.mux.HandleFunc("/papers/daily/dates", s.handleHFDailyDates)
+	s.mux.HandleFunc("/papers/daily/{date}/trend", s.handleHFDailyTrend)
+	s.mux.HandleFunc("/papers/daily/{date}", s.handleHFDailyDay)
 	return s
 }
 

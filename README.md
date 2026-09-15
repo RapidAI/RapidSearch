@@ -66,8 +66,11 @@ Listen locally at `http://127.0.0.1:18765/settings`. search-proxy forwards `/set
 
 Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `/workspace/agent-papers`). **Catalog + existing PDFs are public** (no login). Translate enqueue, translate config/test, and `/settings*` still require Hub global admin cookie, admin Bearer, or operator `SEARCH_TOKEN`. The `/papers` page always shows a **Settings** link (anonymous users get the Hub login page there). Translate / Re-translate buttons appear only when `/papers/api` returns `can_manage: true`. Defaults to a **light (white)** theme.
 
-- `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述).
+- `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述), `hf-daily` (Hugging Face 每日论文). Two sections: curated catalog and **Hugging Face Daily Papers** (date directory + that day's cards).
 - `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`zh_pdf`, `dual_pdf`, `translate_status`, `can_manage`, `has_review`, `avg_stars`, `rating_count`). `tag=` matches stable English keys. No API keys / translate-config / rater list.
+- `GET /papers/daily/dates` — public: pickable dates (last 14 days plus cached older days), each with `count` / `has_trend` when cached.
+- `GET /papers/daily/{YYYY-MM-DD}` — public: that day's HF Daily Papers. Fetches/caches `https://huggingface.co/api/daily_papers?date=…` under `$PAPERS_DIR/hf-daily/`, merges items into the same `manifest.json` + `pdfs/` pipeline (tag `hf-daily`) so translate / review / PDF routes are unchanged.
+- `GET` / `POST /papers/daily/{YYYY-MM-DD}/trend` — public: persisted Chinese tech-trend 综述 via the same Hub LLM as paper reviews (`translate-config`). POST `{ "force": true }` regenerates. Stored at `$PAPERS_DIR/hf-daily/{date}.trend.json`.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
@@ -86,11 +89,13 @@ pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
 translate-config.json      # LLM settings (secrets; not in git)
 translate_status.json      # queue/job status
 reviews/{id}.json          # 解读 + ratings (runtime; not in git)
+hf-daily/{date}.json       # HF Daily Papers cache (runtime; not in git)
+hf-daily/{date}.trend.json # daily tech-trend 综述 (runtime; not in git)
 ```
 
 Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
 
-本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。每张卡片在 arXiv 后提供「生成解读 / 查看解读」：用同一套翻译 LLM 生成中文精读+评审，并支持匿名 cookie 评分（展示均分）。
+本地打开 `http://127.0.0.1:18765/papers`（无需登录即可浏览/下载已有 PDF；点「设置」会进入 Hub 登录页）。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。未登录不显示「翻译」按钮；翻译在后台排队，不阻塞页面。每张卡片在 arXiv 后提供「生成解读 / 查看解读」：用同一套翻译 LLM 生成中文精读+评审，并支持匿名 cookie 评分（展示均分）。「Hugging Face 每日论文」栏目按日期浏览当日论文；「查看趋势综述」用同一套 LLM 生成并落盘当日技术趋势综述。日更论文入库后，翻译 / 打开 PDF / 下载 / 来源 / 生成解读 / 评分与精选目录完全相同。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.
