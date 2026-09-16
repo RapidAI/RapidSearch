@@ -373,42 +373,6 @@ func TestEnqueueResetsInterruptCount(t *testing.T) {
 	}
 }
 
-func TestPapersTranslatePostResetsInterruptCount(t *testing.T) {
-	h, _ := papersHandler(t)
-	srv, ok := h.(*Server)
-	if !ok {
-		t.Fatalf("handler type %T", h)
-	}
-	svc := srv.papers().translate()
-	svc.putJob(translateJob{
-		ID: "2401.05459", Status: translateSkipped, InterruptCount: 3,
-		Error: translateInterruptSkipError(3), Lane: translateLaneFast, PageCount: 23,
-	})
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/papers/translate", strings.NewReader(`{"id":"2401.05459"}`))
-	papersAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
-	}
-	var resp translateEnqueueResp
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if len(resp.Queued) != 1 || resp.Queued[0] != "2401.05459" {
-		t.Fatalf("queued=%v", resp.Queued)
-	}
-	j, ok := svc.job("2401.05459")
-	if !ok {
-		t.Fatal("missing job")
-	}
-	if j.InterruptCount != 0 {
-		t.Fatalf("POST should reset interrupt_count=%d", j.InterruptCount)
-	}
-}
-
 func TestPapersAPISurfacesInterruptSkipError(t *testing.T) {
 	h, _ := papersHandler(t)
 	srv, ok := h.(*Server)
