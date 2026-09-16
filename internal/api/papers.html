@@ -422,6 +422,31 @@
     .review-status { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
     .review-status.err { color: var(--bad); }
     .review-status.busy { font-style: italic; }
+    .review-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      flex-wrap: wrap;
+    }
+    .review-toolbar button { font-size: 13px; }
+    .review-refs-status { font-size: 13px; color: var(--muted); margin: 0; }
+    .review-refs-status.ok { color: var(--ok); }
+    .review-refs-status.err { color: var(--bad); }
+    .review-refs-status.busy { font-style: italic; }
+    a.review-ref {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
+    .review-refs-list {
+      margin: 0;
+      padding-left: 1.2em;
+      line-height: 1.55;
+    }
+    .review-refs-list li { margin: 0 0 6px; }
+    .review-ref-missing { color: var(--muted); font-size: 12px; }
   </style>
   <script>
   (function () {
@@ -517,6 +542,10 @@
         <button type="button" class="modal-close" id="review-close" data-review-close="1" data-i18n-aria="reviewClose" aria-label="Close">×</button>
       </div>
       <p id="review-status" class="review-status" hidden></p>
+      <div class="review-toolbar" id="review-toolbar" hidden>
+        <button type="button" id="review-update-refs" data-i18n="reviewUpdateRefs">Update references</button>
+        <p id="review-refs-status" class="review-refs-status" hidden></p>
+      </div>
       <div id="review-body" hidden>
         <section class="review-section">
           <h3 data-i18n="reviewSec1">方法原理与创新</h3>
@@ -533,6 +562,10 @@
         <section class="review-section">
           <h3 data-i18n="reviewSec4">论文质量总评</h3>
           <p id="rev-quality"></p>
+        </section>
+        <section class="review-section" id="review-refs-section" hidden>
+          <h3 data-i18n="reviewRefs">Related papers</h3>
+          <ul id="review-refs-list" class="review-refs-list"></ul>
         </section>
       </div>
       <div class="review-rate" id="review-rate" hidden>
@@ -661,7 +694,14 @@
       reviewRateLocked: "Rating unlocks after the review is generated.",
       reviewNotReady: "Review is not ready yet.",
       reviewNeedLLM: "Configure the translation LLM in Settings first.",
-      reviewLoadFail: "Failed to load review."
+      reviewLoadFail: "Failed to load review.",
+      reviewUpdateRefs: "Update references",
+      reviewRefs: "Related papers",
+      reviewRefsUpdating: "Updating references…",
+      reviewRefsUpdated: "Updated {n} reference(s).",
+      reviewRefsFail: "Could not update references.",
+      reviewRefNoReview: "No review yet",
+      reviewRefOpen: "Open review"
     },
     zh: {
       langLabel: "语言",
@@ -755,7 +795,14 @@
       reviewRateLocked: "解读生成完成后即可评分。",
       reviewNotReady: "解读尚未生成完成。",
       reviewNeedLLM: "请先在设置中配置翻译 LLM。",
-      reviewLoadFail: "加载解读失败。"
+      reviewLoadFail: "加载解读失败。",
+      reviewUpdateRefs: "更新引用",
+      reviewRefs: "相关论文",
+      reviewRefsUpdating: "正在更新引用…",
+      reviewRefsUpdated: "已更新 {n} 条引用。",
+      reviewRefsFail: "无法更新引用。",
+      reviewRefNoReview: "尚无解读",
+      reviewRefOpen: "查看解读"
     }
   };
 
@@ -914,6 +961,8 @@
   let searchTimer = 0;
   const generating = {};
   let openReview = null;
+  let hashReviewOpened = false;
+  let updatingRefs = false;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -1464,6 +1513,13 @@
         status.className = "";
       }
       renderAll(false);
+      if (!hashReviewOpened) {
+        const hid = parseReviewHash();
+        if (hid) {
+          hashReviewOpened = true;
+          openReviewPanel(hid);
+        }
+      }
       return true;
     } catch (e) {
       if (!silent) {
@@ -1630,14 +1686,129 @@
     el.textContent = t("reviewAvg").replace("{avg}", String(avg)).replace("{n}", String(n));
   }
 
+  function reviewHash(id) {
+    return "#review=" + encodeURIComponent(id);
+  }
+  function parseReviewHash() {
+    const h = String(location.hash || "");
+    const m = h.match(/^#review=([^&]+)/);
+    if (!m) return "";
+    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+  }
+  function setReviewHash(id) {
+    const base = location.pathname + location.search;
+    const want = id ? base + reviewHash(id) : base;
+    const cur = location.pathname + location.search + (location.hash || "");
+    if (cur === want) return;
+    try { history.replaceState(null, "", want); } catch (e) {
+      if (id) location.hash = reviewHash(id).slice(1);
+    }
+  }
+  function bindReviewRefLinks(root) {
+    (root || document).querySelectorAll("[data-review-id]").forEach(function (el) {
+      el.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        const rid = el.getAttribute("data-review-id") || "";
+        if (rid) openReviewPanel(rid);
+      });
+    });
+  }
+  function linkReviewText(text, refs) {
+    const raw = String(text || "");
+    if (!raw) return "";
+    const needles = [];
+    (refs || []).forEach(function (ref) {
+      const id = ref.paper_id || "";
+      if (!id) return;
+      if (ref.title) needles.push({ n: ref.title, id: id });
+      if (ref.arxiv_id) {
+        needles.push({ n: "arXiv:" + ref.arxiv_id, id: id });
+        needles.push({ n: ref.arxiv_id, id: id });
+      }
+      if (id && id !== ref.arxiv_id) needles.push({ n: id, id: id });
+    });
+    needles.sort(function (a, b) { return b.n.length - a.n.length; });
+    const hits = [];
+    const lower = raw.toLowerCase();
+    needles.forEach(function (nd) {
+      const needle = String(nd.n || "");
+      if (needle.length < 6) return;
+      const nlow = needle.toLowerCase();
+      let from = 0;
+      while (from < lower.length) {
+        const i = lower.indexOf(nlow, from);
+        if (i < 0) break;
+        const end = i + needle.length;
+        const overlap = hits.some(function (h) { return i < h.end && end > h.start; });
+        if (!overlap) hits.push({ start: i, end: end, id: nd.id });
+        from = i + Math.max(1, needle.length);
+      }
+    });
+    hits.sort(function (a, b) { return a.start - b.start; });
+    let html = "";
+    let pos = 0;
+    hits.forEach(function (h) {
+      html += esc(raw.slice(pos, h.start));
+      html += '<a class="review-ref" href="' + esc(reviewHash(h.id)) + '" data-review-id="' + esc(h.id) + '">' +
+        esc(raw.slice(h.start, h.end)) + "</a>";
+      pos = h.end;
+    });
+    html += esc(raw.slice(pos));
+    return html;
+  }
+  function setRefsStatus(msg, kind) {
+    const el = document.getElementById("review-refs-status");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-refs-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-refs-status" + (kind ? " " + kind : "");
+  }
+  function renderReviewRefs(refs) {
+    const sec = document.getElementById("review-refs-section");
+    const list = document.getElementById("review-refs-list");
+    refs = refs || [];
+    if (!sec || !list) return;
+    if (!refs.length) {
+      sec.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    sec.hidden = false;
+    list.innerHTML = refs.map(function (ref) {
+      const id = ref.paper_id || "";
+      const label = ref.title || ref.arxiv_id || id;
+      const extra = ref.has_review ? "" : ' <span class="review-ref-missing">' + esc(t("reviewRefNoReview")) + "</span>";
+      return '<li><a class="review-ref" href="' + esc(reviewHash(id)) + '" data-review-id="' + esc(id) + '">' +
+        esc(label) + "</a>" + extra + "</li>";
+    }).join("");
+    bindReviewRefLinks(list);
+  }
   function fillReviewModal(data) {
     document.getElementById("review-title").textContent = (data && data.title) || (openReview && openReview.title) || "";
-    document.getElementById("rev-method-principles").textContent = (data && data.analysis && data.analysis.method_principles) || "";
-    document.getElementById("rev-method-essence").textContent = (data && data.analysis && data.analysis.method_essence) || "";
-    document.getElementById("rev-experiment").textContent = (data && data.analysis && data.analysis.experiment) || "";
-    document.getElementById("rev-quality").textContent = (data && data.analysis && data.analysis.quality) || "";
+    const refs = (data && data.refs) || [];
+    const fields = [
+      ["rev-method-principles", data && data.analysis && data.analysis.method_principles],
+      ["rev-method-essence", data && data.analysis && data.analysis.method_essence],
+      ["rev-experiment", data && data.analysis && data.analysis.experiment],
+      ["rev-quality", data && data.analysis && data.analysis.quality]
+    ];
+    fields.forEach(function (pair) {
+      const el = document.getElementById(pair[0]);
+      if (!el) return;
+      el.innerHTML = linkReviewText(pair[1] || "", refs);
+      bindReviewRefLinks(el);
+    });
+    renderReviewRefs(refs);
     const has = !!(data && data.has_review);
     document.getElementById("review-body").hidden = !has;
+    const bar = document.getElementById("review-toolbar");
+    if (bar) bar.hidden = !has;
     if (has) {
       setReviewRatingEnabled(true, data);
     } else {
@@ -1651,6 +1822,10 @@
     openReview = null;
     hideReviewRating();
     setReviewStatus("", "");
+    setRefsStatus("", "");
+    const bar = document.getElementById("review-toolbar");
+    if (bar) bar.hidden = true;
+    setReviewHash("");
   }
 
   function showReviewModal(title) {
@@ -1664,8 +1839,12 @@
     if (!id || generating[id]) return;
     const paper = findCatalogPaper(id) || { id: id, title: id, has_review: false };
     openReview = { id: id, title: paper.title || id, ready: false };
+    setReviewHash(id);
     showReviewModal(openReview.title);
     document.getElementById("review-body").hidden = true;
+    const bar = document.getElementById("review-toolbar");
+    if (bar) bar.hidden = true;
+    setRefsStatus("", "");
     hideReviewRating();
     if (paper.has_review) {
       setReviewStatus("", "");
@@ -1714,6 +1893,37 @@
     } finally {
       delete generating[id];
       renderList();
+    }
+  }
+
+  async function updateOpenReviewRefs() {
+    if (!openReview || !openReview.id || updatingRefs) return;
+    updatingRefs = true;
+    const btn = document.getElementById("review-update-refs");
+    if (btn) btn.disabled = true;
+    setRefsStatus(t("reviewRefsUpdating"), "busy");
+    try {
+      const res = await fetch(reviewURL(openReview.id, "/refs"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: "{}"
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        const err = data && data.error ? String(data.error) : "";
+        if (err === "review is not ready") setRefsStatus(t("reviewNotReady"), "err");
+        else setRefsStatus(err || t("reviewRefsFail"), "err");
+        return;
+      }
+      fillReviewModal(data);
+      const n = (data.refs || []).length;
+      setRefsStatus(t("reviewRefsUpdated").replace("{n}", String(n)), "ok");
+    } catch (e) {
+      setRefsStatus(String(e), "err");
+    } finally {
+      updatingRefs = false;
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -1886,6 +2096,15 @@
     if (ev.key === "Escape" && !document.getElementById("review-modal").hidden) {
       closeReviewModal();
     }
+  });
+  document.getElementById("review-update-refs").addEventListener("click", updateOpenReviewRefs);
+  window.addEventListener("hashchange", function () {
+    const hid = parseReviewHash();
+    if (!hid) {
+      if (openReview) closeReviewModal();
+      return;
+    }
+    if (!openReview || openReview.id !== hid) openReviewPanel(hid);
   });
   applyI18n();
   applyManageUI();
