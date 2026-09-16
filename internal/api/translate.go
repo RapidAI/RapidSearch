@@ -38,9 +38,10 @@ const (
 	translateRunning = "running"
 	translateDone    = "done"
 	translateFailed  = "failed"
-	// translateSkipped is a permanent hang-timeout outcome. Auto-translate
-	// and translate-all will not pick the paper up again; a manual
-	// POST /papers/translate for that id resets timeout_count and requeues.
+	// translateSkipped is a permanent hang-timeout or interrupt-recovery
+	// outcome. Auto-translate and translate-all will not pick the paper up
+	// again; a manual POST /papers/translate for that id resets
+	// timeout_count and interrupt_count and requeues.
 	translateSkipped = "skipped"
 )
 
@@ -86,18 +87,19 @@ type translateConfigPatch struct {
 }
 
 type translateJob struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
-	UpdatedAt    string `json:"updated_at,omitempty"`
-	StartedAt    string `json:"started_at,omitempty"`
-	Finished     string `json:"finished_at,omitempty"`
-	Filename     string `json:"filename,omitempty"`
-	ZhRel        string `json:"zh_pdf,omitempty"`
-	DualRel      string `json:"dual_pdf,omitempty"`
-	PageCount    int    `json:"page_count,omitempty"`
-	Lane         string `json:"lane,omitempty"` // fast | slow
-	TimeoutCount int    `json:"timeout_count,omitempty"`
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	Error          string `json:"error,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+	StartedAt      string `json:"started_at,omitempty"`
+	Finished       string `json:"finished_at,omitempty"`
+	Filename       string `json:"filename,omitempty"`
+	ZhRel          string `json:"zh_pdf,omitempty"`
+	DualRel        string `json:"dual_pdf,omitempty"`
+	PageCount      int    `json:"page_count,omitempty"`
+	Lane           string `json:"lane,omitempty"` // fast | slow
+	TimeoutCount   int    `json:"timeout_count,omitempty"`
+	InterruptCount int    `json:"interrupt_count,omitempty"`
 }
 
 type translateStatusFile struct {
@@ -171,7 +173,8 @@ func (s *translateService) start() {
 	go s.loop()
 }
 
-// recoverJobs rehydrates queued ids into the in-memory queue after a reload.
+// recoverJobs rehydrates queued ids into the in-memory queue after a reload
+// and requeues stale interrupt failures (see recoverInterruptedJobs).
 // Orphan BabelDOC processes occupy concurrency slots via occupiedSlots()
 // and are adopted/skipped by reconcileExternal; we do not spawn a second
 // worker for the same paper id.
@@ -181,6 +184,10 @@ func (s *translateService) recoverJobs() {
 	}
 	s.reconcileExternal()
 	s.reapTimedOut()
+	// Recover stale interrupt failures from the previous process. Jobs that
+	// reconcileExternal just marked failed in this tick stay failed until
+	// the debounce window elapses (loop watchdog picks them up).
+	s.recoverInterruptedJobs()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -466,6 +473,7 @@ func (s *translateService) putJobIfStillRunning(j translateJob) bool {
 		return false
 	}
 	j.TimeoutCount = cur.TimeoutCount
+	j.InterruptCount = cur.InterruptCount
 	if s.status.Jobs == nil {
 		s.status.Jobs = map[string]translateJob{}
 	}
@@ -997,8 +1005,9 @@ func pendingTranslateIDs(papers []paperEntry, auto bool) []string {
 		case translateQueued, translateRunning:
 			continue
 		case translateSkipped:
-			// Permanent hang skip — only a manual POST /papers/translate for
-			// this id (which resets timeout_count) may requeue it.
+			// Permanent hang / interrupt skip — only a manual
+			// POST /papers/translate for this id (which resets timeout_count
+			// and interrupt_count) may requeue it.
 			continue
 		case translateFailed:
 			if auto {
