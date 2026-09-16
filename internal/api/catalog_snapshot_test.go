@@ -303,6 +303,82 @@ func utf8RuneCount(s string) int {
 	return n
 }
 
+func TestLeanCatalogSizeReduction(t *testing.T) {
+	// Approximate the public 码卡龙 catalog: hundreds of papers whose English
+	// abstracts dominate a ~1MB JSON body.
+	const n = 80
+	fullPapers := make([]paperEntry, n)
+	for i := 0; i < n; i++ {
+		en := uniqueAbstract(i, 1200)
+		zh := uniqueAbstractZH(i, 400)
+		fullPapers[i] = paperEntry{
+			Title:      "A long survey of personal LLM agents and tool use",
+			Authors:    []string{"Ada Lovelace", "Alan Turing"},
+			Abstract:   en,
+			AbstractZH: zh,
+			Year:       2025,
+			ArxivID:    "2501.00000",
+			TopicTags:  []string{"survey", "self-evolution"},
+			Brief:      en[:280],
+		}
+	}
+	full := papersCatalog{GeneratedAt: "2026-01-01T00:00:00Z", Count: n, Papers: fullPapers}
+	fullRaw, err := json.Marshal(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lean := leanCatalogForSnapshot(nil, full)
+	leanRaw, gz, _, err := encodeCatalogSnapshot(lean)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leanRaw) >= len(fullRaw) {
+		t.Fatalf("lean %d should be smaller than full %d", len(leanRaw), len(fullRaw))
+	}
+	if len(gz) == 0 || len(gz) >= len(leanRaw) {
+		t.Fatalf("gzip %d should be smaller than lean %d", len(gz), len(leanRaw))
+	}
+	t.Logf("full=%d lean=%d gzip=%d (%.0f%% of full on the wire)",
+		len(fullRaw), len(leanRaw), len(gz), 100*float64(len(gz))/float64(len(fullRaw)))
+}
+
+func uniqueAbstract(i, target int) string {
+	var b strings.Builder
+	seed := uint32(0x9e3779b9 ^ uint32(i)*0x85ebca6b)
+	for b.Len() < target {
+		seed = seed*1664525 + 1013904223
+		b.WriteString(loremWord(seed))
+		b.WriteByte(' ')
+	}
+	s := b.String()
+	if len(s) > target {
+		s = s[:target]
+	}
+	return s
+}
+
+func uniqueAbstractZH(i, runes int) string {
+	base := []rune("智能体在开放环境中协作使用工具与记忆并评估安全边界对齐策略以及检索增强生成效果。")
+	out := make([]rune, 0, runes)
+	seed := uint32(0x27d4eb2d ^ uint32(i)*0xc2b2ae35)
+	for len(out) < runes {
+		seed = seed*1664525 + 1013904223
+		out = append(out, base[int(seed)%len(base)])
+	}
+	return string(out)
+}
+
+func loremWord(seed uint32) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz"
+	n := int(seed%7) + 3
+	buf := make([]byte, n)
+	for i := 0; i < n; i++ {
+		seed = seed*1664525 + 1013904223
+		buf[i] = alphabet[int(seed)%len(alphabet)]
+	}
+	return string(buf)
+}
+
 func TestCatalogSnapshotGzipAnd304(t *testing.T) {
 	h, dir := papersHandler(t)
 	// Inflate the fixture so gzip has something to do.
