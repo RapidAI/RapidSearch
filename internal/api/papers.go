@@ -124,6 +124,8 @@ type papersStore struct {
 
 	snapMu      sync.RWMutex
 	snapCat     papersCatalog
+	snapRaw     []byte
+	snapGZ      []byte
 	snapETag    string
 	snapReady   bool
 	snapKick    chan struct{}

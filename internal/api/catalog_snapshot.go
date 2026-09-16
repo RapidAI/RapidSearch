@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -17,9 +19,17 @@ import (
 
 const (
 	catalogSnapshotFileName     = "catalog-snapshot.json"
+	catalogSnapshotGZFileName   = "catalog-snapshot.json.gz"
 	catalogSnapshotIntervalDef  = 60 * time.Second
 	envCatalogSnapshotInterval  = "PAPERS_CATALOG_SNAPSHOT_INTERVAL"
-	catalogSnapshotCacheControl = "private, max-age=15"
+	// Public + SWR so browsers/CDN can reuse the static snapshot. Live
+	// can_manage / visits / translate progress stay on /papers/api/progress.
+	catalogSnapshotCacheControl = "public, max-age=60, stale-while-revalidate=300"
+	// Card UI shows 280 EN / 140 ZH runes; keep a little extra for search/hover.
+	catalogSnapshotAbstractRunes   = 400
+	catalogSnapshotAbstractZHRunes = 220
+	// Warn if the lean JSON would stress the 2 MiB tunnel buffered limit.
+	catalogSnapshotWarnBytes = 2 << 20
 )
 
 // papersProgress is the public live payload for GET /papers/api/progress.
@@ -48,6 +58,13 @@ func catalogSnapshotPath(root string) string {
 		root = papersRoot()
 	}
 	return filepath.Join(root, catalogSnapshotFileName)
+}
+
+func catalogSnapshotGZPath(root string) string {
+	if root == "" {
+		root = papersRoot()
+	}
+	return filepath.Join(root, catalogSnapshotGZFileName)
 }
 
 // catalogSnapshotInterval is how often the static catalog file is rewritten.
@@ -155,25 +172,30 @@ func (ps *papersStore) refreshCatalogSnapshot() {
 		log.Printf("papers catalog snapshot: %v", err)
 		return
 	}
-	out := snapshotFromCatalog(ps, cat)
-	raw, err := json.Marshal(out)
+	out := leanCatalogForSnapshot(ps, cat)
+	raw, gz, etag, err := encodeCatalogSnapshot(out)
 	if err != nil {
 		log.Printf("papers catalog snapshot marshal: %v", err)
 		return
 	}
-	etag := snapshotETag(raw)
 	out.SnapshotETag = etag
-	raw, err = json.Marshal(out)
-	if err != nil {
-		log.Printf("papers catalog snapshot marshal: %v", err)
-		return
-	}
-	if err := atomicWriteFile(catalogSnapshotPath(ps.root), append(raw, '\n'), 0o644); err != nil {
+	if err := atomicWriteFile(catalogSnapshotPath(ps.root), raw, 0o644); err != nil {
 		log.Printf("papers catalog snapshot write: %v", err)
 		return
 	}
+	if len(gz) > 0 {
+		if err := atomicWriteFile(catalogSnapshotGZPath(ps.root), gz, 0o644); err != nil {
+			log.Printf("papers catalog snapshot gzip write: %v", err)
+			gz = nil
+		}
+	}
+	if len(raw) > catalogSnapshotWarnBytes {
+		log.Printf("papers catalog snapshot is %d bytes (gzip %d); over 2MiB tunnel buffered limit — streaming still works", len(raw), len(gz))
+	}
 	ps.snapMu.Lock()
 	ps.snapCat = out
+	ps.snapRaw = raw
+	ps.snapGZ = gz
 	ps.snapETag = etag
 	ps.snapReady = true
 	ps.snapMu.Unlock()
@@ -199,6 +221,63 @@ func snapshotFromCatalog(ps *papersStore, cat papersCatalog) papersCatalog {
 	return out
 }
 
+// leanCatalogForSnapshot copies the catalog and truncates abstracts so the
+// first-paint JSON stays well under the tunnel frame budget. Cards only show
+// 280 EN / 140 ZH runes; extra runes here are for client-side search/hover.
+func leanCatalogForSnapshot(ps *papersStore, cat papersCatalog) papersCatalog {
+	out := snapshotFromCatalog(ps, cat)
+	if len(out.Papers) == 0 {
+		return out
+	}
+	papers := make([]paperEntry, len(out.Papers))
+	for i, p := range out.Papers {
+		p.Abstract = briefRunes(p.Abstract, catalogSnapshotAbstractRunes)
+		p.AbstractZH = briefRunes(p.AbstractZH, catalogSnapshotAbstractZHRunes)
+		if p.Brief != "" {
+			p.Brief = briefRunes(p.Brief, 280)
+		}
+		p.QueryHits = nil
+		papers[i] = p
+	}
+	out.Papers = papers
+	return out
+}
+
+func encodeCatalogSnapshot(out papersCatalog) (raw, gz []byte, etag string, err error) {
+	raw, err = json.Marshal(out)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	etag = snapshotETag(raw)
+	out.SnapshotETag = etag
+	raw, err = json.Marshal(out)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	raw = append(raw, '\n')
+	gz = gzipBytes(raw)
+	return raw, gz, etag, nil
+}
+
+func gzipBytes(raw []byte) []byte {
+	if len(raw) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	if err != nil {
+		return nil
+	}
+	if _, err := zw.Write(raw); err != nil {
+		_ = zw.Close()
+		return nil
+	}
+	if err := zw.Close(); err != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 func snapshotETag(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:8])
@@ -218,6 +297,34 @@ func (ps *papersStore) cachedCatalogSnapshot() (papersCatalog, string, bool) {
 	return out, ps.snapETag, true
 }
 
+func (ps *papersStore) catalogSnapshotBytes() (raw, gz []byte, etag string, err error) {
+	if ps == nil {
+		return nil, nil, "", os.ErrNotExist
+	}
+	ps.snapMu.RLock()
+	if ps.snapReady && len(ps.snapRaw) > 0 {
+		raw = ps.snapRaw
+		gz = ps.snapGZ
+		etag = ps.snapETag
+		ps.snapMu.RUnlock()
+		return raw, gz, etag, nil
+	}
+	ps.snapMu.RUnlock()
+	_, etag, err = ps.loadCatalogSnapshot()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	ps.snapMu.RLock()
+	raw = ps.snapRaw
+	gz = ps.snapGZ
+	etag = ps.snapETag
+	ps.snapMu.RUnlock()
+	if len(raw) == 0 {
+		return nil, nil, "", os.ErrNotExist
+	}
+	return raw, gz, etag, nil
+}
+
 func (ps *papersStore) loadCatalogSnapshot() (papersCatalog, string, error) {
 	if out, etag, ok := ps.cachedCatalogSnapshot(); ok {
 		return out, etag, nil
@@ -235,8 +342,14 @@ func (ps *papersStore) loadCatalogSnapshot() (papersCatalog, string, error) {
 		etag = snapshotETag(raw)
 		out.SnapshotETag = etag
 	}
+	gz, _ := os.ReadFile(catalogSnapshotGZPath(ps.root))
+	if len(gz) == 0 {
+		gz = gzipBytes(raw)
+	}
 	ps.snapMu.Lock()
 	ps.snapCat = out
+	ps.snapRaw = raw
+	ps.snapGZ = gz
 	ps.snapETag = etag
 	ps.snapReady = true
 	ps.snapMu.Unlock()
@@ -250,7 +363,11 @@ func (s *Server) handlePapersCatalog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ps := s.papers()
-	out, etag, err := ps.loadCatalogSnapshot()
+	raw, gz, etag, err := ps.catalogSnapshotBytes()
+	var papers []paperEntry
+	if cached, _, ok := ps.cachedCatalogSnapshot(); ok {
+		papers = cached.Papers
+	}
 	if err != nil {
 		cat, liveErr := ps.catalog()
 		if liveErr != nil {
@@ -258,25 +375,77 @@ func (s *Server) handlePapersCatalog(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
 			return
 		}
-		out = snapshotFromCatalog(ps, cat)
-		if raw, mErr := json.Marshal(out); mErr == nil {
-			out.SnapshotETag = snapshotETag(raw)
+		out := leanCatalogForSnapshot(ps, cat)
+		var encErr error
+		raw, gz, etag, encErr = encodeCatalogSnapshot(out)
+		if encErr != nil {
+			writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
+			return
 		}
+		out.SnapshotETag = etag
+		papers = out.Papers
 		ps.requestCatalogSnapshot()
-		etag = out.SnapshotETag
 	}
 	canManage := s.settingsAuthed(r)
-	out.CanManage = canManage
-	out.TranslateProgress = nil
-	if ps != nil && ps.visits != nil {
-		out.Visits = ps.visits.Total()
-	}
-	s.kickPapersSideEffects(canManage, out.Papers)
+	s.kickPapersSideEffects(canManage, papers)
+	serveCachedJSON(w, r, raw, gz, etag)
+}
+
+func serveCachedJSON(w http.ResponseWriter, r *http.Request, raw, gz []byte, etag string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", catalogSnapshotCacheControl)
+	w.Header().Set("Vary", "Accept-Encoding")
 	if etag != "" {
 		w.Header().Set("ETag", `"`+etag+`"`)
+		if noneMatch(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 	}
-	w.Header().Set("Cache-Control", catalogSnapshotCacheControl)
-	writeJSON(w, http.StatusOK, out)
+	body := raw
+	if acceptsGzip(r) && len(gz) > 0 && (len(raw) == 0 || len(gz) < len(raw)) {
+		w.Header().Set("Content-Encoding", "gzip")
+		body = gz
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+func acceptsGzip(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		enc := strings.TrimSpace(strings.Split(part, ";")[0])
+		if strings.EqualFold(enc, "gzip") {
+			return true
+		}
+	}
+	return false
+}
+
+func noneMatch(header, etag string) bool {
+	etag = strings.TrimSpace(etag)
+	if header == "" || etag == "" {
+		return false
+	}
+	quoted := `"` + etag + `"`
+	for _, part := range strings.Split(header, ",") {
+		token := strings.TrimSpace(part)
+		if token == "*" {
+			return true
+		}
+		token = strings.TrimPrefix(token, "W/")
+		if token == quoted || token == etag {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handlePapersProgress(w http.ResponseWriter, r *http.Request) {

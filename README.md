@@ -68,7 +68,9 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 
 - `GET /papers` — public HTML list (ZH/EN), filter/search, and download links (light theme). Settings link always visible. Tag filter keys: `self-evolution` (agent自进化), `security` (agent安全), `both` (agent安全自进化), `llm-iot` (LLM based 物联网), `survey` (综述), `llm-training` (LLM 训练), `agent-tools-memory` (agent工具与记忆), `other` (其它).
 - `POST /papers/import` — public (lightly rate-limited) manual import. **`tag` is required** on every path (JSON URL/id and PDF upload); missing or unknown tags are rejected before download or ingest. JSON `{ "url_or_id": "2504.01990", "tag": "llm-training" }` accepts an arXiv id, arXiv abs/pdf URL, or a direct http(s) PDF URL. Multipart `tag` + `file` (or `pdf`) uploads a local PDF; if both a file and `url_or_id` are sent, the file wins. Uploads must look like a traditional academic paper (PDF magic, size ≤ 80MB, extractable text with Abstract/Introduction/References or 摘要/引言/参考文献). Rejection codes include `not_a_paper`, `not_pdf`, `too_large`, `scanned`. Successful imports write `PAPERS_DIR/pdfs`, upsert `manifest.json` (and `papers.db` when present) with `source=manual` and the chosen tag, then run the same catalog / optional `auto_translate` / abstract-ZH path as synced papers. Private/loopback URLs are blocked unless `PAPERS_IMPORT_ALLOW_PRIVATE=1` (local/dev). Daily ArXiv sync also searches `llm-training` and `agent-tools-memory`; `other` stays manual-only.
-- `GET /papers/api?q=&tag=` — public JSON catalog from `manifest.json` (`page_count`, `zh_pdf`, `dual_pdf`, `translate_status`, `translate_skip_reason`, `can_manage`, `has_review`, `avg_stars`, `rating_count`). `page_count` is computed from the local PDF. Papers with `page_count > 100` get `translate_skip_reason=too_many_pages` and are not translated (100 pages is allowed). `tag=` matches stable English keys. No API keys / translate-config / rater list.
+- `GET /papers/api?q=&tag=` — public live JSON catalog from `manifest.json` (`page_count`, `zh_pdf`, `dual_pdf`, `translate_status`, `translate_skip_reason`, `can_manage`, `has_review`, `avg_stars`, `rating_count`). First paint does **not** use this route (it can exceed 2 MiB). `page_count` is computed from the local PDF. Papers with `page_count > 100` get `translate_skip_reason=too_many_pages` and are not translated (100 pages is allowed). `tag=` matches stable English keys. No API keys / translate-config / rater list.
+- `GET /papers/api/catalog` (also `GET /papers/static/catalog-snapshot.json`) — **static lean snapshot** for first paint. Abstracts truncated (400 EN / 220 ZH runes) so cards still show Chinese/English brief. Served with `ETag`, `Cache-Control: public, max-age=60, stale-while-revalidate=300`, and `Content-Encoding: gzip` when the client sends `Accept-Encoding: gzip`. `can_manage` is always false here; live visits/progress come from the next endpoint. The browser also keeps the last good snapshot in `localStorage` (`rs_papers_catalog_v1`) and paints it immediately on repeat visits.
+- `GET /papers/api/progress` — tiny live JSON (`translate_progress`, `jobs`, `can_manage`, `visits`, `snapshot_etag`, `abstract_zh_pending`). `Cache-Control: no-store`. The page polls this (4s while work is active / 30s idle) and only refetches the catalog when `snapshot_etag` changes.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
 - `GET` / `PUT /settings/translate` (also `/papers/translate/config`) — **auth required**: OpenAI-compatible BabelDOC settings (`base_url`, `api_key` masked, `model`, `qps`, `auto_translate`). Stored at `$PAPERS_DIR/translate-config.json` (mode `0600`, gitignored). Empty `api_key` does not wipe; send `"clear_api_key": true` to delete.
@@ -87,7 +89,18 @@ pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
 translate-config.json      # LLM settings (secrets; not in git)
 translate_status.json      # queue/job status
 reviews/{id}.json          # 解读 + ratings (runtime; not in git)
+catalog-snapshot.json      # lean public catalog (auto-written)
+catalog-snapshot.json.gz   # precompressed sibling for gzip clients
 ```
+
+**Catalog snapshot regenerate / invalidate**
+
+The search-service rewrites `$PAPERS_DIR/catalog-snapshot.json` and `.gz` every `PAPERS_CATALOG_SNAPSHOT_INTERVAL` (Go duration like `60s` or an integer number of seconds; default **60s**), and immediately after catalog-changing events (manual import, manifest invalidation). Operators do not need to run a separate generator.
+
+- Wait for the next interval, or restart search-service (it writes a snapshot on startup).
+- Importing a paper calls `invalidateCatalog` and kicks a rewrite.
+- Delete the two snapshot files to force a live lean fallback on the next `GET /papers/api/catalog`; the background writer then recreates them.
+- Do not edit the JSON by hand — it is overwritten on the next refresh. The live `GET /papers/api` mega-JSON is unchanged (full abstracts) and is not used for first paint.
 
 Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires an updated `search-proxy` that forwards `/papers`, including `/papers/pdf/zh|dual/…` streamed like other PDFs).
 

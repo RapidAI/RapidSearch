@@ -38,12 +38,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	client := &http.Client{
-		Timeout: 3 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := newRelayHTTPClient()
 
 	log.Printf("search-relay backend=%s tunnel=%s", backend, tun)
 	backoff := time.Second
@@ -78,6 +73,20 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// newRelayHTTPClient disables automatic gzip so Content-Encoding from the
+// search-service (catalog snapshot) survives the tunnel to the public proxy.
+func newRelayHTTPClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DisableCompression = true
+	return &http.Client{
+		Timeout:   3 * time.Minute,
+		Transport: tr,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func parseTunnelAddr(s string) (string, error) {

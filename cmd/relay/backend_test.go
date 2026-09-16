@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -88,6 +89,61 @@ func TestServeBackendStreamsOversizedGET(t *testing.T) {
 	}
 	if !json.Valid(got) {
 		t.Fatal("streamed catalog must be complete JSON")
+	}
+}
+
+func TestRelayHTTPClientPreservesGzip(t *testing.T) {
+	payload := []byte(`{"count":1,"papers":[]}`)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	gz := buf.Bytes()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("relay must forward Accept-Encoding, got %q", r.Header.Get("Accept-Encoding"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(gz)
+	}))
+	t.Cleanup(srv.Close)
+
+	var head tunnel.Frame
+	var got []byte
+	write := func(fr tunnel.Frame) error {
+		switch fr.Type {
+		case tunnel.TypeRespHead:
+			head = fr
+		case tunnel.TypeRespChunk:
+			b, err := base64.StdEncoding.DecodeString(fr.Body)
+			if err != nil {
+				return err
+			}
+			got = append(got, b...)
+		}
+		return nil
+	}
+	err := serveBackend(context.Background(), newRelayHTTPClient(), srv.URL, tunnel.Frame{
+		Type:    tunnel.TypeReq,
+		ID:      "gz",
+		Method:  http.MethodGet,
+		Path:    "/papers/api/catalog",
+		Headers: map[string]string{"Accept-Encoding": "gzip"},
+	}, write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head.Headers["Content-Encoding"] != "gzip" {
+		t.Fatalf("headers=%v", head.Headers)
+	}
+	if !bytes.Equal(got, gz) {
+		t.Fatalf("gzip body mutated: got %d want %d", len(got), len(gz))
 	}
 }
 
