@@ -42,7 +42,7 @@ type paperEntry struct {
 
 	// Filled for API/HTML consumers.
 	Filename        string `json:"filename,omitempty"`
-	HasLocal        bool   `json:"has_local"`
+	HasLocal        bool   `json:"has_local,omitempty"`
 	LocalPDF        string `json:"local_pdf,omitempty"` // relative download path
 	Brief           string `json:"brief,omitempty"`
 	ID              string `json:"id,omitempty"`
@@ -59,9 +59,9 @@ type paperEntry struct {
 	TranslateLane string `json:"translate_lane,omitempty"`
 
 	// Review flags for catalog cards (no rater list).
-	HasReview   bool    `json:"has_review"`
-	AvgStars    float64 `json:"avg_stars"`
-	RatingCount int     `json:"rating_count"`
+	HasReview   bool    `json:"has_review,omitempty"`
+	AvgStars    float64 `json:"avg_stars,omitempty"`
+	RatingCount int     `json:"rating_count,omitempty"`
 }
 
 type papersManifest struct {
@@ -88,6 +88,12 @@ type papersCatalog struct {
 	// Live /papers/api may omit them; /papers/api/catalog and /papers/api/progress set them.
 	SnapshotAt   string `json:"snapshot_at,omitempty"`
 	SnapshotETag string `json:"snapshot_etag,omitempty"`
+	// Offset / Limit / NextOffset describe a paged first-paint slice.
+	// Count stays the full catalog size so the client can fetch the tail.
+	Offset     int  `json:"offset,omitempty"`
+	Limit      int  `json:"limit,omitempty"`
+	NextOffset int  `json:"next_offset,omitempty"`
+	Partial    bool `json:"partial,omitempty"`
 }
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
@@ -115,6 +121,7 @@ type papersStore struct {
 	absZH   *abstractZHService
 	reviews *reviewService
 	visits  *visitCounter
+	daily   *hfDailyService
 
 	importMu          sync.Mutex
 	importLimit       *importLimiter
@@ -157,6 +164,7 @@ func newPapersStore(root string) *papersStore {
 	if strings.TrimSpace(os.Getenv("PAPERS_IMPORT_ALLOW_PRIVATE")) == "1" {
 		ps.allowPrivateFetch = true
 	}
+	ps.daily = newHFDailyService(ps)
 	ps.xlate.start()
 	ps.absZH.start()
 	ps.startCatalogSnapshot()
@@ -197,18 +205,25 @@ func (ps *papersStore) catalog() (papersCatalog, error) {
 		Count:       base.Count,
 		Papers:      append([]paperEntry(nil), base.Papers...),
 	}
+	ps.decoratePapers(out.Papers)
+	return out, nil
+}
+
+func (ps *papersStore) decoratePapers(papers []paperEntry) {
+	if ps == nil || len(papers) == 0 {
+		return
+	}
 	var jobs map[string]translateJob
-	if ps != nil && ps.xlate != nil {
+	if ps.xlate != nil {
 		jobs = ps.xlate.jobsCopy()
 	}
-	overlayTranslations(out.Papers, ps.root, jobs)
-	if ps != nil && ps.absZH != nil {
-		ps.absZH.overlay(out.Papers)
+	overlayTranslations(papers, ps.root, jobs)
+	if ps.absZH != nil {
+		ps.absZH.overlay(papers)
 	}
-	if ps != nil && ps.reviews != nil {
-		ps.reviews.overlay(out.Papers)
+	if ps.reviews != nil {
+		ps.reviews.overlay(papers)
 	}
-	return out, nil
 }
 
 func (ps *papersStore) catalogBase() (papersCatalog, error) {
@@ -358,9 +373,9 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 		// Catalog page is public; Settings link always shown. Translate actions
 		// are gated in the UI via /papers/api can_manage, and mutations still
 		// require authorizeSettings. Unauthenticated /settings shows login.
-		writeSettingsHTML(w, r, papersPageHTML)
+		writePapersHTML(w, r, papersPageHTML)
 	case http.MethodHead:
-		writeSettingsHTML(w, r, papersPageHTML)
+		writePapersHTML(w, r, papersPageHTML)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 	}

@@ -18,16 +18,21 @@ import (
 )
 
 const (
-	catalogSnapshotFileName     = "catalog-snapshot.json"
-	catalogSnapshotGZFileName   = "catalog-snapshot.json.gz"
-	catalogSnapshotIntervalDef  = 60 * time.Second
-	envCatalogSnapshotInterval  = "PAPERS_CATALOG_SNAPSHOT_INTERVAL"
+	catalogSnapshotFileName    = "catalog-snapshot.json"
+	catalogSnapshotGZFileName  = "catalog-snapshot.json.gz"
+	catalogSnapshotIntervalDef = 60 * time.Second
+	envCatalogSnapshotInterval = "PAPERS_CATALOG_SNAPSHOT_INTERVAL"
 	// Public + SWR so browsers/CDN can reuse the static snapshot. Live
 	// can_manage / visits / translate progress stay on /papers/api/progress.
 	catalogSnapshotCacheControl = "public, max-age=60, stale-while-revalidate=300"
-	// Card UI shows 280 EN / 140 ZH runes; keep a little extra for search/hover.
-	catalogSnapshotAbstractRunes   = 400
-	catalogSnapshotAbstractZHRunes = 220
+	// Revalidate HTML so visit bumps still run; allow stale reuse on slow tunnels.
+	papersHTMLCacheControl = "public, max-age=0, stale-while-revalidate=300"
+	// Card UI shows 280 EN / 140 ZH runes — first paint only needs that teaser.
+	catalogSnapshotAbstractRunes   = 280
+	catalogSnapshotAbstractZHRunes = 140
+	catalogFirstPageLimit          = 25
+	catalogMaxAuthors              = 8
+	catalogPageLimitMax            = 10000
 	// Warn if the lean JSON would stress the 2 MiB tunnel buffered limit.
 	catalogSnapshotWarnBytes = 2 << 20
 )
@@ -221,9 +226,8 @@ func snapshotFromCatalog(ps *papersStore, cat papersCatalog) papersCatalog {
 	return out
 }
 
-// leanCatalogForSnapshot copies the catalog and truncates abstracts so the
-// first-paint JSON stays well under the tunnel frame budget. Cards only show
-// 280 EN / 140 ZH runes; extra runes here are for client-side search/hover.
+// leanCatalogForSnapshot copies the catalog and keeps only card-sized fields
+// so first paint (and client search) stays well under the tunnel frame budget.
 func leanCatalogForSnapshot(ps *papersStore, cat papersCatalog) papersCatalog {
 	out := snapshotFromCatalog(ps, cat)
 	if len(out.Papers) == 0 {
@@ -231,16 +235,92 @@ func leanCatalogForSnapshot(ps *papersStore, cat papersCatalog) papersCatalog {
 	}
 	papers := make([]paperEntry, len(out.Papers))
 	for i, p := range out.Papers {
-		p.Abstract = briefRunes(p.Abstract, catalogSnapshotAbstractRunes)
-		p.AbstractZH = briefRunes(p.AbstractZH, catalogSnapshotAbstractZHRunes)
-		if p.Brief != "" {
-			p.Brief = briefRunes(p.Brief, 280)
-		}
-		p.QueryHits = nil
-		papers[i] = p
+		papers[i] = leanPaperForSnapshot(p)
 	}
 	out.Papers = papers
 	return out
+}
+
+// leanPaperForSnapshot keeps the fields cards + client search need and drops
+// duplicates / unused metadata that dominated the public ~1.5MB snapshot.
+func leanPaperForSnapshot(p paperEntry) paperEntry {
+	p.Abstract = briefRunes(p.Abstract, catalogSnapshotAbstractRunes)
+	p.AbstractZH = briefRunes(p.AbstractZH, catalogSnapshotAbstractZHRunes)
+	p.Brief = ""
+	p.QueryHits = nil
+	p.PDFURL = ""
+	p.DOI = ""
+	p.Score = 0
+	p.DownloadStatus = ""
+	p.Updated = ""
+	p.Filename = ""
+	p.PDFPath = ""
+	if len(p.Authors) > catalogMaxAuthors {
+		p.Authors = append([]string(nil), p.Authors[:catalogMaxAuthors]...)
+	}
+	return p
+}
+
+func catalogPageArgs(r *http.Request) (offset, limit int, paged bool) {
+	if r == nil {
+		return 0, 0, false
+	}
+	q := r.URL.Query()
+	if strings.TrimSpace(q.Get("limit")) == "" && strings.TrimSpace(q.Get("offset")) == "" {
+		return 0, 0, false
+	}
+	offset, _ = strconv.Atoi(strings.TrimSpace(q.Get("offset")))
+	limit, _ = strconv.Atoi(strings.TrimSpace(q.Get("limit")))
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 || limit > catalogPageLimitMax {
+		limit = catalogPageLimitMax
+	}
+	return offset, limit, true
+}
+
+func sliceCatalog(cat papersCatalog, offset, limit int) papersCatalog {
+	total := cat.Count
+	if total == 0 {
+		total = len(cat.Papers)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(cat.Papers) {
+		offset = len(cat.Papers)
+	}
+	if limit <= 0 {
+		limit = catalogPageLimitMax
+	}
+	end := offset + limit
+	if end > len(cat.Papers) {
+		end = len(cat.Papers)
+	}
+	out := cat
+	out.Papers = append([]paperEntry(nil), cat.Papers[offset:end]...)
+	out.Count = total
+	out.Offset = offset
+	out.Limit = limit
+	out.Partial = end < len(cat.Papers) || offset > 0
+	if end < len(cat.Papers) {
+		out.NextOffset = end
+	}
+	return out
+}
+
+func encodeCatalogPage(full papersCatalog, offset, limit int, fullETag string) (raw, gz []byte, httpETag string, err error) {
+	page := sliceCatalog(full, offset, limit)
+	page.SnapshotETag = fullETag
+	raw, err = json.Marshal(page)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	raw = append(raw, '\n')
+	gz = gzipBytes(raw)
+	httpETag = fullETag + "-o" + strconv.Itoa(offset) + "l" + strconv.Itoa(limit)
+	return raw, gz, httpETag, nil
 }
 
 func encodeCatalogSnapshot(out papersCatalog) (raw, gz []byte, etag string, err error) {
@@ -388,7 +468,43 @@ func (s *Server) handlePapersCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	canManage := s.settingsAuthed(r)
 	s.kickPapersSideEffects(canManage, papers)
+	if offset, limit, paged := catalogPageArgs(r); paged {
+		var full papersCatalog
+		if cached, _, ok := ps.cachedCatalogSnapshot(); ok {
+			full = cached
+		} else if err := json.Unmarshal(raw, &full); err != nil {
+			writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
+			return
+		}
+		if full.SnapshotETag == "" {
+			full.SnapshotETag = etag
+		}
+		pageRaw, pageGZ, pageETag, encErr := encodeCatalogPage(full, offset, limit, etag)
+		if encErr != nil {
+			writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
+			return
+		}
+		if noneMatch(r.Header.Get("If-None-Match"), pageETag) || noneMatch(r.Header.Get("If-None-Match"), etag) {
+			w.Header().Set("Cache-Control", catalogSnapshotCacheControl)
+			w.Header().Set("Vary", "Accept-Encoding")
+			w.Header().Set("ETag", `"`+pageETag+`"`)
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		serveCachedJSON(w, r, pageRaw, pageGZ, pageETag)
+		return
+	}
 	serveCachedJSON(w, r, raw, gz, etag)
+}
+
+func serveCachedValue(w http.ResponseWriter, r *http.Request, v interface{}, etag string) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "encode failed", "papers", nil, "")
+		return
+	}
+	raw = append(raw, '\n')
+	serveCachedJSON(w, r, raw, gzipBytes(raw), etag)
 }
 
 func serveCachedJSON(w http.ResponseWriter, r *http.Request, raw, gz []byte, etag string) {
@@ -454,30 +570,34 @@ func (s *Server) handlePapersProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ps := s.papers()
-	cat, err := ps.catalog()
-	if err != nil {
-		log.Printf("papers progress: %v", err)
-		writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
-		return
-	}
-	canManage := s.settingsAuthed(r)
-	s.kickPapersSideEffects(canManage, cat.Papers)
-
 	snapAt, snapETag := "", ""
+	var papers []paperEntry
 	if cached, etag, ok := ps.cachedCatalogSnapshot(); ok {
 		snapAt = cached.SnapshotAt
 		snapETag = etag
+		papers = append([]paperEntry(nil), cached.Papers...)
+	} else {
+		cat, err := ps.catalog()
+		if err != nil {
+			log.Printf("papers progress: %v", err)
+			writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
+			return
+		}
+		papers = cat.Papers
 	}
+	canManage := s.settingsAuthed(r)
+	s.kickPapersSideEffects(canManage, papers)
+	overlayJobStatus(papers, ps)
 
 	pending := 0
 	if ps != nil && ps.absZH != nil {
-		pending = ps.absZH.pendingCount(cat.Papers)
+		pending = ps.absZH.pendingCount(papers)
 	}
 	out := papersProgress{
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 		SnapshotAt:        snapAt,
 		SnapshotETag:      snapETag,
-		TranslateProgress: summarizeTranslateProgress(cat.Papers),
+		TranslateProgress: summarizeTranslateProgress(papers),
 		AbstractZHPending: pending,
 		CanManage:         canManage,
 		Jobs:              progressJobs(ps, snapAt),
@@ -540,6 +660,68 @@ func jobNewerThanSnapshot(jobUpdated, snapshotAt string) bool {
 		return jt.After(st)
 	}
 	return jobUpdated > snapshotAt
+}
+
+func overlayJobStatus(papers []paperEntry, ps *papersStore) {
+	if ps == nil || ps.xlate == nil || len(papers) == 0 {
+		return
+	}
+	jobs := ps.xlate.jobsCopy()
+	if len(jobs) == 0 {
+		return
+	}
+	for i := range papers {
+		id := papers[i].ID
+		if id == "" {
+			id = paperTranslateID(papers[i])
+		}
+		j, ok := jobs[id]
+		if !ok {
+			continue
+		}
+		papers[i].TranslateStatus = j.Status
+		switch j.Status {
+		case translateDone, translateRunning:
+			papers[i].TranslateError = ""
+		default:
+			papers[i].TranslateError = sanitizeUserError(j.Error)
+		}
+		if j.ZhRel != "" {
+			papers[i].ZhPDF = translatedPDFURL(translateKindZH, id)
+		}
+		if j.DualRel != "" {
+			papers[i].DualPDF = translatedPDFURL(translateKindDual, id)
+		}
+	}
+}
+
+func writePapersHTML(w http.ResponseWriter, r *http.Request, page []byte) {
+	lang := acceptLang(r)
+	body := applyHTMLLang(page, lang)
+	etag := snapshotETag(body)
+	gz := gzipBytes(body)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", papersHTMLCacheControl)
+	w.Header().Set("Vary", "Accept-Encoding, Accept-Language")
+	if etag != "" {
+		w.Header().Set("ETag", `"`+etag+`"`)
+		if noneMatch(r.Header.Get("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	out := body
+	if acceptsGzip(r) && len(gz) > 0 && len(gz) < len(body) {
+		w.Header().Set("Content-Encoding", "gzip")
+		out = gz
+	}
+	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
+	if r != nil && r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
 }
 
 func (s *Server) kickPapersSideEffects(canManage bool, papers []paperEntry) {

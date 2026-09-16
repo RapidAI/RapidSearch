@@ -244,8 +244,14 @@ func TestPapersPageWiresCatalogAndProgress(t *testing.T) {
 	if strings.Contains(body, `setInterval(function () { load({ silent: true }); }`) {
 		t.Fatal("banner poll must not refetch the full catalog")
 	}
-	if !strings.Contains(body, "rs_papers_catalog_v1") || !strings.Contains(body, "hydrateCatalogCache") {
+	if !strings.Contains(body, "rs_papers_catalog_v2") || !strings.Contains(body, "hydrateCatalogCache") {
 		t.Fatal("page must persist last-good catalog for instant paint")
+	}
+	if !strings.Contains(body, "loadCatalogTail") || !strings.Contains(body, "offset=") {
+		t.Fatal("page must fetch a first catalog page then merge the tail")
+	}
+	if !strings.Contains(body, "rs_papers_daily_v1") || !strings.Contains(body, "hydrateDailyCache") {
+		t.Fatal("page must persist last HF Daily day for instant paint")
 	}
 	if !strings.Contains(body, "fetchCatalogJSON") || !strings.Contains(body, "If-None-Match") {
 		t.Fatal("catalog fetch must send If-None-Match and allow HTTP cache")
@@ -286,6 +292,9 @@ func TestLeanCatalogTruncatesAbstracts(t *testing.T) {
 	}
 	if lean.Papers[0].QueryHits != nil {
 		t.Fatal("query_hits must be omitted from the lean snapshot")
+	}
+	if lean.Papers[0].Brief != "" || lean.Papers[0].PDFURL != "" || lean.Papers[0].DOI != "" {
+		t.Fatal("card snapshot must drop brief and unused metadata")
 	}
 	if !strings.Contains(lean.Papers[0].Abstract, "word") {
 		t.Fatal("truncated EN abstract must keep searchable prefix")
@@ -438,5 +447,88 @@ func TestCatalogSnapshotGzipAnd304(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "Agents cooperate") {
 		t.Fatal("identity body should include lean abstract prefix")
+	}
+}
+
+func TestCatalogFirstPageSmallerThanFull(t *testing.T) {
+	h, dir := papersHandler(t)
+	papers := make([]paperEntry, 80)
+	for i := 0; i < 80; i++ {
+		papers[i] = paperEntry{
+			Title:      "A long survey of personal LLM agents and tool use",
+			Authors:    []string{"Ada Lovelace", "Alan Turing"},
+			Abstract:   uniqueAbstract(i, 1200),
+			AbstractZH: uniqueAbstractZH(i, 400),
+			Year:       2025,
+			ArxivID:    "2501.00000",
+			TopicTags:  []string{"survey"},
+		}
+	}
+	man := papersManifest{GeneratedAt: "2026-01-01T00:00:00Z", Papers: papers}
+	raw, _ := json.Marshal(man)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps := h.(*Server).papers()
+	ps.invalidateCatalog()
+	ps.refreshCatalogSnapshot()
+
+	full := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api/catalog", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	h.ServeHTTP(full, req)
+	page := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/api/catalog?offset=0&limit=25", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	h.ServeHTTP(page, req)
+	if page.Code != http.StatusOK || full.Code != http.StatusOK {
+		t.Fatalf("full=%d page=%d", full.Code, page.Code)
+	}
+	if page.Body.Len() == 0 || page.Body.Len() >= full.Body.Len() {
+		t.Fatalf("first page gzip %d should be smaller than full gzip %d", page.Body.Len(), full.Body.Len())
+	}
+	var cat papersCatalog
+	// Decode gzip for structure check via identity request.
+	id := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/api/catalog?offset=0&limit=25", nil)
+	h.ServeHTTP(id, req)
+	if err := json.Unmarshal(id.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if !cat.Partial || cat.NextOffset != 25 || len(cat.Papers) != 25 || cat.Count != 80 {
+		t.Fatalf("page shape %+v n=%d", cat, len(cat.Papers))
+	}
+	t.Logf("full_gzip=%d first_page_gzip=%d (%.0f%% of full)",
+		full.Body.Len(), page.Body.Len(), 100*float64(page.Body.Len())/float64(full.Body.Len()))
+}
+
+func TestPapersHTMLIsCacheableAndGzipped(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	cc := rr.Header().Get("Cache-Control")
+	if strings.Contains(cc, "no-store") || !strings.Contains(cc, "stale-while-revalidate") {
+		t.Fatalf("html cache: %s", cc)
+	}
+	if rr.Header().Get("ETag") == "" {
+		t.Fatal("html etag")
+	}
+	if rr.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("encoding=%s", rr.Header().Get("Content-Encoding"))
+	}
+	etag := rr.Header().Get("ETag")
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers", nil)
+	req.Header.Set("If-None-Match", etag)
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotModified {
+		t.Fatalf("304 status=%d", rr.Code)
 	}
 }
