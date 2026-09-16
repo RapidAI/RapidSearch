@@ -259,6 +259,9 @@ func (s *Server) handlePapersCatalog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out = snapshotFromCatalog(ps, cat)
+		if raw, mErr := json.Marshal(out); mErr == nil {
+			out.SnapshotETag = snapshotETag(raw)
+		}
 		ps.requestCatalogSnapshot()
 		etag = out.SnapshotETag
 	}
