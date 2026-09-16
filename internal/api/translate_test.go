@@ -20,6 +20,7 @@ func papersHandler(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("PAPERS_DIR", dir)
+	t.Setenv("PAPERS_CATALOG_SNAPSHOT_INTERVAL", "1h")
 	t.Setenv("SEARCH_TOKEN", "papers-secret")
 	t.Setenv("HUB_AUTH_BASES", "http://127.0.0.1:1")
 	t.Setenv("SEARCH_CONFIG_PATH", filepath.Join(dir, "search-config.json"))
@@ -47,7 +48,12 @@ func papersHandler(t *testing.T) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	h := New(nil, "", nil, nil)
-	t.Cleanup(func() { search.ActivateStore(nil) })
+	t.Cleanup(func() {
+		if srv, ok := h.(*Server); ok && srv.papersStore != nil {
+			srv.papersStore.stopCatalogSnapshot()
+		}
+		search.ActivateStore(nil)
+	})
 	return h, dir
 }
 

@@ -84,6 +84,10 @@ type papersCatalog struct {
 	CanManage bool `json:"can_manage"`
 	// Visits is cumulative GET /papers page views (not API polls).
 	Visits int64 `json:"visits"`
+	// SnapshotAt / SnapshotETag identify the static catalog file used for first paint.
+	// Live /papers/api may omit them; /papers/api/catalog and /papers/api/progress set them.
+	SnapshotAt   string `json:"snapshot_at,omitempty"`
+	SnapshotETag string `json:"snapshot_etag,omitempty"`
 }
 
 // translateProgress is a page-level summary of background BabelDOC jobs.
@@ -117,6 +121,15 @@ type papersStore struct {
 	importClient      *http.Client
 	allowPrivateFetch bool   // tests: httptest.Server on loopback
 	arxivAPIBase      string // tests: override export.arxiv.org
+
+	snapMu      sync.RWMutex
+	snapCat     papersCatalog
+	snapETag    string
+	snapReady   bool
+	snapKick    chan struct{}
+	snapStop    chan struct{}
+	snapStopped bool
+	snapWG      sync.WaitGroup
 }
 
 func papersRoot() string {
@@ -144,6 +157,7 @@ func newPapersStore(root string) *papersStore {
 	}
 	ps.xlate.start()
 	ps.absZH.start()
+	ps.startCatalogSnapshot()
 	return ps
 }
 
@@ -162,9 +176,12 @@ func (ps *papersStore) invalidateCatalog() {
 		return
 	}
 	ps.mu.Lock()
-	defer ps.mu.Unlock()
 	ps.loaded = time.Time{}
 	ps.modTime = time.Time{}
+	ps.mu.Unlock()
+	// Import / sync changed the manifest — refresh the static snapshot now,
+	// not only on the next timer tick.
+	ps.requestCatalogSnapshot()
 }
 
 func (ps *papersStore) catalog() (papersCatalog, error) {
@@ -376,13 +393,8 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
-	// Auto-enqueue PDF BabelDOC is an admin side effect — never from anonymous GETs.
-	if canManage {
-		s.maybeAutoTranslate(cat.Papers)
-	}
-	// Chinese abstracts are public catalog data: fill missing cache in background.
+	s.kickPapersSideEffects(canManage, cat.Papers)
 	if abs := s.papers().absZH; abs != nil {
-		abs.ensureMissing(cat.Papers)
 		out.AbstractZHPending = abs.pendingCount(out.Papers)
 	}
 	writeJSON(w, http.StatusOK, out)

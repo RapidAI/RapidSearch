@@ -93,8 +93,11 @@ func TestPathNeedsStreamAndPassthrough(t *testing.T) {
 	if !PathNeedsStream("/papers/pdf/zh/2401.05459") || !PathNeedsStream("/papers/pdf/dual/2401.05459") {
 		t.Fatal("translated pdfs must stream")
 	}
-	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api") || PathNeedsStream("/papers/translate/config") {
-		t.Fatal("html/api should not stream")
+	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api/progress") || PathNeedsStream("/papers/translate/config") {
+		t.Fatal("html/progress should not stream")
+	}
+	if !PathNeedsStream("/papers/api") || !PathNeedsStream("/papers/api/catalog") {
+		t.Fatal("catalog JSON must stream so the 2 MiB frame cap cannot truncate it")
 	}
 	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") || !PathPassthroughAuth("/papers/translate/test") {
 		t.Fatal("passthrough")
