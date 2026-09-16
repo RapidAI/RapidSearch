@@ -57,11 +57,11 @@ type paperReviewRating struct {
 
 // paperReviewFile is the on-disk record under $PAPERS_DIR/reviews/<id>.json.
 type paperReviewFile struct {
-	PaperID     string              `json:"paper_id"`
-	Title       string              `json:"title"`
-	Analysis    paperReviewAnalysis `json:"analysis"`
-	Model       string              `json:"model,omitempty"`
-	GeneratedAt string              `json:"generated_at,omitempty"`
+	PaperID       string              `json:"paper_id"`
+	Title         string              `json:"title"`
+	Analysis      paperReviewAnalysis `json:"analysis"`
+	Model         string              `json:"model,omitempty"`
+	GeneratedAt   string              `json:"generated_at,omitempty"`
 	Ratings       []paperReviewRating `json:"ratings,omitempty"`
 	AvgStars      float64             `json:"avg_stars"`
 	RatingCount   int                 `json:"rating_count"`
@@ -679,6 +679,11 @@ func (ps *papersStore) findPaper(id string) (paperEntry, bool) {
 			pid = paperTranslateID(p)
 		}
 		if pid == id {
+			return p, true
+		}
+	}
+	if ps.daily != nil {
+		if p, ok := ps.daily.findCached(id); ok {
 			return p, true
 		}
 	}

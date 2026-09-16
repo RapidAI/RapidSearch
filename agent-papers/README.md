@@ -117,7 +117,7 @@ Retag existing corpus (no PDF changes):
 /workspace/crawl4ai-venv/bin/python search_download_papers.py --out /workspace/agent-papers --retag
 ```
 
-The public `/papers` page does **not** load `manifest.json` directly. search-service writes a lean `catalog-snapshot.json` (+ `.gz`) under this directory every `PAPERS_CATALOG_SNAPSHOT_INTERVAL` (default 60s) and after imports. See the repo README **Catalog snapshot regenerate / invalidate**. Do not hand-edit those snapshot files.
+The public `/papers` page does **not** load `manifest.json` directly. search-service writes a lean `catalog-snapshot.json` (+ `.gz`) under this directory every `PAPERS_CATALOG_SNAPSHOT_INTERVAL` (default 60s) and after imports. First paint uses `GET /papers/api/catalog?offset=0&limit=25`, then merges the tail. Hugging Face Daily caches live under `hf-daily/`. See the repo README **Catalog snapshot regenerate / invalidate**. Do not hand-edit those snapshot files.
 
 ## Notes / 说明
 

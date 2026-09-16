@@ -447,6 +447,49 @@
     }
     .review-refs-list li { margin: 0 0 6px; }
     .review-ref-missing { color: var(--muted); font-size: 12px; }
+    .section-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 16px;
+    }
+    .section-tabs button {
+      border-radius: 999px;
+      padding: 7px 14px;
+    }
+    .section-tabs button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .date-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 12px;
+    }
+    .date-nav input[type="date"] { padding: 8px 10px; }
+    .date-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .date-chip {
+      font-size: 13px;
+      border-radius: 999px;
+      padding: 5px 10px;
+    }
+    .date-chip.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .date-chip .n { opacity: 0.75; margin-left: 4px; font-size: 12px; }
+    .daily-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+    .trend-list { margin: 0 0 0 18px; padding: 0; }
+    .trend-list li { margin: 0 0 6px; line-height: 1.5; }
   </style>
   <script>
   (function () {
@@ -492,6 +535,24 @@
   <p class="hint-line">
     <span data-i18n="llmSettingsHint">Configure the translation LLM in </span><a id="llm-settings-link" href="/settings" data-i18n="llmSettingsLink">Settings</a><span data-i18n="llmSettingsHintAfter">.</span>
   </p>
+
+  <div class="section-tabs" role="tablist">
+    <button type="button" id="tab-catalog" class="active" data-section="catalog" data-i18n="tabCatalog">Selected papers</button>
+    <button type="button" id="tab-daily" data-section="daily" data-i18n="tabDaily">Hugging Face Daily Papers</button>
+  </div>
+
+  <div id="daily-tools" hidden>
+    <div class="date-nav">
+      <button type="button" id="daily-prev" data-i18n="prevDay">Previous day</button>
+      <input id="daily-date" type="date" aria-label="Date">
+      <button type="button" id="daily-next" data-i18n="nextDay">Next day</button>
+      <div class="date-chips" id="daily-dates"></div>
+    </div>
+    <div class="daily-actions">
+      <button type="button" class="primary" id="trend-open" data-i18n="trendView">View trend summary</button>
+      <button type="button" id="trend-regen" hidden data-i18n="trendRegen">Regenerate trend</button>
+    </div>
+  </div>
 
   <div class="toolbar">
     <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, abstract, tags…" autocomplete="off">
@@ -576,6 +637,37 @@
       </div>
     </div>
   </div>
+  <div id="trend-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="trend-backdrop" data-trend-close="1"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="trend-title">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" data-i18n="trendKicker">Daily tech-trend summary</p>
+          <h2 id="trend-title"></h2>
+        </div>
+        <button type="button" class="modal-close" id="trend-close" data-trend-close="1" data-i18n-aria="trendClose" aria-label="Close">×</button>
+      </div>
+      <p id="trend-status" class="review-status" hidden></p>
+      <div id="trend-body" hidden>
+        <section class="review-section">
+          <h3 data-i18n="trendOverview">Overview</h3>
+          <p id="trend-overview"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendThemes">Themes</h3>
+          <ul class="trend-list" id="trend-themes"></ul>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendHighlights">Highlights</h3>
+          <ul class="trend-list" id="trend-highlights"></ul>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendOutlook">Outlook</h3>
+          <p id="trend-outlook"></p>
+        </section>
+      </div>
+    </div>
+  </div>
 </main>
 <dialog id="import-dialog" aria-labelledby="import-title">
   <h2 id="import-title" data-i18n="importTitle">Import paper</h2>
@@ -606,6 +698,26 @@
       langLabel: "Language",
       themeLabel: "Theme",
       heading: "MaClaw Selected papers",
+      tabCatalog: "Selected papers",
+      tabDaily: "Hugging Face Daily Papers",
+      prevDay: "Previous day",
+      nextDay: "Next day",
+      dailyMeta: "{count} papers · {date} · fetched {when}",
+      dailyLoadErr: "Failed to load Hugging Face Daily Papers",
+      trendView: "View trend summary",
+      trendGen: "Generate trend summary",
+      trendRegen: "Regenerate trend",
+      trendKicker: "Daily tech-trend summary",
+      trendOverview: "Overview",
+      trendThemes: "Themes",
+      trendHighlights: "Highlights",
+      trendOutlook: "Outlook",
+      trendClose: "Close",
+      trendGenerating: "Generating trend summary…",
+      trendGenFail: "Could not generate trend summary.",
+      trendLoadFail: "Failed to load trend summary.",
+      trendNeedLLM: "Configure the translation LLM in Settings first.",
+      trendEmpty: "No papers for this date.",
       lead: "Browse the local catalog, download cached PDFs, and queue Chinese translations.",
       settingsLink: "Settings",
       searchPh: "Search title, authors, abstract, tags…",
@@ -708,6 +820,26 @@
       langLabel: "语言",
       themeLabel: "主题",
       heading: "码卡龙论文精选",
+      tabCatalog: "精选论文",
+      tabDaily: "Hugging Face 每日论文",
+      prevDay: "上一天",
+      nextDay: "下一天",
+      dailyMeta: "{count} 篇 · {date} · 获取于 {when}",
+      dailyLoadErr: "加载 Hugging Face 每日论文失败",
+      trendView: "查看趋势综述",
+      trendGen: "生成趋势综述",
+      trendRegen: "重新生成综述",
+      trendKicker: "每日技术趋势综述",
+      trendOverview: "总体图景",
+      trendThemes: "主题聚类",
+      trendHighlights: "要点",
+      trendOutlook: "展望",
+      trendClose: "关闭",
+      trendGenerating: "正在生成趋势综述…",
+      trendGenFail: "无法生成趋势综述。",
+      trendLoadFail: "加载趋势综述失败。",
+      trendNeedLLM: "请先在设置中配置翻译 LLM。",
+      trendEmpty: "这一天没有论文。",
       lead: "浏览本地目录、下载已缓存 PDF，并排队生成中文翻译。",
       settingsLink: "设置",
       searchPh: "搜索标题、作者、摘要、标签…",
@@ -810,7 +942,7 @@
 
   const TAG_KEYS = [
     "self-evolution", "security", "both", "llm-iot", "survey",
-    "llm-training", "agent-tools-memory", "other"
+    "llm-training", "agent-tools-memory", "hf-daily", "other"
   ];
   const TAG_LABELS = {
     en: {
@@ -821,6 +953,7 @@
       "survey": "Survey",
       "llm-training": "LLM training",
       "agent-tools-memory": "Agent tools & memory",
+      "hf-daily": "HF Daily",
       "other": "Other"
     },
     zh: {
@@ -831,6 +964,7 @@
       "survey": "综述",
       "llm-training": "LLM 训练",
       "agent-tools-memory": "agent工具与记忆",
+      "hf-daily": "HF 每日论文",
       "other": "其它"
     }
   };
@@ -892,7 +1026,8 @@
     document.getElementById("theme-light").classList.toggle("active", theme === "light");
     document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
     document.documentElement.setAttribute("data-i18n-ready", "1");
-    document.title = t("heading");
+    document.title = currentSection === "daily" ? t("tabDaily") : t("heading");
+    if (currentSection === "daily") renderDateChips();
   }
   function setLang(lang) {
     if (lang !== "zh" && lang !== "en") lang = "en";
@@ -937,8 +1072,12 @@
   function apiURL() {
     return prefix + "/papers/api";
   }
-  function catalogURL() {
-    return prefix + "/papers/api/catalog";
+  function catalogURL(offset, limit) {
+    let u = prefix + "/papers/api/catalog";
+    if (typeof limit === "number" && limit > 0) {
+      u += "?offset=" + encodeURIComponent(String(offset || 0)) + "&limit=" + encodeURIComponent(String(limit));
+    }
+    return u;
   }
   function progressURL() {
     return prefix + "/papers/api/progress";
@@ -950,12 +1089,17 @@
   }
 
   let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false };
+  let lastDaily = { ok: true, date: "", count: 0, papers: [], fetched_at: "", has_trend: false };
   let canManage = false;
   let catalogLoaded = false;
   let snapshotETag = "";
   let catalogFetch = null;
-  const CATALOG_CACHE_KEY = "rs_papers_catalog_v1";
-  const CATALOG_CACHE_VER = 1;
+  let currentSection = "catalog";
+  let dailyDates = [];
+  let dailyDate = "";
+  const CATALOG_CACHE_KEY = "rs_papers_catalog_v2";
+  const CATALOG_CACHE_VER = 2;
+  const DAILY_CACHE_KEY = "rs_papers_daily_v1";
   let lastAbsPending = -1;
   let filteredPapers = [];
   let pageIndex = 1; // 1-based
@@ -1004,9 +1148,9 @@
 
   function applyFilters(resetPage) {
     const q = document.getElementById("q").value.trim().toLowerCase();
-    const tag = document.getElementById("tag").value;
+    const tag = currentSection === "daily" ? "" : document.getElementById("tag").value;
     const sort = document.getElementById("sort").value || "date-desc";
-    let list = (lastCatalog.papers || []).slice();
+    let list = ((currentSection === "daily" ? lastDaily.papers : lastCatalog.papers) || []).slice();
     if (tag) {
       const tagL = tag.toLowerCase();
       list = list.filter(function (p) {
@@ -1093,7 +1237,7 @@
     const titleEl = document.getElementById("xlate-banner-title");
     const detailEl = document.getElementById("xlate-banner-detail");
     const metaEl = document.getElementById("xlate-banner-meta");
-    const prog = progressFromCatalog(lastCatalog);
+    const prog = progressFromCatalog(currentSection === "daily" ? lastDaily : lastCatalog);
     if (!prog.active) {
       banner.classList.remove("active");
       banner.hidden = true;
@@ -1214,6 +1358,13 @@
     return n;
   }
   function renderMeta() {
+    if (currentSection === "daily") {
+      document.getElementById("meta").textContent = t("dailyMeta")
+        .replace("{count}", String(typeof lastDaily.count === "number" ? lastDaily.count : (lastDaily.papers || []).length))
+        .replace("{date}", lastDaily.date || dailyDate || "—")
+        .replace("{when}", lastDaily.fetched_at || "—");
+      return;
+    }
     const when = lastCatalog.generated_at || "—";
     const all = lastCatalog.papers || [];
     const total = typeof lastCatalog.count === "number" ? lastCatalog.count : all.length;
@@ -1257,7 +1408,19 @@
 
   function applyManageUI() {
     const pending = document.getElementById("xlate-pending");
-    if (pending) pending.hidden = !canManage;
+    if (pending) pending.hidden = !canManage || currentSection === "daily";
+    const regen = document.getElementById("trend-regen");
+    if (regen) regen.hidden = !canManage || currentSection !== "daily" || !lastDaily.has_trend;
+    const tag = document.getElementById("tag");
+    if (tag) tag.hidden = currentSection === "daily";
+    const chips = document.getElementById("tag-chips");
+    if (chips) chips.hidden = currentSection === "daily";
+    const dailyTools = document.getElementById("daily-tools");
+    if (dailyTools) dailyTools.hidden = currentSection !== "daily";
+    const tabCat = document.getElementById("tab-catalog");
+    const tabDaily = document.getElementById("tab-daily");
+    if (tabCat) tabCat.classList.toggle("active", currentSection === "catalog");
+    if (tabDaily) tabDaily.classList.toggle("active", currentSection === "daily");
   }
 
   function renderPaperCard(p) {
@@ -1373,13 +1536,15 @@
       });
     }
     const prog = renderTranslateBanner();
-    const anyInflight = (lastCatalog.papers || []).some(function (p) {
+    const pool = currentSection === "daily" ? (lastDaily.papers || []) : (lastCatalog.papers || []);
+    const anyInflight = pool.some(function (p) {
       const st = p.translate_status || "";
       return st === "queued" || st === "running";
     });
+    const absSource = currentSection === "daily" ? lastDaily : lastCatalog;
     const absPending = currentLang() === "zh" && (
-      (Number(lastCatalog.abstract_zh_pending) || 0) > 0 ||
-      (lastCatalog.papers || []).some(function (p) {
+      (Number(absSource.abstract_zh_pending) || 0) > 0 ||
+      pool.some(function (p) {
         return String(p.abstract || "").trim() && !String(p.abstract_zh || "").trim();
       })
     );
@@ -1471,15 +1636,19 @@
       const st = p.translate_status || "";
       if (st === "queued" || st === "running") prevInflight[p.id || p.arxiv_id || ""] = st;
     });
-    (lastCatalog.papers || []).forEach(function (p) {
-      const id = p.id || p.arxiv_id || "";
-      if (!id || !jobs[id]) return;
-      const j = jobs[id];
-      p.translate_status = j.status || p.translate_status;
-      if (j.error != null) p.translate_error = j.error;
-      if (j.zh_pdf) p.zh_pdf = j.zh_pdf;
-      if (j.dual_pdf) p.dual_pdf = j.dual_pdf;
-    });
+    function applyJobs(list) {
+      (list || []).forEach(function (p) {
+        const id = p.id || p.arxiv_id || "";
+        if (!id || !jobs[id]) return;
+        const j = jobs[id];
+        p.translate_status = j.status || p.translate_status;
+        if (j.error != null) p.translate_error = j.error;
+        if (j.zh_pdf) p.zh_pdf = j.zh_pdf;
+        if (j.dual_pdf) p.dual_pdf = j.dual_pdf;
+      });
+    }
+    applyJobs(lastCatalog.papers);
+    applyJobs(lastDaily.papers);
     Object.keys(prevInflight).forEach(function (id) {
       if (id && !jobs[id]) needCatalog = true;
     });
@@ -1515,17 +1684,31 @@
     }
   }
 
-  function applyCatalogData(data) {
+  function applyCatalogData(data, opts) {
     if (!data || typeof data !== "object") return;
     const keepProgress = lastCatalog.translate_progress;
     const keepVisits = lastCatalog.visits;
-    lastCatalog = data;
+    const merge = !!(opts && opts.merge);
+    if (merge && Array.isArray(data.papers) && (lastCatalog.papers || []).length) {
+      const offset = Number(data.offset) || 0;
+      const papers = (lastCatalog.papers || []).slice();
+      for (let i = 0; i < data.papers.length; i++) {
+        papers[offset + i] = data.papers[i];
+      }
+      lastCatalog.papers = papers;
+      if (typeof data.count === "number") lastCatalog.count = data.count;
+      lastCatalog.partial = !!data.partial && papers.length < (data.count || papers.length);
+      lastCatalog.generated_at = data.generated_at || lastCatalog.generated_at;
+      if (data.snapshot_etag) lastCatalog.snapshot_etag = data.snapshot_etag;
+    } else {
+      lastCatalog = data;
+    }
     lastCatalog.can_manage = canManage;
     if (!lastCatalog.translate_progress && keepProgress) {
       lastCatalog.translate_progress = keepProgress;
     }
     if (typeof keepVisits === "number") lastCatalog.visits = keepVisits;
-    fillTags(data.papers || []);
+    fillTags(lastCatalog.papers || []);
     catalogLoaded = true;
     if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
   }
@@ -1541,11 +1724,13 @@
     return true;
   }
 
-  async function fetchCatalogJSON() {
+  async function fetchCatalogJSON(offset, limit) {
     const headers = authHeaders(false);
-    if (snapshotETag) headers["If-None-Match"] = '"' + snapshotETag + '"';
+    if (snapshotETag && !(typeof limit === "number" && limit > 0 && offset > 0)) {
+      headers["If-None-Match"] = '"' + snapshotETag + '"';
+    }
     // Default HTTP cache (ETag + Cache-Control). Do not bypass the browser cache.
-    let res = await fetch(catalogURL(), { credentials: "same-origin", headers: headers });
+    let res = await fetch(catalogURL(offset, limit), { credentials: "same-origin", headers: headers });
     if (res.status === 304) {
       return { res: res, data: null, notModified: true };
     }
@@ -1556,7 +1741,7 @@
       }
       // Empty 200 (rare tunnel glitch): retry once without validators.
       if (!catalogLoaded) {
-        res = await fetch(catalogURL(), { credentials: "same-origin", headers: authHeaders(false), cache: "reload" });
+        res = await fetch(catalogURL(offset, limit), { credentials: "same-origin", headers: authHeaders(false), cache: "reload" });
         if (res.ok) {
           const retryText = await res.text();
           if (retryText) {
@@ -1584,7 +1769,7 @@
       status.className = "";
     }
     try {
-      const got = await fetchCatalogJSON();
+      const got = await fetchCatalogJSON(0, PAGE_SIZE);
       const res = got.res;
       if (got.notModified) {
         catalogLoaded = true;
@@ -1592,6 +1777,7 @@
           status.textContent = "";
           status.className = "";
         }
+        loadCatalogTail(silent);
         return true;
       }
       if (!res.ok) {
@@ -1608,7 +1794,7 @@
         }
         return hadPapers;
       }
-      applyCatalogData(got.data);
+      applyCatalogData(got.data, { merge: false });
       writeCatalogCache(got.data, snapshotETag);
       if (!silent) {
         status.textContent = "";
@@ -1622,6 +1808,7 @@
           openReviewPanel(hid);
         }
       }
+      loadCatalogTail(true);
       return true;
     } catch (e) {
       if (!silent && !hadPapers) {
@@ -1638,6 +1825,217 @@
     return catalogFetch;
   }
 
+  async function loadCatalogTail(silent) {
+    const have = (lastCatalog.papers || []).length;
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : have;
+    if (total <= have) {
+      writeCatalogCache(lastCatalog, snapshotETag);
+      return;
+    }
+    try {
+      const got = await fetchCatalogJSON(have, 10000);
+      if (got.notModified || !got.res || !got.res.ok || !got.data) return;
+      applyCatalogData(got.data, { merge: true });
+      writeCatalogCache(lastCatalog, snapshotETag);
+      if (currentSection === "catalog") renderAll(false);
+    } catch (e) {
+      if (!silent) {
+        // Keep first-page cards; search will catch up on the next successful tail.
+      }
+    }
+  }
+
+  function todayYMD() {
+    const d = new Date();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return d.getUTCFullYear() + "-" + m + "-" + day;
+  }
+  function dailyURL(date, suffix) {
+    return prefix + "/papers/daily/" + encodeURIComponent(date) + (suffix || "");
+  }
+  function shiftDate(ymd, delta) {
+    const p = String(ymd || "").split("-");
+    if (p.length !== 3) return ymd;
+    const dt = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+    dt.setUTCDate(dt.getUTCDate() + delta);
+    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(dt.getUTCDate()).padStart(2, "0");
+    return dt.getUTCFullYear() + "-" + m + "-" + d;
+  }
+  function selectDailyDate(date, opts) {
+    dailyDate = date || todayYMD();
+    const input = document.getElementById("daily-date");
+    if (input) input.value = dailyDate;
+    renderDateChips();
+    return loadDaily(opts);
+  }
+  function setSection(section, date, opts) {
+    currentSection = section === "daily" ? "daily" : "catalog";
+    if (currentSection === "daily") {
+      const q = document.getElementById("q");
+      if (q) q.value = "";
+      if (date) dailyDate = date;
+    }
+    applyManageUI();
+    applyI18n();
+    if (currentSection === "daily") return selectDailyDate(dailyDate || date || todayYMD(), opts);
+    renderAll(true);
+    return load(opts);
+  }
+  function renderDateChips() {
+    const box = document.getElementById("daily-dates");
+    if (!box) return;
+    const dates = dailyDates || [];
+    box.innerHTML = dates.slice(0, 8).map(function (d) {
+      const active = d.date === dailyDate ? " active" : "";
+      const n = d.count ? '<span class="n">' + esc(String(d.count)) + "</span>" : "";
+      return '<button type="button" class="date-chip' + active + '" data-date="' + esc(d.date) + '">' +
+        esc(d.date.slice(5)) + n + "</button>";
+    }).join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        selectDailyDate(btn.getAttribute("data-date") || "");
+      });
+    });
+    const input = document.getElementById("daily-date");
+    if (input && dailyDate) input.value = dailyDate;
+  }
+  function readDailyCache() {
+    try {
+      const raw = localStorage.getItem(DAILY_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !obj.day || !Array.isArray(obj.day.papers)) return null;
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeDailyCache(day) {
+    if (!day || !day.date) return;
+    try {
+      localStorage.setItem(DAILY_CACHE_KEY, JSON.stringify({
+        saved_at: Date.now(),
+        day: day
+      }));
+    } catch (e) {}
+  }
+  function hydrateDailyCache() {
+    const cached = readDailyCache();
+    if (!cached) return false;
+    lastDaily = cached.day;
+    if (lastDaily.date) dailyDate = lastDaily.date;
+    return true;
+  }
+  async function loadDailyDates() {
+    try {
+      const res = await fetch(prefix + "/papers/daily/dates", { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      dailyDates = data.dates || [];
+      if (!dailyDate) dailyDate = data.default || todayYMD();
+      renderDateChips();
+    } catch (e) {}
+  }
+  async function loadDaily(opts) {
+    const silent = !!(opts && opts.silent);
+    const status = document.getElementById("status");
+    if (!dailyDate) dailyDate = todayYMD();
+    const had = (lastDaily.papers || []).length > 0 && lastDaily.date === dailyDate;
+    if (!silent && !had) {
+      status.textContent = t("loadingCatalog");
+      status.className = "";
+    }
+    try {
+      const res = await fetch(dailyURL(dailyDate), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) {
+        if (!had && !silent) {
+          status.textContent = t("dailyLoadErr") + " (" + res.status + ")";
+          status.className = "err";
+        }
+        if (had) renderAll(false);
+        return had;
+      }
+      const data = await res.json();
+      lastDaily = data;
+      dailyDate = data.date || dailyDate;
+      writeDailyCache(data);
+      if (!silent) {
+        status.textContent = "";
+        status.className = "";
+      }
+      applyManageUI();
+      renderDateChips();
+      renderAll(true);
+      return true;
+    } catch (e) {
+      if (!silent && !had) {
+        status.textContent = t("dailyLoadErr") + " — " + String(e);
+        status.className = "err";
+      }
+      if (had) renderAll(false);
+      return had;
+    }
+  }
+  function setTrendStatus(msg, kind) {
+    const el = document.getElementById("trend-status");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-status" + (kind ? " " + kind : "");
+  }
+  function renderTrend(data) {
+    document.getElementById("trend-title").textContent = (data && data.headline) || (lastDaily.date || dailyDate);
+    document.getElementById("trend-overview").textContent = (data && data.overview) || "";
+    const themes = document.getElementById("trend-themes");
+    const highs = document.getElementById("trend-highlights");
+    themes.innerHTML = ((data && data.themes) || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    highs.innerHTML = ((data && data.highlights) || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    document.getElementById("trend-outlook").textContent = (data && data.outlook) || "";
+    document.getElementById("trend-body").hidden = false;
+  }
+  async function openTrendPanel(force) {
+    const modal = document.getElementById("trend-modal");
+    modal.hidden = false;
+    document.getElementById("trend-body").hidden = true;
+    setTrendStatus(t("trendGenerating"), "busy");
+    try {
+      const url = dailyURL(dailyDate || lastDaily.date || todayYMD(), "/trend");
+      const res = await fetch(url, {
+        method: force ? "POST" : "GET",
+        credentials: "same-origin",
+        headers: authHeaders(!!force),
+        body: force ? JSON.stringify({ force: true }) : undefined
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || data.error) {
+        if (data.error === "need_llm") setTrendStatus(t("trendNeedLLM"), "err");
+        else setTrendStatus(t(force ? "trendGenFail" : "trendLoadFail"), "err");
+        return;
+      }
+      if (!data.headline && !data.overview) {
+        setTrendStatus(t("trendEmpty"), "");
+        return;
+      }
+      setTrendStatus("", "");
+      lastDaily.has_trend = true;
+      applyManageUI();
+      renderTrend(data);
+    } catch (e) {
+      setTrendStatus(t("trendLoadFail") + " — " + String(e), "err");
+    }
+  }
+  function closeTrendModal() {
+    document.getElementById("trend-modal").hidden = true;
+  }
+
   async function loadProgress(opts) {
     try {
       const res = await fetch(progressURL(), { credentials: "same-origin", headers: authHeaders(false) });
@@ -1652,6 +2050,7 @@
   }
 
   async function load(opts) {
+    if (currentSection === "daily") return loadDaily(opts);
     const silent = !!(opts && opts.silent);
     const hadCache = catalogLoaded && (lastCatalog.papers || []).length > 0;
     await Promise.all([
@@ -1711,9 +2110,14 @@
   }
 
   function findCatalogPaper(id) {
-    return (lastCatalog.papers || []).find(function (p) {
-      return (p.id || p.arxiv_id || "") === id;
-    }) || null;
+    const pools = [lastCatalog.papers || [], lastDaily.papers || []];
+    for (let i = 0; i < pools.length; i++) {
+      const hit = pools[i].find(function (p) {
+        return (p.id || p.arxiv_id || "") === id;
+      });
+      if (hit) return hit;
+    }
+    return null;
   }
 
   function patchCatalogReview(id, data) {
@@ -2216,10 +2620,32 @@
     }
     if (!openReview || openReview.id !== hid) openReviewPanel(hid);
   });
+  document.getElementById("tab-catalog").addEventListener("click", function () {
+    setSection("catalog");
+  });
+  document.getElementById("tab-daily").addEventListener("click", function () {
+    setSection("daily");
+  });
+  document.getElementById("daily-prev").addEventListener("click", function () {
+    selectDailyDate(shiftDate(dailyDate || todayYMD(), -1));
+  });
+  document.getElementById("daily-next").addEventListener("click", function () {
+    selectDailyDate(shiftDate(dailyDate || todayYMD(), 1));
+  });
+  document.getElementById("daily-date").addEventListener("change", function () {
+    selectDailyDate(this.value || todayYMD());
+  });
+  document.getElementById("trend-open").addEventListener("click", function () { openTrendPanel(false); });
+  document.getElementById("trend-regen").addEventListener("click", function () { openTrendPanel(true); });
+  document.querySelectorAll("[data-trend-close]").forEach(function (el) {
+    el.addEventListener("click", function () { closeTrendModal(); });
+  });
   applyI18n();
   applyManageUI();
   renderTagChips();
   hydrateCatalogCache();
+  hydrateDailyCache();
+  loadDailyDates();
   load();
 })();
 </script>

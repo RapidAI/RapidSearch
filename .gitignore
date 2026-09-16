@@ -56,6 +56,10 @@ agent-papers/translate.pause
 agent-papers/reviews/
 **/agent-papers/reviews/
 
+# Hugging Face Daily caches / trend summaries (runtime)
+agent-papers/hf-daily/
+**/agent-papers/hf-daily/
+
 # Local rebuild leftovers
 search-proxy-linux
 search-service.prev
