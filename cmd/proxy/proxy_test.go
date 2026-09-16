@@ -60,7 +60,7 @@ func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 func TestProxyPapersSkipsBearerSoLoginCanRender(t *testing.T) {
 	h := testProxy(t)
 	for _, path := range []string{
-		"/papers", "/papers/", "/papers/api", "/papers/pdf/x.pdf",
+		"/papers", "/papers/", "/papers/api", "/papers/api/catalog", "/papers/api/progress", "/papers/pdf/x.pdf",
 		"/papers/pdf/zh/2401.05459", "/papers/pdf/dual/2401.05459",
 		"/papers/translate", "/papers/translate/config",
 		"/papers/review/2401.05459", "/papers/review/2401.05459/generate",

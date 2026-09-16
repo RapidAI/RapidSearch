@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	MaxFrame    = 4 << 20   // 4 MiB JSON frame
-	StreamChunk = 256 << 10 // raw bytes per resp-chunk
+	MaxFrame        = 4 << 20      // 4 MiB JSON frame
+	StreamChunk     = 256 << 10    // raw bytes per resp-chunk
+	BufferedBodyMax = MaxFrame / 2 // 2 MiB — doBackend must never silently exceed this
+	StreamThreshold = 1 << 20      // stream GET bodies over 1 MiB
 )
 
 const (
@@ -92,10 +94,23 @@ func PathIsPapersPDF(p string) bool {
 	return strings.HasPrefix(pathOnly(p), "/papers/pdf/")
 }
 
+// PathIsPapersCatalogAPI reports the heavy catalog JSON (live or snapshot).
+// /papers/api/progress is tiny and is not included.
+func PathIsPapersCatalogAPI(p string) bool {
+	p = pathOnly(p)
+	if p == "/papers/api/progress" {
+		return false
+	}
+	if p == "/papers/api" || p == "/papers/api/catalog" {
+		return true
+	}
+	return strings.HasPrefix(p, "/papers/static/")
+}
+
 // PathNeedsStream reports paths that must use resp-head/chunk/end framing
-// instead of a single JSON response body (large binary downloads).
+// instead of a single JSON response body (large downloads and catalog JSON).
 func PathNeedsStream(p string) bool {
-	return PathIsDownload(p) || PathIsPapersPDF(p)
+	return PathIsDownload(p) || PathIsPapersPDF(p) || PathIsPapersCatalogAPI(p)
 }
 
 // PathPassthroughAuth reports paths where the public proxy skips Bearer

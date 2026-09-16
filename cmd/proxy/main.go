@@ -242,43 +242,10 @@ func (h *hub) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	if tunnel.PathNeedsStream(path) {
-		h.serveStream(ctx, w, s, fr)
-		return
-	}
-	resp, err := s.roundTrip(ctx, fr)
-	if err != nil {
-		if err == errReplaced || strings.Contains(err.Error(), "offline") {
-			writeErr(w, http.StatusServiceUnavailable, "search backend offline", "offline")
-			return
-		}
-		log.Printf("proxy forward %s %s: %v", r.Method, path, err)
-		writeErr(w, http.StatusBadGateway, "tunnel error", "tunnel")
-		return
-	}
-	if resp.Error != "" && resp.Status == 0 {
-		writeErr(w, http.StatusBadGateway, "backend error", "tunnel")
-		return
-	}
-	raw, err := base64.StdEncoding.DecodeString(resp.Body)
-	if err != nil {
-		raw = []byte(resp.Body)
-	}
-	for k, v := range resp.Headers {
-		if hopHeaders[strings.ToLower(k)] {
-			continue
-		}
-		w.Header().Set(k, v)
-	}
-	if w.Header().Get("Content-Type") == "" {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	}
-	status := resp.Status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	w.WriteHeader(status)
-	_, _ = w.Write(raw)
+	// Always accept resp-head/chunk/end so the relay can stream large GET
+	// bodies (catalog JSON grew past the 2 MiB buffered frame). serveStream
+	// still handles a single TypeResp for small replies.
+	h.serveStream(ctx, w, s, fr)
 }
 
 func (h *hub) serveStream(ctx context.Context, w http.ResponseWriter, s *session, fr tunnel.Frame) {

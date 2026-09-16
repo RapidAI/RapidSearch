@@ -176,16 +176,8 @@ func runOnce(ctx context.Context, addr, token, backend string, client *http.Clie
 			// keepalive
 		case tunnel.TypeReq:
 			go func(f tunnel.Frame) {
-				if tunnel.PathNeedsStream(f.Path) {
-					if err := streamBackend(ctx, client, backend, f, write); err != nil {
-						log.Printf("stream download id=%s: %v", f.ID, err)
-						_ = c.Close()
-					}
-					return
-				}
-				resp := doBackend(ctx, client, backend, f)
-				if err := write(resp); err != nil {
-					log.Printf("write resp id=%s: %v", f.ID, err)
+				if err := serveBackend(ctx, client, backend, f, write); err != nil {
+					log.Printf("backend id=%s path=%s: %v", f.ID, f.Path, err)
 					_ = c.Close()
 				}
 			}(f)
@@ -193,7 +185,46 @@ func runOnce(ctx context.Context, addr, token, backend string, client *http.Clie
 	}
 }
 
+func serveBackend(ctx context.Context, client *http.Client, backend string, f tunnel.Frame, write func(tunnel.Frame) error) error {
+	if tunnel.PathNeedsStream(f.Path) {
+		return streamBackend(ctx, client, backend, f, write)
+	}
+	res, err := backendDo(ctx, client, backend, f)
+	if err != nil {
+		return write(tunnel.Frame{Type: "resp", ID: f.ID, Status: 502, Error: err.Error()})
+	}
+	defer res.Body.Close()
+	if res.ContentLength > tunnel.StreamThreshold {
+		return writeStreamResponse(res, f, write)
+	}
+	raw, overflow, readErr := readBufferedBody(res.Body, tunnel.StreamThreshold)
+	if overflow {
+		return writeStreamFromPrefetch(res, raw, f, write)
+	}
+	if readErr != nil && len(raw) == 0 {
+		return write(tunnel.Frame{Type: "resp", ID: f.ID, Status: 502, Error: readErr.Error()})
+	}
+	return write(bufferedRespFrame(f.ID, res, raw))
+}
+
 func doBackend(ctx context.Context, client *http.Client, backend string, f tunnel.Frame) tunnel.Frame {
+	path := f.Path
+	if path == "" {
+		path = "/"
+	}
+	res, err := backendDo(ctx, client, backend, f)
+	if err != nil {
+		return tunnel.Frame{Type: "resp", ID: f.ID, Status: 502, Error: err.Error()}
+	}
+	defer res.Body.Close()
+	raw, overflow, _ := readBufferedBody(res.Body, tunnel.BufferedBodyMax)
+	if overflow {
+		return tooLargeResp(f.ID)
+	}
+	return bufferedRespFrame(f.ID, res, raw)
+}
+
+func backendDo(ctx context.Context, client *http.Client, backend string, f tunnel.Frame) (*http.Response, error) {
 	path := f.Path
 	if path == "" {
 		path = "/"
@@ -213,7 +244,7 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 	}
 	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {
-		return tunnel.Frame{Type: "resp", ID: f.ID, Status: 502, Error: err.Error()}
+		return nil, err
 	}
 	for k, v := range f.Headers {
 		lk := strings.ToLower(k)
@@ -228,25 +259,62 @@ func doBackend(ctx context.Context, client *http.Client, backend string, f tunne
 		req.Header.Set(k, v)
 	}
 	log.Printf("backend %s %s", method, path)
-	res, err := client.Do(req)
-	if err != nil {
-		return tunnel.Frame{Type: "resp", ID: f.ID, Status: 502, Error: err.Error()}
-	}
-	defer res.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(res.Body, tunnel.MaxFrame/2))
+	return client.Do(req)
+}
+
+func responseHeaders(res *http.Response) map[string]string {
 	hdrs := map[string]string{}
+	if res == nil {
+		return hdrs
+	}
 	for k, vs := range res.Header {
-		if len(vs) > 0 && strings.ToLower(k) != "transfer-encoding" && strings.ToLower(k) != "content-length" {
+		lk := strings.ToLower(k)
+		if lk == "transfer-encoding" || lk == "content-length" {
+			continue
+		}
+		if len(vs) > 0 {
 			hdrs[k] = vs[0]
 		}
 	}
+	return hdrs
+}
+
+func bufferedRespFrame(id string, res *http.Response, raw []byte) tunnel.Frame {
 	return tunnel.Frame{
 		Type:    "resp",
-		ID:      f.ID,
+		ID:      id,
 		Status:  res.StatusCode,
-		Headers: hdrs,
+		Headers: responseHeaders(res),
 		Body:    base64.StdEncoding.EncodeToString(raw),
 	}
+}
+
+func tooLargeResp(id string) tunnel.Frame {
+	body := []byte(`{"ok":false,"error":"response too large for tunnel frame; use streaming","code":"tunnel"}`)
+	return tunnel.Frame{
+		Type:   "resp",
+		ID:     id,
+		Status: http.StatusRequestEntityTooLarge,
+		Headers: map[string]string{
+			"Content-Type": "application/json; charset=utf-8",
+		},
+		Body: base64.StdEncoding.EncodeToString(body),
+	}
+}
+
+// readBufferedBody reads at most limit bytes. overflow is true when the
+// backend sent more than limit — callers must not treat that as a complete 200.
+func readBufferedBody(r io.Reader, limit int64) (raw []byte, overflow bool, err error) {
+	if limit <= 0 {
+		limit = tunnel.BufferedBodyMax
+	}
+	raw, err = io.ReadAll(io.LimitReader(r, limit+1))
+	if int64(len(raw)) > limit {
+		// Include the peeked overflow byte so streaming can continue
+		// without dropping a byte from the backend body.
+		return raw, true, nil
+	}
+	return raw, false, err
 }
 
 func streamBackend(ctx context.Context, client *http.Client, backend string, f tunnel.Frame, write func(tunnel.Frame) error) error {
@@ -289,23 +357,30 @@ func streamBackend(ctx context.Context, client *http.Client, backend string, f t
 		return write(tunnel.Frame{Type: tunnel.TypeRespEnd, ID: f.ID, Error: err.Error()})
 	}
 	defer res.Body.Close()
+	return writeStreamResponse(res, f, write)
+}
 
-	hdrs := map[string]string{}
-	for k, vs := range res.Header {
-		lk := strings.ToLower(k)
-		if lk == "transfer-encoding" || lk == "content-length" {
-			continue
-		}
-		if len(vs) > 0 {
-			hdrs[k] = vs[0]
-		}
-	}
+func writeStreamResponse(res *http.Response, f tunnel.Frame, write func(tunnel.Frame) error) error {
+	return writeStreamFromPrefetch(res, nil, f, write)
+}
+
+func writeStreamFromPrefetch(res *http.Response, prefetch []byte, f tunnel.Frame, write func(tunnel.Frame) error) error {
+	hdrs := responseHeaders(res)
 	// Keep content-length when known so clients can show progress.
 	if res.ContentLength > 0 {
 		hdrs["Content-Length"] = fmt.Sprintf("%d", res.ContentLength)
 	}
 	if err := write(tunnel.Frame{Type: tunnel.TypeRespHead, ID: f.ID, Status: res.StatusCode, Headers: hdrs}); err != nil {
 		return err
+	}
+	if len(prefetch) > 0 {
+		if err := write(tunnel.Frame{
+			Type: tunnel.TypeRespChunk,
+			ID:   f.ID,
+			Body: base64.StdEncoding.EncodeToString(prefetch),
+		}); err != nil {
+			return err
+		}
 	}
 	buf := make([]byte, tunnel.StreamChunk)
 	for {

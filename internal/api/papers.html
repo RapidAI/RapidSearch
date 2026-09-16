@@ -590,6 +590,8 @@
       source: "Source",
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
+      loadingCatalog: "Loading catalog…",
+      catalogUnavailable: "Catalog snapshot is unavailable.",
       unauthorized: "Unauthorized — sign in via Settings first.",
       llmSettingsHint: "Configure the translation LLM in ",
       llmSettingsLink: "Settings",
@@ -682,6 +684,8 @@
       source: "来源",
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
+      loadingCatalog: "正在加载目录…",
+      catalogUnavailable: "目录快照不可用。",
       unauthorized: "未授权 — 请先在设置页登录。",
       llmSettingsHint: "在",
       llmSettingsLink: "设置",
@@ -884,6 +888,12 @@
   function apiURL() {
     return prefix + "/papers/api";
   }
+  function catalogURL() {
+    return prefix + "/papers/api/catalog";
+  }
+  function progressURL() {
+    return prefix + "/papers/api/progress";
+  }
   function pdfURL(localPath, download) {
     let u = prefix + localPath;
     if (download) u += (u.indexOf("?") >= 0 ? "&" : "?") + "download=1";
@@ -892,6 +902,9 @@
 
   let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false };
   let canManage = false;
+  let catalogLoaded = false;
+  let snapshotETag = "";
+  let lastAbsPending = -1;
   let filteredPapers = [];
   let pageIndex = 1; // 1-based
   let pollTimer = 0;
@@ -1071,13 +1084,13 @@
       if (pollTimer && !idlePoll) return;
       if (pollTimer) clearInterval(pollTimer);
       idlePoll = false;
-      pollTimer = setInterval(function () { load({ silent: true }); }, POLL_ACTIVE_MS);
+      pollTimer = setInterval(function () { loadProgress({ silent: true }); }, POLL_ACTIVE_MS);
       return;
     }
     if (pollTimer && idlePoll) return;
     if (pollTimer) clearInterval(pollTimer);
     idlePoll = true;
-    pollTimer = setInterval(function () { load({ silent: true }); }, POLL_IDLE_MS);
+    pollTimer = setInterval(function () { loadProgress({ silent: true }); }, POLL_IDLE_MS);
   }
 
   function briefChars(text, max) {
@@ -1379,34 +1392,106 @@
     });
   }
 
-  async function load(opts) {
+  function applyProgressData(data) {
+    if (!data || typeof data !== "object") return false;
+    let needCatalog = false;
+    if (data.snapshot_etag && snapshotETag && data.snapshot_etag !== snapshotETag) {
+      needCatalog = true;
+    }
+    if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+    if (data.translate_progress) lastCatalog.translate_progress = data.translate_progress;
+    if (typeof data.abstract_zh_pending === "number") {
+      if (lastAbsPending >= 0 && data.abstract_zh_pending < lastAbsPending) needCatalog = true;
+      lastAbsPending = data.abstract_zh_pending;
+      lastCatalog.abstract_zh_pending = data.abstract_zh_pending;
+    }
+    if (typeof data.can_manage === "boolean") {
+      canManage = data.can_manage;
+      lastCatalog.can_manage = data.can_manage;
+      applyManageUI();
+    }
+    if (typeof data.visits === "number") lastCatalog.visits = data.visits;
+    const jobs = data.jobs || {};
+    const prevInflight = {};
+    (lastCatalog.papers || []).forEach(function (p) {
+      const st = p.translate_status || "";
+      if (st === "queued" || st === "running") prevInflight[p.id || p.arxiv_id || ""] = st;
+    });
+    (lastCatalog.papers || []).forEach(function (p) {
+      const id = p.id || p.arxiv_id || "";
+      if (!id || !jobs[id]) return;
+      const j = jobs[id];
+      p.translate_status = j.status || p.translate_status;
+      if (j.error != null) p.translate_error = j.error;
+      if (j.zh_pdf) p.zh_pdf = j.zh_pdf;
+      if (j.dual_pdf) p.dual_pdf = j.dual_pdf;
+    });
+    Object.keys(prevInflight).forEach(function (id) {
+      if (id && !jobs[id]) needCatalog = true;
+    });
+    return needCatalog;
+  }
+
+  async function loadCatalog(opts) {
     const silent = !!(opts && opts.silent);
     const status = document.getElementById("status");
-    if (!silent) {
-      status.textContent = "";
+    const list = document.getElementById("list");
+    if (!silent && !catalogLoaded) {
+      status.textContent = t("loadingCatalog");
       status.className = "";
+      if (list && !(lastCatalog.papers || []).length) {
+        list.innerHTML = '<p class="empty">' + esc(t("loadingCatalog")) + "</p>";
+      }
     }
     try {
-      // Always fetch the full catalog so client search/sort/pagination and
-      // page-level translate_progress stay accurate while jobs run.
-      const res = await fetch(apiURL(), { credentials: "same-origin", headers: authHeaders(false) });
+      // First paint comes from the static snapshot (streamed through the tunnel).
+      // Filter/tag/search keep working against this in-memory copy.
+      const res = await fetch(catalogURL(), { credentials: "same-origin", headers: authHeaders(false) });
       if (!res.ok) {
-        status.textContent = t("loadErr") + " (" + res.status + ")";
+        status.textContent = t("catalogUnavailable") + " (" + res.status + ")";
         status.className = "err";
-        return;
+        return false;
       }
       const data = await res.json();
       canManage = !!data.can_manage;
       applyManageUI();
       fillTags(data.papers || []);
       lastCatalog = data;
+      catalogLoaded = true;
+      if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+      if (!silent) {
+        status.textContent = "";
+        status.className = "";
+      }
       renderAll(false);
+      return true;
     } catch (e) {
       if (!silent) {
-        status.textContent = String(e);
+        status.textContent = t("catalogUnavailable") + " — " + String(e);
         status.className = "err";
       }
+      return false;
     }
+  }
+
+  async function loadProgress(opts) {
+    try {
+      const res = await fetch(progressURL(), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      const needCatalog = applyProgressData(data);
+      renderAll(false);
+      if (needCatalog) loadCatalog({ silent: true });
+    } catch (e) {
+      // Progress is best-effort: keep the snapshot list on screen.
+    }
+  }
+
+  async function load(opts) {
+    const silent = !!(opts && opts.silent);
+    const ok = await loadCatalog({ silent: silent && catalogLoaded });
+    if (!ok) return;
+    await loadProgress({ silent: true });
   }
 
   async function enqueue(payload) {
