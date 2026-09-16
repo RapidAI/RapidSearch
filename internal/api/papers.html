@@ -624,6 +624,7 @@
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
       loadingCatalog: "Loading catalog…",
+      updatingCatalog: "Updating catalog…",
       catalogUnavailable: "Catalog snapshot is unavailable.",
       unauthorized: "Unauthorized — sign in via Settings first.",
       llmSettingsHint: "Configure the translation LLM in ",
@@ -725,6 +726,7 @@
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
       loadingCatalog: "正在加载目录…",
+      updatingCatalog: "正在更新目录…",
       catalogUnavailable: "目录快照不可用。",
       unauthorized: "未授权 — 请先在设置页登录。",
       llmSettingsHint: "在",
@@ -951,6 +953,9 @@
   let canManage = false;
   let catalogLoaded = false;
   let snapshotETag = "";
+  let catalogFetch = null;
+  const CATALOG_CACHE_KEY = "rs_papers_catalog_v1";
+  const CATALOG_CACHE_VER = 1;
   let lastAbsPending = -1;
   let filteredPapers = [];
   let pageIndex = 1; // 1-based
@@ -1481,33 +1486,130 @@
     return needCatalog;
   }
 
-  async function loadCatalog(opts) {
+  function readCatalogCache() {
+    try {
+      const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || obj.v !== CATALOG_CACHE_VER || !obj.catalog || !Array.isArray(obj.catalog.papers)) {
+        return null;
+      }
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeCatalogCache(catalog, etag) {
+    if (!catalog || !Array.isArray(catalog.papers)) return;
+    try {
+      const copy = Object.assign({}, catalog, { can_manage: false, translate_progress: null });
+      localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({
+        v: CATALOG_CACHE_VER,
+        etag: etag || copy.snapshot_etag || "",
+        saved_at: Date.now(),
+        catalog: copy
+      }));
+    } catch (e) {
+      // Quota or private mode — HTTP cache / gzip still apply.
+    }
+  }
+
+  function applyCatalogData(data) {
+    if (!data || typeof data !== "object") return;
+    const keepProgress = lastCatalog.translate_progress;
+    const keepVisits = lastCatalog.visits;
+    lastCatalog = data;
+    lastCatalog.can_manage = canManage;
+    if (!lastCatalog.translate_progress && keepProgress) {
+      lastCatalog.translate_progress = keepProgress;
+    }
+    if (typeof keepVisits === "number") lastCatalog.visits = keepVisits;
+    fillTags(data.papers || []);
+    catalogLoaded = true;
+    if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+  }
+
+  function hydrateCatalogCache() {
+    const cached = readCatalogCache();
+    if (!cached) return false;
+    applyCatalogData(cached.catalog);
+    if (cached.etag) snapshotETag = cached.etag;
+    canManage = false;
+    applyManageUI();
+    renderAll(false);
+    return true;
+  }
+
+  async function fetchCatalogJSON() {
+    const headers = authHeaders(false);
+    if (snapshotETag) headers["If-None-Match"] = '"' + snapshotETag + '"';
+    // Default HTTP cache (ETag + Cache-Control). Do not bypass the browser cache.
+    let res = await fetch(catalogURL(), { credentials: "same-origin", headers: headers });
+    if (res.status === 304) {
+      return { res: res, data: null, notModified: true };
+    }
+    if (res.ok) {
+      const text = await res.text();
+      if (text) {
+        return { res: res, data: JSON.parse(text), notModified: false };
+      }
+      // Empty 200 (rare tunnel glitch): retry once without validators.
+      if (!catalogLoaded) {
+        res = await fetch(catalogURL(), { credentials: "same-origin", headers: authHeaders(false), cache: "reload" });
+        if (res.ok) {
+          const retryText = await res.text();
+          if (retryText) {
+            return { res: res, data: JSON.parse(retryText), notModified: false };
+          }
+        }
+      }
+    }
+    return { res: res, data: null, notModified: false };
+  }
+
+  async function loadCatalogInner(opts) {
     const silent = !!(opts && opts.silent);
     const status = document.getElementById("status");
     const list = document.getElementById("list");
-    if (!silent && !catalogLoaded) {
+    const hadPapers = (lastCatalog.papers || []).length > 0;
+    if (!silent && !hadPapers) {
       status.textContent = t("loadingCatalog");
       status.className = "";
-      if (list && !(lastCatalog.papers || []).length) {
+      if (list) {
         list.innerHTML = '<p class="empty">' + esc(t("loadingCatalog")) + "</p>";
       }
+    } else if (!silent && hadPapers) {
+      status.textContent = t("updatingCatalog");
+      status.className = "";
     }
     try {
-      // First paint comes from the static snapshot (streamed through the tunnel).
-      // Filter/tag/search keep working against this in-memory copy.
-      const res = await fetch(catalogURL(), { credentials: "same-origin", headers: authHeaders(false) });
-      if (!res.ok) {
-        status.textContent = t("catalogUnavailable") + " (" + res.status + ")";
-        status.className = "err";
-        return false;
+      const got = await fetchCatalogJSON();
+      const res = got.res;
+      if (got.notModified) {
+        catalogLoaded = true;
+        if (!silent) {
+          status.textContent = "";
+          status.className = "";
+        }
+        return true;
       }
-      const data = await res.json();
-      canManage = !!data.can_manage;
-      applyManageUI();
-      fillTags(data.papers || []);
-      lastCatalog = data;
-      catalogLoaded = true;
-      if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+      if (!res.ok) {
+        if (!hadPapers) {
+          status.textContent = t("catalogUnavailable") + " (" + res.status + ")";
+          status.className = "err";
+        }
+        return hadPapers;
+      }
+      if (!got.data) {
+        if (!hadPapers) {
+          status.textContent = t("catalogUnavailable");
+          status.className = "err";
+        }
+        return hadPapers;
+      }
+      applyCatalogData(got.data);
+      writeCatalogCache(got.data, snapshotETag);
       if (!silent) {
         status.textContent = "";
         status.className = "";
@@ -1522,12 +1624,18 @@
       }
       return true;
     } catch (e) {
-      if (!silent) {
+      if (!silent && !hadPapers) {
         status.textContent = t("catalogUnavailable") + " — " + String(e);
         status.className = "err";
       }
-      return false;
+      return hadPapers;
     }
+  }
+
+  async function loadCatalog(opts) {
+    if (catalogFetch) return catalogFetch;
+    catalogFetch = loadCatalogInner(opts).finally(function () { catalogFetch = null; });
+    return catalogFetch;
   }
 
   async function loadProgress(opts) {
@@ -1536,7 +1644,7 @@
       if (!res.ok) return;
       const data = await res.json();
       const needCatalog = applyProgressData(data);
-      renderAll(false);
+      if ((lastCatalog.papers || []).length) renderAll(false);
       if (needCatalog) loadCatalog({ silent: true });
     } catch (e) {
       // Progress is best-effort: keep the snapshot list on screen.
@@ -1545,9 +1653,11 @@
 
   async function load(opts) {
     const silent = !!(opts && opts.silent);
-    const ok = await loadCatalog({ silent: silent && catalogLoaded });
-    if (!ok) return;
-    await loadProgress({ silent: true });
+    const hadCache = catalogLoaded && (lastCatalog.papers || []).length > 0;
+    await Promise.all([
+      loadCatalog({ silent: silent || hadCache }),
+      loadProgress({ silent: true })
+    ]);
   }
 
   async function enqueue(payload) {
@@ -2109,6 +2219,7 @@
   applyI18n();
   applyManageUI();
   renderTagChips();
+  hydrateCatalogCache();
   load();
 })();
 </script>
