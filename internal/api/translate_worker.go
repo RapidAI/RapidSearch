@@ -100,6 +100,7 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 				j.PageCount = p.PageCount
 				j.Lane = paperTranslateLane(p.PageCount)
 				j.TimeoutCount = 0
+				j.InterruptCount = 0
 				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				if s.status.Jobs == nil {
 					s.status.Jobs = map[string]translateJob{}
@@ -138,6 +139,7 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 		j.PageCount = p.PageCount
 		j.Lane = paperTranslateLane(p.PageCount)
 		j.TimeoutCount = 0
+		j.InterruptCount = 0
 		j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		if s.status.Jobs == nil {
 			s.status.Jobs = map[string]translateJob{}
@@ -195,6 +197,7 @@ func (s *translateService) loop() {
 		// before we adopt leftovers or start the next paper.
 		s.reapTimedOut()
 		s.reconcileExternal()
+		s.recoverInterruptedJobs()
 		started := s.startAvailable()
 		wait := 3 * time.Second
 		if started > 0 || s.occupiedSlots() > 0 {
