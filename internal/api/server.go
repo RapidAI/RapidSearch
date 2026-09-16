@@ -102,6 +102,7 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/papers/pdf/dual/{name...}", s.handlePapersPDF)
 	s.mux.HandleFunc("/papers/review/{id}/generate", s.handlePapersReviewGenerate)
 	s.mux.HandleFunc("/papers/review/{id}/rate", s.handlePapersReviewRate)
+	s.mux.HandleFunc("/papers/review/{id}/refs", s.handlePapersReviewRefs)
 	s.mux.HandleFunc("/papers/review/{id}", s.handlePapersReview)
 	return s
 }

@@ -62,9 +62,11 @@ type paperReviewFile struct {
 	Analysis    paperReviewAnalysis `json:"analysis"`
 	Model       string              `json:"model,omitempty"`
 	GeneratedAt string              `json:"generated_at,omitempty"`
-	Ratings     []paperReviewRating `json:"ratings,omitempty"`
-	AvgStars    float64             `json:"avg_stars"`
-	RatingCount int                 `json:"rating_count"`
+	Ratings       []paperReviewRating `json:"ratings,omitempty"`
+	AvgStars      float64             `json:"avg_stars"`
+	RatingCount   int                 `json:"rating_count"`
+	Refs          []paperReviewRef    `json:"refs,omitempty"`
+	RefsUpdatedAt string              `json:"refs_updated_at,omitempty"`
 }
 
 func (r *paperReviewFile) hasAnalysis() bool {
@@ -83,6 +85,7 @@ type paperReviewView struct {
 	HasReview   bool                `json:"has_review"`
 	MyStars     int                 `json:"my_stars,omitempty"`
 	Skipped     bool                `json:"skipped,omitempty"`
+	Refs        []paperReviewRef    `json:"refs,omitempty"`
 }
 
 type reviewSummary struct {
@@ -333,6 +336,7 @@ func (rec paperReviewFile) public(raterKey string, skipped bool) paperReviewView
 		HasReview:   rec.hasAnalysis(),
 		MyStars:     myStars(rec.Ratings, raterKey),
 		Skipped:     skipped,
+		Refs:        rec.Refs,
 	}
 }
 
@@ -741,6 +745,11 @@ func (s *Server) handlePapersReviewGenerate(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), reviewHTTPTimeout)
 	defer cancel()
 	rec, skipped, err := ps.reviews.generate(ctx, paper, req.Force)
+	if err == nil && rec.hasAnalysis() && !skipped {
+		if updated, rerr := ps.reviews.refreshRefs(id, catalogPapersForRefs(ps)); rerr == nil {
+			rec = updated
+		}
+	}
 	if err != nil {
 		if err == errReviewLLMNotReady {
 			writeErr(w, http.StatusServiceUnavailable, err.Error(), search.CodeEngine, nil, "")

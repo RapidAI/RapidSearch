@@ -440,6 +440,7 @@ func TestPapersPageReviewUI(t *testing.T) {
 		`id="review-modal"`,
 		"/papers/review/",
 		"review-btn",
+		"id=\"review-update-refs\"",
 		"方法原理与创新",
 		"方法本质",
 		"实验完整性",
@@ -449,6 +450,14 @@ func TestPapersPageReviewUI(t *testing.T) {
 		"setReviewRatingEnabled",
 		"openReview.ready",
 		"disabled",
+		"reviewUpdateRefs",
+		"更新引用",
+		"Update references",
+		"review-update-refs",
+		"data-review-id",
+		"#review=",
+		"/refs",
+		"linkReviewText",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("papers.html missing %q", want)
