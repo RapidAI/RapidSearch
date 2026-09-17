@@ -752,7 +752,9 @@
       xlateBusy: "Translation already in progress",
       xlateErrPrefix: "Error: ",
       xlate: "Translate",
+      xlatePriority: "Prioritize",
       xlatePending: "Translate pending",
+      prioritizedOk: "Moved to the front of the queue.",
       pages: "{n} pages",
       xlateSkipPages: "Over 100 pages — skipped translation",
       xlateSlowLane: "Slow translation queue",
@@ -874,7 +876,9 @@
       xlateBusy: "正在翻译中",
       xlateErrPrefix: "错误：",
       xlate: "翻译",
+      xlatePriority: "优先",
       xlatePending: "翻译待处理",
+      prioritizedOk: "已移到队列最近位置。",
       pages: "{n} 页",
       xlateSkipPages: "超过 100 页，不翻译",
       xlateSlowLane: "慢速翻译队列",
@@ -1460,14 +1464,18 @@
     } else if (slowLane) {
       actions += '<span class="status-pill slow">' + esc(t("xlateSlowLane")) + "</span>";
     }
-    if (!tooMany && canManage && p.has_local && st !== "queued" && st !== "running") {
-      // One button: 「翻译」 unless a completed translation exists → 「再次翻译」(force).
+    if (!tooMany && canManage && p.has_local && st !== "running") {
+      // Manage-only. Card clicks always send priority:true so the job is
+      // inserted (or bumped) at the head of its lane, after currently
+      // running work. Translate-all stays FIFO tail.
       // Hidden for anonymous visitors; 中文版 / 中英对照 links above stay public.
       const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
-      if (completed) {
+      if (st === "queued") {
+        actions += '<button type="button" class="xlate-one xlate-priority" data-id="' + esc(p.id || "") + '" data-priority="1">' + esc(t("xlatePriority")) + "</button>";
+      } else if (completed) {
         actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
       } else {
-        actions += '<button type="button" class="xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+        actions += '<button type="button" class="primary xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
       }
     }
     let errHtml = "";
@@ -1524,7 +1532,7 @@
       list.innerHTML = pagePapers.map(renderPaperCard).join("");
       list.querySelectorAll(".xlate-one").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          const payload = { id: btn.getAttribute("data-id") || "" };
+          const payload = { id: btn.getAttribute("data-id") || "", priority: true };
           if (btn.getAttribute("data-force") === "1") payload.force = true;
           enqueue(payload);
         });
@@ -2089,7 +2097,9 @@
         if (rejected[id] === "too_many_pages") pageSkips++;
       });
       if (n) {
-        status.textContent = t("queuedOk").replace("{n}", String(n));
+        status.textContent = (payload && payload.priority)
+          ? t("prioritizedOk")
+          : t("queuedOk").replace("{n}", String(n));
         status.className = "ok";
       } else if (pageSkips) {
         status.textContent = t("xlateSkipPages");
