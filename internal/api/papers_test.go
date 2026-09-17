@@ -180,6 +180,18 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, "reXlate") || !strings.Contains(body, "再次翻译") {
 		t.Fatal("papers page must offer force re-translate control")
 	}
+	if !strings.Contains(body, `xlate: "Translate"`) || !strings.Contains(body, `xlate: "翻译"`) {
+		t.Fatal("untranslated cards must show Translate / 翻译")
+	}
+	if !strings.Contains(body, `xlatePriority: "Prioritize"`) || !strings.Contains(body, `xlatePriority: "优先"`) {
+		t.Fatal("queued cards must offer Prioritize / 优先 to bump near the lane head")
+	}
+	if !strings.Contains(body, "priority: true") || !strings.Contains(body, "prioritizedOk") {
+		t.Fatal("card Translate/Prioritize must POST priority:true")
+	}
+	if !strings.Contains(body, "Moved to the front of the queue.") || !strings.Contains(body, "已移到队列最近位置。") {
+		t.Fatal("priority enqueue must confirm near-front placement in EN and ZH")
+	}
 	if !strings.Contains(body, "xlate-err") {
 		t.Fatal("papers page must surface translate errors")
 	}

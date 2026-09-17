@@ -809,6 +809,9 @@ type translateEnqueueReq struct {
 	ID    string `json:"id"`
 	All   bool   `json:"all"`
 	Force bool   `json:"force"` // manual re-translate; ignored for auto / translate-all
+	// Priority inserts (or bumps) the paper at the head of its lane queue
+	// (fast or slow). Running jobs are not preempted. Ignored for translate-all.
+	Priority bool `json:"priority"`
 }
 
 type translateEnqueueResp struct {
@@ -854,14 +857,17 @@ func (s *Server) handlePapersTranslate(w http.ResponseWriter, r *http.Request) {
 		}
 		var ids []string
 		force := req.Force
+		priority := req.Priority
 		if id := sanitizePaperID(req.ID); id != "" {
 			ids = []string{id}
 		} else {
-			// Translate-all is never a force re-translate of completed papers.
+			// Translate-all is never a force re-translate of completed papers
+			// and never jumps the backlog (FIFO tail of each lane).
 			force = false
+			priority = false
 			ids = pendingTranslateIDs(cat.Papers, false)
 		}
-		res := svc.enqueue(ids, cat.Papers, force)
+		res := svc.enqueueAt(ids, cat.Papers, force, priority)
 		resp := translateEnqueueResp{
 			OK:         true,
 			Queued:     res.Queued,

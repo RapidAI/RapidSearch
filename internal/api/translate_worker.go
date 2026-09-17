@@ -25,6 +25,20 @@ type enqueueResult struct {
 }
 
 func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool) enqueueResult {
+	return s.enqueueAt(ids, papers, force, false)
+}
+
+// enqueueAt queues paper ids. When priority is true, each id is inserted at
+// the head of its lane queue (fast or slow) instead of the tail.
+//
+// Semantics:
+//   - Running jobs are never preempted. Priority only reorders the pending
+//     lane queue, so the paper is next to start in that lane after currently
+//     running work (subject to dual-lane slot reservation).
+//   - Already-queued + priority: the id is moved to the lane head (bump).
+//   - Already-queued without priority: no-op skip (same as today).
+//   - Translate-all / auto-translate always use priority=false (FIFO tail).
+func (s *translateService) enqueueAt(ids []string, papers []paperEntry, force, priority bool) enqueueResult {
 	out := enqueueResult{Rejected: map[string]string{}}
 	if s == nil {
 		out.Skipped = append([]string(nil), ids...)
@@ -87,10 +101,20 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			alreadyQueued = true
 		}
 		if alreadyQueued {
-			if force {
-				// Replace: ensure a single queue entry (no duplicate spawn).
-				if !s.inQ[id] {
-					s.pushQueuedLocked(id, p.PageCount)
+			if force || priority {
+				// Replace / bump: keep a single queue entry (no duplicate spawn).
+				// Priority moves the paper to the head of its lane; force
+				// without priority keeps the current position.
+				if priority {
+					if !s.pushQueuedFrontLocked(id, p.PageCount) {
+						out.Skipped = append(out.Skipped, id)
+						continue
+					}
+				} else if !s.inQ[id] {
+					if !s.pushQueuedLocked(id, p.PageCount) {
+						out.Skipped = append(out.Skipped, id)
+						continue
+					}
 				}
 				j := s.status.Jobs[id]
 				j.ID = id
@@ -99,8 +123,10 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 				j.Filename = p.Filename
 				j.PageCount = p.PageCount
 				j.Lane = paperTranslateLane(p.PageCount)
-				j.TimeoutCount = 0
-				j.InterruptCount = 0
+				if force || priority {
+					j.TimeoutCount = 0
+					j.InterruptCount = 0
+				}
 				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				if s.status.Jobs == nil {
 					s.status.Jobs = map[string]translateJob{}
@@ -125,7 +151,13 @@ func (s *translateService) enqueue(ids []string, papers []paperEntry, force bool
 			removeTranslatedOutputs(s.root, id)
 		}
 
-		if !s.pushQueuedLocked(id, p.PageCount) {
+		pushed := false
+		if priority {
+			pushed = s.pushQueuedFrontLocked(id, p.PageCount)
+		} else {
+			pushed = s.pushQueuedLocked(id, p.PageCount)
+		}
+		if !pushed {
 			out.Skipped = append(out.Skipped, id)
 			continue
 		}
@@ -393,8 +425,46 @@ func (s *translateService) reconcileExternal() {
 }
 
 func (s *translateService) pushQueuedLocked(id string, pages int) bool {
-	if id == "" || s.inQ[id] {
+	return s.pushQueuedAtLocked(id, pages, false)
+}
+
+// pushQueuedFrontLocked inserts id at the head of its lane. If the id is
+// already queued, it is removed first so the bump is a move, not a duplicate.
+func (s *translateService) pushQueuedFrontLocked(id string, pages int) bool {
+	return s.pushQueuedAtLocked(id, pages, true)
+}
+
+func (s *translateService) removeQueuedLocked(id string) {
+	if id == "" {
+		return
+	}
+	s.fastQ = removeQueuedID(s.fastQ, id)
+	s.slowQ = removeQueuedID(s.slowQ, id)
+	delete(s.inQ, id)
+}
+
+func removeQueuedID(q []string, id string) []string {
+	if len(q) == 0 || id == "" {
+		return q
+	}
+	out := make([]string, 0, len(q))
+	for _, x := range q {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func (s *translateService) pushQueuedAtLocked(id string, pages int, front bool) bool {
+	if id == "" {
 		return false
+	}
+	if s.inQ[id] {
+		if !front {
+			return false
+		}
+		s.removeQueuedLocked(id)
 	}
 	lane := paperTranslateLane(pages)
 	if lane == "" {
@@ -403,7 +473,13 @@ func (s *translateService) pushQueuedLocked(id string, pages int) bool {
 	if s.inQ == nil {
 		s.inQ = map[string]bool{}
 	}
-	if lane == translateLaneSlow {
+	if front {
+		if lane == translateLaneSlow {
+			s.slowQ = append([]string{id}, s.slowQ...)
+		} else {
+			s.fastQ = append([]string{id}, s.fastQ...)
+		}
+	} else if lane == translateLaneSlow {
 		s.slowQ = append(s.slowQ, id)
 	} else {
 		s.fastQ = append(s.fastQ, id)
