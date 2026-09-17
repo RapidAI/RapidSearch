@@ -141,5 +141,6 @@ After login (same Hub global admin cookie as `/settings`) or with Bearer `SEARCH
 - `GET /papers` — HTML catalog (ZH/EN)
 - `GET /papers/api?q=&tag=` — JSON catalog
 - `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
+- `POST /papers/pdf/recover` — recover a missing local PDF (`{"id":"<arxiv_id>"}` or `{"all_missing":true}`)
 
 Public URL (after proxy deploy): `https://hub.maclaw.top/searchproxy/papers`

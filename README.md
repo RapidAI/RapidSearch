@@ -65,10 +65,11 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `GET /papers` — HTML list (ZH/EN), with filter/search
 - `GET /papers/api?q=&tag=` — JSON catalog from `manifest.json`
 - `GET /papers/pdf/{arxiv_id_or_filename}` — stream local PDF (`?download=1` for attachment)
+- `POST /papers/pdf/recover` — re-download a missing local PDF (`{"id":"2609.03747"}` or `{"all_missing":true}`). Same auth as `/papers`.
 
 Scripts live in-repo under `agent-papers/` (Python). Runtime PDFs/DB are **not** in git — set `PAPERS_DIR` to the data directory. Public URL after proxy deploy: `https://hub.maclaw.top/searchproxy/papers` (requires deploying an updated `search-proxy` that forwards `/papers`).
 
-本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`），只提供已下载 PDF，不强制重新从 ArXiv 拉取。
+本地打开 `http://127.0.0.1:18765/papers`。数据目录用环境变量 `PAPERS_DIR`（默认 `/workspace/agent-papers`）。目录里没有本地 PDF 的 arXiv 论文可在页面上点「恢复 PDF」。
 
 
 Persisted to `SEARCH_CONFIG_PATH` (default `./search-config.json`, mode `0600`, gitignored). Raw keys are never logged.

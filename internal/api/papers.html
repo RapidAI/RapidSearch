@@ -88,6 +88,22 @@
     }
     a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
     a.btn:hover { filter: brightness(1.08); }
+    button.btn {
+      display: inline-block;
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 10px;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    button.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button.btn:hover { filter: brightness(1.08); }
+    button.btn:disabled { opacity: 0.65; cursor: progress; }
+    .card-msg { font-size: 12px; color: var(--muted); align-self: center; }
+    .card-msg.err { color: var(--bad); }
+    .card-msg.ok { color: var(--ok); }
     .meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
     .meta strong { color: var(--ink); }
     article.paper {
@@ -159,6 +175,7 @@
       <option value="" data-i18n="tagAll">All tags</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+    <button type="button" id="recover-all" hidden data-i18n="recoverAll">Recover missing PDFs</button>
   </div>
   <p class="meta" id="meta"></p>
   <p id="status"></p>
@@ -171,7 +188,7 @@
     en: {
       langLabel: "Language",
       heading: "Agent papers",
-      lead: "Browse the local catalog and download already-cached PDFs.",
+      lead: "Browse the local catalog and download already-cached PDFs. Recover missing arXiv PDFs when signed in.",
       settingsLink: "Settings",
       searchPh: "Search title, authors, arXiv id…",
       tagAll: "All tags",
@@ -182,13 +199,22 @@
       view: "Open PDF",
       arxiv: "arXiv",
       noLocal: "No local PDF",
+      recover: "Recover PDF",
+      recoverBusy: "Recovering…",
+      recoverOk: "PDF recovered.",
+      recoverFail: "Recover failed: {error}",
+      recoverAll: "Recover missing PDFs",
+      recoverAllBusy: "Recovering missing PDFs…",
+      recoverAllOk: "Recovered {n} PDF(s).",
+      recoverAllPartial: "Recovered {ok}, failed {fail}.",
+      recoverAllNone: "No missing local PDFs to recover.",
       loadErr: "Failed to load catalog",
       unauthorized: "Unauthorized — sign in via Settings first."
     },
     zh: {
       langLabel: "语言",
       heading: "Agent 论文库",
-      lead: "浏览本地目录并下载已缓存的 PDF（不重新从 ArXiv 拉取）。",
+      lead: "浏览本地目录并下载已缓存的 PDF。缺失时可从 arXiv 恢复。",
       settingsLink: "设置",
       searchPh: "搜索标题、作者、arXiv 编号…",
       tagAll: "全部标签",
@@ -199,6 +225,15 @@
       view: "打开 PDF",
       arxiv: "arXiv",
       noLocal: "无本地 PDF",
+      recover: "恢复 PDF",
+      recoverBusy: "正在恢复…",
+      recoverOk: "PDF 已恢复。",
+      recoverFail: "恢复失败：{error}",
+      recoverAll: "恢复缺失 PDF",
+      recoverAllBusy: "正在恢复缺失 PDF…",
+      recoverAllOk: "已恢复 {n} 篇 PDF。",
+      recoverAllPartial: "恢复成功 {ok} 篇，失败 {fail} 篇。",
+      recoverAllNone: "没有可恢复的缺失 PDF。",
       loadErr: "加载目录失败",
       unauthorized: "未授权 — 请先在设置页登录。"
     }
@@ -266,8 +301,10 @@
     return u;
   }
 
-  let lastCatalog = { count: 0, papers: [], generated_at: "" };
+  let lastCatalog = { count: 0, papers: [], generated_at: "", can_manage: false };
   let lastShown = 0;
+  const cardState = {};
+  let recoverAllBusy = false;
 
   function renderMeta() {
     const when = lastCatalog.generated_at || "—";
@@ -287,16 +324,45 @@
       .replace(/"/g, "&quot;");
   }
 
+  function paperID(p) {
+    return (p && (p.arxiv_id || p.filename || p.title)) || "";
+  }
+
+  function canRecover(p) {
+    return !!(lastCatalog.can_manage && p && !p.has_local && (p.arxiv_id || p.pdf_url));
+  }
+
+  function missingRecoverableCount() {
+    return (lastCatalog.papers || []).filter(canRecover).length;
+  }
+
+  function updateRecoverAll() {
+    const btn = document.getElementById("recover-all");
+    if (!btn) return;
+    const n = missingRecoverableCount();
+    btn.hidden = !lastCatalog.can_manage || n === 0;
+    btn.disabled = recoverAllBusy;
+    btn.textContent = recoverAllBusy ? t("recoverAllBusy") : t("recoverAll");
+  }
+
+  function parseAPIError(data, status) {
+    if (data && data.error) return String(data.error);
+    return "HTTP " + status;
+  }
+
   function renderList() {
     const list = document.getElementById("list");
     const papers = lastCatalog.papers || [];
     lastShown = papers.length;
     renderMeta();
+    updateRecoverAll();
     if (!papers.length) {
       list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
       return;
     }
     list.innerHTML = papers.map(function (p) {
+      const pid = paperID(p);
+      const st = cardState[pid] || {};
       const tags = (p.topic_tags || []).map(function (tg) {
         return '<span class="tag">' + esc(tg) + "</span>";
       }).join("");
@@ -307,15 +373,22 @@
         actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
       } else {
         actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+        if (canRecover(p)) {
+          actions += '<button type="button" class="btn primary recover-pdf" data-id="' + esc(pid) + '"' +
+            (st.busy ? " disabled" : "") + ">" + esc(st.busy ? t("recoverBusy") : t("recover")) + "</button>";
+        }
       }
       if (p.source_url) {
         actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
       } else if (p.arxiv_id) {
         actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
       }
+      if (st.msg) {
+        actions += '<span class="card-msg' + (st.err ? " err" : " ok") + '">' + esc(st.msg) + "</span>";
+      }
       const brief = p.brief || "";
       return (
-        '<article class="paper">' +
+        '<article class="paper" data-id="' + esc(pid) + '">' +
           "<h2>" + esc(p.title || "") + "</h2>" +
           '<div class="row">' + year + tags + "</div>" +
           (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
@@ -323,6 +396,115 @@
         "</article>"
       );
     }).join("");
+  }
+
+  function applyRecoveredPaper(updated) {
+    if (!updated) return;
+    const pid = paperID(updated);
+    const papers = lastCatalog.papers || [];
+    for (let i = 0; i < papers.length; i++) {
+      if (paperID(papers[i]) === pid || (updated.arxiv_id && papers[i].arxiv_id === updated.arxiv_id)) {
+        papers[i] = updated;
+        break;
+      }
+    }
+  }
+
+  async function recoverOne(id) {
+    if (!id || (cardState[id] && cardState[id].busy)) return;
+    cardState[id] = { busy: true, msg: "", err: false };
+    renderList();
+    try {
+      const res = await fetch(prefix + "/papers/pdf/recover", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (res.status === 401) {
+        cardState[id] = { busy: false, msg: t("unauthorized"), err: true };
+        renderList();
+        location.href = prefix + "/settings";
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        cardState[id] = {
+          busy: false,
+          msg: t("recoverFail").replace("{error}", parseAPIError(data, res.status)),
+          err: true
+        };
+        renderList();
+        return;
+      }
+      applyRecoveredPaper(data.paper);
+      cardState[id] = { busy: false, msg: t("recoverOk"), err: false };
+      renderList();
+    } catch (e) {
+      cardState[id] = {
+        busy: false,
+        msg: t("recoverFail").replace("{error}", String(e)),
+        err: true
+      };
+      renderList();
+    }
+  }
+
+  async function recoverAll() {
+    if (recoverAllBusy) return;
+    const status = document.getElementById("status");
+    recoverAllBusy = true;
+    status.className = "";
+    status.textContent = t("recoverAllBusy");
+    updateRecoverAll();
+    try {
+      const res = await fetch(prefix + "/papers/pdf/recover", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all_missing: true })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (res.status === 401) {
+        status.textContent = t("unauthorized");
+        status.className = "err";
+        location.href = prefix + "/settings";
+        return;
+      }
+      if (!res.ok) {
+        status.textContent = t("recoverFail").replace("{error}", parseAPIError(data, res.status));
+        status.className = "err";
+        return;
+      }
+      const ok = Number(data.recovered || 0);
+      const fail = Number(data.failed || 0);
+      let summary = t("recoverAllNone");
+      let summaryClass = "";
+      if (ok === 0 && fail === 0) {
+        summary = t("recoverAllNone");
+      } else if (fail === 0) {
+        summary = t("recoverAllOk").replace("{n}", String(ok));
+      } else {
+        summary = t("recoverAllPartial").replace("{ok}", String(ok)).replace("{fail}", String(fail));
+        summaryClass = fail && !ok ? "err" : "";
+        (data.errors || []).forEach(function (item) {
+          if (item && item.id) {
+            cardState[item.id] = { busy: false, msg: t("recoverFail").replace("{error}", item.error || ""), err: true };
+          }
+        });
+      }
+      await load();
+      status.textContent = summary;
+      status.className = summaryClass;
+    } catch (e) {
+      status.textContent = t("recoverFail").replace("{error}", String(e));
+      status.className = "err";
+    } finally {
+      recoverAllBusy = false;
+      updateRecoverAll();
+    }
   }
 
   function fillTags(papers) {
@@ -375,6 +557,13 @@
   document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
   document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
   document.getElementById("apply").addEventListener("click", load);
+  document.getElementById("recover-all").addEventListener("click", recoverAll);
+  document.getElementById("list").addEventListener("click", function (ev) {
+    const btn = ev.target.closest("button.recover-pdf");
+    if (!btn) return;
+    ev.preventDefault();
+    recoverOne(btn.getAttribute("data-id"));
+  });
   document.getElementById("q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); load(); }
   });
