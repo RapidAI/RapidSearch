@@ -444,7 +444,7 @@ func TestRecoverPDFPageHasButtonCopy(t *testing.T) {
 		t.Fatalf("status=%d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Recover PDF", "恢复 PDF", "recover-pdf", "/papers/pdf/recover", "all_missing"} {
+	for _, want := range []string{"Recover PDF", "恢复 PDF", "recover-pdf", "/papers/pdf/recover", "all_missing", "pageToken"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("papers.html missing %q", want)
 		}

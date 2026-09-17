@@ -287,18 +287,30 @@
   const prefix = appPrefix();
   document.getElementById("settings-link").href = prefix + "/settings";
 
+  function pageToken() {
+    try { return new URLSearchParams(location.search).get("token") || ""; } catch (e) { return ""; }
+  }
+  function withToken(path) {
+    const tok = pageToken();
+    if (!tok) return path;
+    return path + (path.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(tok);
+  }
+
   function apiURL(q, tag) {
     let u = prefix + "/papers/api";
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (tag) params.set("tag", tag);
     const s = params.toString();
-    return s ? u + "?" + s : u;
+    return withToken(s ? u + "?" + s : u);
   }
   function pdfURL(localPath, download) {
     let u = prefix + localPath;
     if (download) u += (u.indexOf("?") >= 0 ? "&" : "?") + "download=1";
-    return u;
+    return withToken(u);
+  }
+  function recoverURL() {
+    return withToken(prefix + "/papers/pdf/recover");
   }
 
   let lastCatalog = { count: 0, papers: [], generated_at: "", can_manage: false };
@@ -415,7 +427,7 @@
     cardState[id] = { busy: true, msg: "", err: false };
     renderList();
     try {
-      const res = await fetch(prefix + "/papers/pdf/recover", {
+      const res = await fetch(recoverURL(), {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -459,7 +471,7 @@
     status.textContent = t("recoverAllBusy");
     updateRecoverAll();
     try {
-      const res = await fetch(prefix + "/papers/pdf/recover", {
+      const res = await fetch(recoverURL(), {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
