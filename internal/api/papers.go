@@ -43,6 +43,7 @@ type paperEntry struct {
 	HasLocal  bool   `json:"has_local"`
 	LocalPDF  string `json:"local_pdf,omitempty"` // relative download path
 	Brief     string `json:"brief,omitempty"`
+	PageCount int    `json:"page_count,omitempty"`
 }
 
 type papersManifest struct {
@@ -56,14 +57,16 @@ type papersCatalog struct {
 	Stats       map[string]interface{} `json:"stats,omitempty"`
 	Count       int                    `json:"count"`
 	Papers      []paperEntry           `json:"papers"`
+	CanManage   bool                   `json:"can_manage"`
 }
 
 type papersStore struct {
-	mu      sync.Mutex
-	root    string
-	loaded  time.Time
-	modTime time.Time
-	cat     papersCatalog
+	mu         sync.Mutex
+	root       string
+	loaded     time.Time
+	modTime    time.Time
+	cat        papersCatalog
+	httpClient *http.Client
 }
 
 func papersRoot() string {
@@ -246,6 +249,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	out := cat
+	out.CanManage = true
 	if q != "" || tag != "" {
 		filtered := filterPapers(cat.Papers, q, tag)
 		out.Papers = filtered
