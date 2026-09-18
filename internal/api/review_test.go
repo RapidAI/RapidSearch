@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -415,6 +416,94 @@ func TestParseReviewAnalysisFences(t *testing.T) {
 	}
 }
 
+func TestParseReviewAnalysisEmpty(t *testing.T) {
+	_, err := parseReviewAnalysis("   ")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, errReviewEmptyJSON) {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("must not surface raw JSON EOF: %v", err)
+	}
+}
+
+func TestParseReviewAnalysisTruncated(t *testing.T) {
+	raw := `{"method_principles":"原理部分写了一半`
+	_, err := parseReviewAnalysis(raw)
+	if err == nil {
+		t.Fatal("expected truncated error")
+	}
+	if !errors.Is(err, errChatTruncated) {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("must not surface raw JSON EOF: %v", err)
+	}
+}
+
+func TestParseReviewAnalysisPartialFields(t *testing.T) {
+	raw := `{"method_principles":"完整原理","method_essence":"完整本质","experiment":"写到一半`
+	a, err := parseReviewAnalysis(raw)
+	if err != nil {
+		t.Fatalf("partial complete fields should be accepted: %v", err)
+	}
+	if a.MethodPrinciples != "完整原理" || a.MethodEssence != "完整本质" {
+		t.Fatalf("%+v", a)
+	}
+	if a.Experiment != "" {
+		t.Fatalf("truncated field must not be recovered: %+v", a)
+	}
+}
+
+func TestReviewMaxTokensBudget(t *testing.T) {
+	if reviewMaxTokens < 8000 {
+		t.Fatalf("reviewMaxTokens=%d is too small for Hub reasoning + Chinese JSON review", reviewMaxTokens)
+	}
+}
+
+func TestExtractChatContentShapes(t *testing.T) {
+	t.Run("empty body", func(t *testing.T) {
+		_, err := extractChatContent(nil)
+		if !errors.Is(err, errChatEmpty) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("truncated hub envelope", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[{"message":{"content":"{"`))
+		if !errors.Is(err, errChatTruncated) {
+			t.Fatalf("got %v", err)
+		}
+		if strings.Contains(err.Error(), "unexpected end of JSON") {
+			t.Fatalf("raw JSON EOF leaked: %v", err)
+		}
+	})
+	t.Run("empty content", func(t *testing.T) {
+		_, err := extractChatContent([]byte(`{"choices":[{"finish_reason":"length","message":{"content":""}}]}`))
+		if !errors.Is(err, errChatEmpty) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("reasoning json", func(t *testing.T) {
+		body := `{"choices":[{"message":{"content":"","reasoning_content":"think {\"method_principles\":\"甲\",\"method_essence\":\"乙\",\"experiment\":\"丙\",\"quality\":\"丁\"}"}}]}`
+		got, err := extractChatContent([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, `"method_principles"`) {
+			t.Fatalf("got %q", got)
+		}
+	})
+	t.Run("content parts", func(t *testing.T) {
+		body := `{"choices":[{"message":{"content":[{"type":"text","text":"{\"a\":1}"}]}}]}`
+		got, err := extractChatContent([]byte(body))
+		if err != nil || got != `{"a":1}` {
+			t.Fatalf("got %q err=%v", got, err)
+		}
+	})
+}
+
 func TestReviewDirGitignored(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", ".gitignore"))
 	if err != nil {
@@ -454,6 +543,14 @@ func TestPapersPageReviewUI(t *testing.T) {
 		"更新引用",
 		"Update references",
 		"review-update-refs",
+		"reviewRetry",
+		"重新生成",
+		"reviewTruncated",
+		"模型输出被截断，请重试。",
+		"reviewErrorText",
+		"unexpected end of json",
+		"id=\"review-retry\"",
+		"[hidden] { display: none !important; }",
 		"data-review-id",
 		"#review=",
 		"/refs",
@@ -469,5 +566,203 @@ func TestPapersPageReviewUI(t *testing.T) {
     }
     const pid = p.id || p.arxiv_id || "";`) {
 		t.Fatal("review button must be rendered after the Source action")
+	}
+}
+
+func TestGenerateReviewOpenAIReasoningOnly(t *testing.T) {
+	instantHubBackoff(t)
+	reviewJSON := `{"method_principles":"原理","method_essence":"本质","experiment":"实验","quality":"总评"}`
+	var gotMax atomic.Int32
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		gotMax.Store(int32(req.MaxTokens))
+		w.Header().Set("Content-Type", "application/json")
+		payload, err := json.Marshal(map[string]any{
+			"choices": []any{
+				map[string]any{
+					"finish_reason": "length",
+					"message": map[string]any{
+						"content":           "",
+						"reasoning_content": "思考过程 " + reviewJSON,
+					},
+				},
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal hub response: %v", err)
+			http.Error(w, "marshal", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer hub.Close()
+
+	analysis, model, err := generateReviewOpenAI(context.Background(), hub.Client(), translateSnapshot{
+		BaseURL: hub.URL + "/v1",
+		APIKey:  "k",
+		Model:   "auto",
+	}, paperEntry{Title: "T", Abstract: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != "auto" {
+		t.Fatalf("model=%q", model)
+	}
+	if analysis.MethodPrinciples != "原理" || analysis.Quality != "总评" {
+		t.Fatalf("%+v", analysis)
+	}
+	if int(gotMax.Load()) != reviewMaxTokens {
+		t.Fatalf("max_tokens=%d want %d", gotMax.Load(), reviewMaxTokens)
+	}
+}
+
+func TestGenerateReviewOpenAIEmptyContentError(t *testing.T) {
+	instantHubBackoff(t)
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"length","message":{"content":""}}]}`))
+	}))
+	defer hub.Close()
+
+	_, _, err := generateReviewOpenAI(context.Background(), hub.Client(), translateSnapshot{
+		BaseURL: hub.URL + "/v1",
+		APIKey:  "k",
+		Model:   "auto",
+	}, paperEntry{Title: "T", Abstract: "A"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, errChatEmpty) {
+		t.Fatalf("want empty chat content, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unexpected end of JSON") {
+		t.Fatalf("must not surface raw JSON EOF: %v", err)
+	}
+}
+
+func TestGenerateReviewOpenAITruncatedThenSucceeds(t *testing.T) {
+	instantHubBackoff(t)
+	var hits atomic.Int32
+	ok, _ := json.Marshal(sampleAnalysis())
+	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"method_principles\":\"半`))
+			return
+		}
+		_, _ = w.Write(chatCompletionBody(string(ok)))
+	}))
+	defer hub.Close()
+
+	got, _, err := generateReviewOpenAI(context.Background(), hub.Client(), translateSnapshot{
+		BaseURL: hub.URL + "/v1",
+		APIKey:  "k",
+		Model:   "m",
+	}, paperEntry{Title: "T", Abstract: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.any() || got.Quality != sampleAnalysis().Quality {
+		t.Fatalf("%+v", got)
+	}
+	if hits.Load() < 2 {
+		t.Fatalf("hits=%d want retry", hits.Load())
+	}
+}
+
+func TestGenerateReviewHTTPHidesJSONEOF(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	ps := srv.papers()
+	ps.xlate.cfg.APIKey = "k"
+	ps.xlate.cfg.Model = "m"
+	ps.reviews.generateFn = func(ctx context.Context, snap translateSnapshot, paper paperEntry) (paperReviewAnalysis, string, error) {
+		return paperReviewAnalysis{}, "", errors.New("unexpected end of JSON input")
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/generate", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "unexpected end of JSON") {
+		t.Fatalf("raw JSON EOF leaked to client: %s", body)
+	}
+	if !strings.Contains(body, "truncated model response") {
+		t.Fatalf("want typed truncated error, got %s", body)
+	}
+
+	rec, ok := ps.reviews.load("2401.05459")
+	if !ok {
+		t.Fatal("failed generate should persist a failed record")
+	}
+	if rec.hasAnalysis() || rec.Status != reviewStatusFailed {
+		t.Fatalf("must not mark incomplete review done: %+v", rec)
+	}
+	if rec.Error != "truncated model response" {
+		t.Fatalf("error=%q", rec.Error)
+	}
+	if _, err := os.Stat(reviewFilePath(dir, "2401.05459")); err != nil {
+		t.Fatal(err)
+	}
+
+	get := httptest.NewRecorder()
+	greq := httptest.NewRequest(http.MethodGet, "/papers/review/2401.05459", nil)
+	h.ServeHTTP(get, greq)
+	if get.Code != http.StatusOK {
+		t.Fatalf("get failed review status=%d %s", get.Code, get.Body.String())
+	}
+	var view paperReviewView
+	if err := json.Unmarshal(get.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.HasReview {
+		t.Fatal("failed record must not look like a completed review")
+	}
+	if view.Status != reviewStatusFailed {
+		t.Fatalf("status=%q", view.Status)
+	}
+
+	cat := httptest.NewRecorder()
+	creq := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(cat, creq)
+	if strings.Contains(cat.Body.String(), `"has_review":true`) {
+		t.Fatalf("catalog must not mark failed review done: %s", cat.Body.String())
+	}
+}
+
+func TestGenerateReviewHTTPSuccess(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	ps := srv.papers()
+	ps.xlate.cfg.APIKey = "k"
+	ps.xlate.cfg.Model = "m"
+	ps.reviews.generateFn = func(ctx context.Context, snap translateSnapshot, paper paperEntry) (paperReviewAnalysis, string, error) {
+		return sampleAnalysis(), "m", nil
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/review/2401.05459/generate", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var view paperReviewView
+	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasReview || view.Analysis.Quality == "" || view.Status != reviewStatusReady {
+		t.Fatalf("%+v", view)
+	}
+	if _, err := os.Stat(reviewFilePath(dir, "2401.05459")); err != nil {
+		t.Fatal(err)
 	}
 }

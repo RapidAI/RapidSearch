@@ -405,20 +405,99 @@ func translateAbstractOpenAI(ctx context.Context, client *http.Client, base, key
 }
 
 func extractChatContent(body []byte) (string, error) {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return "", errChatEmpty
+	}
+	if looksTruncatedJSON(body) {
+		return "", errChatTruncated
+	}
 	var parsed struct {
 		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content          json.RawMessage `json:"content"`
+				ReasoningContent string          `json:"reasoning_content"`
+				Reasoning        string          `json:"reasoning"`
 			} `json:"message"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", err
+		if isTruncatedJSONError(err) {
+			return "", errChatTruncated
+		}
+		return "", errChatInvalid
 	}
 	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("empty chat choices")
+		return "", errChatEmpty
 	}
-	return strings.TrimSpace(parsed.Choices[0].Message.Content), nil
+	ch := parsed.Choices[0]
+	content := strings.TrimSpace(chatMessageText(ch.Message.Content))
+	if content != "" {
+		return content, nil
+	}
+	reasoning := strings.TrimSpace(ch.Message.ReasoningContent)
+	if reasoning == "" {
+		reasoning = strings.TrimSpace(ch.Message.Reasoning)
+	}
+	if obj, ok := extractJSONObject(reasoning); ok {
+		return obj, nil
+	}
+	reason := strings.TrimSpace(ch.FinishReason)
+	if reason == "" {
+		reason = "unknown"
+	}
+	if reasoning != "" {
+		return "", fmt.Errorf("%w (finish_reason=%s; reasoning present but no JSON object)", errChatEmpty, reason)
+	}
+	return "", fmt.Errorf("%w (finish_reason=%s)", errChatEmpty, reason)
+}
+
+func chatMessageText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var parts []json.RawMessage
+	if json.Unmarshal(raw, &parts) != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range parts {
+		var text string
+		if json.Unmarshal(part, &text) == nil {
+			b.WriteString(text)
+			continue
+		}
+		var obj struct {
+			Text string `json:"text"`
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(part, &obj) == nil && strings.TrimSpace(obj.Text) != "" {
+			b.WriteString(obj.Text)
+		}
+	}
+	return b.String()
+}
+
+// extractJSONObject returns the first JSON object embedded in s, if it parses.
+func extractJSONObject(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	i := strings.Index(s, "{")
+	j := strings.LastIndex(s, "}")
+	if i < 0 || j <= i {
+		return "", false
+	}
+	cand := s[i : j+1]
+	var probe any
+	if json.Unmarshal([]byte(cand), &probe) != nil {
+		return "", false
+	}
+	return cand, true
 }
 
 // briefRunes truncates by Unicode code points (better for CJK abstracts).

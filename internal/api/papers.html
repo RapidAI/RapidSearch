@@ -41,6 +41,7 @@
     }
     html:not([data-i18n-ready]) body { visibility: hidden; }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
@@ -604,7 +605,8 @@
       </div>
       <p id="review-status" class="review-status" hidden></p>
       <div class="review-toolbar" id="review-toolbar" hidden>
-        <button type="button" id="review-update-refs" data-i18n="reviewUpdateRefs">Update references</button>
+        <button type="button" id="review-retry" hidden data-i18n="reviewRetry">Generate review</button>
+        <button type="button" id="review-update-refs" data-i18n="reviewUpdateRefs" disabled>Update references</button>
         <p id="review-refs-status" class="review-refs-status" hidden></p>
       </div>
       <div id="review-body" hidden>
@@ -805,6 +807,9 @@
       reviewNoRatings: "No ratings yet",
       reviewClose: "Close",
       reviewGenFail: "Could not generate review.",
+      reviewRetry: "Retry review",
+      reviewTruncated: "The model response was cut off. Please retry.",
+      reviewEmpty: "The model returned an empty review. Please retry.",
       reviewRateFail: "Could not save rating.",
       reviewRateLocked: "Rating unlocks after the review is generated.",
       reviewNotReady: "Review is not ready yet.",
@@ -929,6 +934,9 @@
       reviewNoRatings: "暂无评分",
       reviewClose: "关闭",
       reviewGenFail: "无法生成解读。",
+      reviewRetry: "重新生成",
+      reviewTruncated: "模型输出被截断，请重试。",
+      reviewEmpty: "模型返回了空解读，请重试。",
       reviewRateFail: "无法保存评分。",
       reviewRateLocked: "解读生成完成后即可评分。",
       reviewNotReady: "解读尚未生成完成。",
@@ -2152,6 +2160,40 @@
     el.className = "review-status" + (kind ? " " + kind : "");
   }
 
+  function reviewErrorText(err, fallbackKey) {
+    const raw = String(err || "").trim();
+    const low = raw.toLowerCase();
+    if (!raw) return t(fallbackKey || "reviewGenFail");
+    if (raw === "translation LLM is not configured") return t("reviewNeedLLM");
+    if (raw === "review is still generating") return t("reviewGenerating");
+    if (raw === "review is not ready") return t("reviewNotReady");
+    if (raw === "truncated model response" ||
+        /unexpected end of json|unexpected eof|unexpected end of input/.test(low)) {
+      return t("reviewTruncated");
+    }
+    if (raw === "empty model response" || /empty (chat|analysis|model)/.test(low)) {
+      return t("reviewEmpty");
+    }
+    if (raw === "could not generate review" || raw === "invalid model response") {
+      return t("reviewGenFail");
+    }
+    if (low.indexOf("json") >= 0 && /parse|unexpected|token|input|syntaxerror/.test(low)) {
+      return t("reviewTruncated");
+    }
+    if (/syntaxerror/.test(low)) return t("reviewTruncated");
+    return t(fallbackKey || "reviewGenFail");
+  }
+
+  function updateReviewActions(ready) {
+    const bar = document.getElementById("review-toolbar");
+    const retry = document.getElementById("review-retry");
+    const refs = document.getElementById("review-update-refs");
+    if (bar) bar.hidden = false;
+    if (retry) retry.hidden = !!ready;
+    if (refs) refs.disabled = !ready;
+    if (openReview) openReview.ready = !!ready;
+  }
+
   function renderStars(myStars, enabled) {
     const row = document.getElementById("review-stars");
     const mine = Number(myStars) || 0;
@@ -2331,8 +2373,7 @@
     renderReviewRefs(refs);
     const has = !!(data && data.has_review);
     document.getElementById("review-body").hidden = !has;
-    const bar = document.getElementById("review-toolbar");
-    if (bar) bar.hidden = !has;
+    updateReviewActions(has);
     if (has) {
       setReviewRatingEnabled(true, data);
     } else {
@@ -2349,6 +2390,10 @@
     setRefsStatus("", "");
     const bar = document.getElementById("review-toolbar");
     if (bar) bar.hidden = true;
+    const retry = document.getElementById("review-retry");
+    if (retry) retry.hidden = true;
+    const refs = document.getElementById("review-update-refs");
+    if (refs) refs.disabled = true;
     setReviewHash("");
   }
 
@@ -2366,23 +2411,38 @@
     setReviewHash(id);
     showReviewModal(openReview.title);
     document.getElementById("review-body").hidden = true;
-    const bar = document.getElementById("review-toolbar");
-    if (bar) bar.hidden = true;
+    updateReviewActions(false);
     setRefsStatus("", "");
     hideReviewRating();
     if (paper.has_review) {
       setReviewStatus("", "");
       try {
         const res = await fetch(reviewURL(id), { credentials: "same-origin", headers: authHeaders(false) });
-        const data = await res.json().catch(function () { return {}; });
-        if (!res.ok || !data.ok) {
-          setReviewStatus(t("reviewLoadFail"), "err");
+        const data = await res.json().catch(function () { return { parse_error: true }; });
+        if (data && data.parse_error) {
+          setReviewStatus(t("reviewTruncated"), "err");
+          updateReviewActions(false);
           return;
         }
-        fillReviewModal(data);
-        return;
+        if (!res.ok || !data.ok) {
+          const err = data && data.error ? String(data.error) : "";
+          if (err === "review is still generating") {
+            setReviewStatus(t("reviewGenerating"), "busy");
+          } else {
+            setReviewStatus(reviewErrorText(err, "reviewLoadFail"), "err");
+            updateReviewActions(false);
+          }
+          return;
+        }
+        if (data.has_review) {
+          fillReviewModal(data);
+          return;
+        }
+        setReviewStatus(reviewErrorText(data.error, "reviewNotReady"), "err");
+        updateReviewActions(false);
       } catch (e) {
-        setReviewStatus(String(e), "err");
+        setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewLoadFail"), "err");
+        updateReviewActions(false);
         return;
       }
     }
@@ -2392,6 +2452,7 @@
     showReviewModal(openReview.title);
     document.getElementById("review-body").hidden = true;
     setReviewRatingEnabled(false);
+    updateReviewActions(false);
     setReviewStatus(t("reviewGenerating"), "busy");
     try {
       const res = await fetch(reviewURL(id, "/generate"), {
@@ -2400,20 +2461,25 @@
         headers: authHeaders(true),
         body: JSON.stringify({})
       });
-      const data = await res.json().catch(function () { return {}; });
-      if (!res.ok || !data.ok) {
-        const msg = data && data.error === "translation LLM is not configured"
-          ? t("reviewNeedLLM")
-          : (data && data.error ? String(data.error) : t("reviewGenFail"));
-        setReviewStatus(msg, "err");
+      const data = await res.json().catch(function () { return { parse_error: true }; });
+      if (data && data.parse_error) {
+        setReviewStatus(t("reviewTruncated"), "err");
         hideReviewRating();
+        updateReviewActions(false);
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        setReviewStatus(reviewErrorText(data && data.error, "reviewGenFail"), "err");
+        hideReviewRating();
+        updateReviewActions(false);
         return;
       }
       setReviewStatus("", "");
       fillReviewModal(data);
       patchCatalogReview(id, data);
     } catch (e) {
-      setReviewStatus(String(e), "err");
+      setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewGenFail"), "err");
+      updateReviewActions(false);
     } finally {
       delete generating[id];
       renderList();
@@ -2422,6 +2488,10 @@
 
   async function updateOpenReviewRefs() {
     if (!openReview || !openReview.id || updatingRefs) return;
+    if (!openReview.ready) {
+      setRefsStatus(t("reviewNotReady"), "err");
+      return;
+    }
     updatingRefs = true;
     const btn = document.getElementById("review-update-refs");
     if (btn) btn.disabled = true;
@@ -2436,8 +2506,11 @@
       const data = await res.json().catch(function () { return {}; });
       if (!res.ok || !data.ok) {
         const err = data && data.error ? String(data.error) : "";
-        if (err === "review is not ready") setRefsStatus(t("reviewNotReady"), "err");
-        else setRefsStatus(err || t("reviewRefsFail"), "err");
+        if (err === "review is not ready" || err === "review is still generating") {
+          setRefsStatus(t("reviewNotReady"), "err");
+        } else {
+          setRefsStatus(reviewErrorText(err, "reviewRefsFail"), "err");
+        }
         return;
       }
       fillReviewModal(data);
@@ -2467,7 +2540,7 @@
         if (err === "review is still generating" || err === "review is not ready") {
           setReviewStatus(t("reviewNotReady"), "err");
         } else {
-          setReviewStatus(err || t("reviewRateFail"), "err");
+          setReviewStatus(reviewErrorText(err, "reviewRateFail"), "err");
         }
         return;
       }
@@ -2476,7 +2549,7 @@
       patchCatalogReview(openReview.id, data);
       renderList();
     } catch (e) {
-      setReviewStatus(String(e), "err");
+      setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewRateFail"), "err");
     }
   }
 
@@ -2622,6 +2695,12 @@
     }
   });
   document.getElementById("review-update-refs").addEventListener("click", updateOpenReviewRefs);
+  document.getElementById("review-retry").addEventListener("click", function () {
+    if (!openReview || !openReview.id || generating[openReview.id]) return;
+    const paper = findCatalogPaper(openReview.id);
+    if (paper) paper.has_review = false;
+    openReviewPanel(openReview.id);
+  });
   window.addEventListener("hashchange", function () {
     const hid = parseReviewHash();
     if (!hid) {

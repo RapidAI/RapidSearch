@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,13 +24,16 @@ import (
 )
 
 const (
-	reviewsDirName    = "reviews"
-	raterCookieName   = "rs_papers_rater"
-	raterCookieMaxAge = 365 * 24 * 60 * 60
-	reviewHTTPTimeout = 120 * time.Second
-	reviewMaxTokens   = 2500
-	reviewMinStars    = 1
-	reviewMaxStars    = 5
+	reviewsDirName      = "reviews"
+	raterCookieName     = "rs_papers_rater"
+	raterCookieMaxAge   = 365 * 24 * 60 * 60
+	reviewHTTPTimeout   = 120 * time.Second
+	reviewMaxTokens     = 12288
+	reviewParseAttempts = 3
+	reviewMinStars      = 1
+	reviewMaxStars      = 5
+	reviewStatusReady   = "ready"
+	reviewStatusFailed  = "failed"
 )
 
 // paperReviewAnalysis is the structured Chinese 精读+评审 write-up.
@@ -67,6 +69,8 @@ type paperReviewFile struct {
 	RatingCount   int                 `json:"rating_count"`
 	Refs          []paperReviewRef    `json:"refs,omitempty"`
 	RefsUpdatedAt string              `json:"refs_updated_at,omitempty"`
+	Status        string              `json:"status,omitempty"`
+	Error         string              `json:"error,omitempty"`
 }
 
 func (r *paperReviewFile) hasAnalysis() bool {
@@ -86,6 +90,8 @@ type paperReviewView struct {
 	MyStars     int                 `json:"my_stars,omitempty"`
 	Skipped     bool                `json:"skipped,omitempty"`
 	Refs        []paperReviewRef    `json:"refs,omitempty"`
+	Status      string              `json:"status,omitempty"`
+	Error       string              `json:"error,omitempty"`
 }
 
 type reviewSummary struct {
@@ -114,6 +120,7 @@ var (
 	errReviewLLMNotReady = fmt.Errorf("translation LLM is not configured")
 	errReviewNotReady    = fmt.Errorf("review is not ready")
 	errReviewGenerating  = fmt.Errorf("review is still generating")
+	errReviewEmptyJSON   = fmt.Errorf("empty analysis JSON")
 )
 
 func reviewsDir(root string) string {
@@ -316,11 +323,20 @@ func (s *reviewService) overlay(papers []paperEntry) {
 }
 
 func (s *reviewService) getPublic(id, raterKey string) (paperReviewView, bool) {
-	rec, ok := s.load(id)
-	if !ok || !rec.hasAnalysis() {
+	if s != nil && s.isGenerating(id) {
 		return paperReviewView{}, false
 	}
-	return rec.public(raterKey, false), true
+	rec, ok := s.load(id)
+	if !ok {
+		return paperReviewView{}, false
+	}
+	if rec.hasAnalysis() {
+		return rec.public(raterKey, false), true
+	}
+	if rec.Status == reviewStatusFailed {
+		return rec.public(raterKey, false), true
+	}
+	return paperReviewView{}, false
 }
 
 func (rec paperReviewFile) public(raterKey string, skipped bool) paperReviewView {
@@ -337,6 +353,8 @@ func (rec paperReviewFile) public(raterKey string, skipped bool) paperReviewView
 		MyStars:     myStars(rec.Ratings, raterKey),
 		Skipped:     skipped,
 		Refs:        rec.Refs,
+		Status:      rec.Status,
+		Error:       rec.Error,
 	}
 }
 
@@ -483,10 +501,13 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 	// LLM call without the persist lock so rate can fail closed immediately.
 	analysis, model, err := s.callGenerate(ctx, snap, paper)
 	if err != nil {
+		s.markFailed(id, strings.TrimSpace(paper.Title), publicReviewGenerateError(err))
 		return paperReviewFile{}, false, err
 	}
 	if !analysis.any() {
-		return paperReviewFile{}, false, fmt.Errorf("empty review from model")
+		err = errReviewEmptyJSON
+		s.markFailed(id, strings.TrimSpace(paper.Title), publicReviewGenerateError(err))
+		return paperReviewFile{}, false, err
 	}
 	if model == "" {
 		model = snap.Model
@@ -502,6 +523,8 @@ func (s *reviewService) generate(ctx context.Context, paper paperEntry, force bo
 	rec.Analysis = analysis
 	rec.Model = model
 	rec.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	rec.Status = reviewStatusReady
+	rec.Error = ""
 	if rec.Ratings == nil {
 		rec.Ratings = []paperReviewRating{}
 	}
@@ -523,6 +546,32 @@ func (s *reviewService) httpClient() *http.Client {
 		return s.client
 	}
 	return &http.Client{Timeout: reviewHTTPTimeout}
+}
+
+func (s *reviewService) markFailed(id, title, userErr string) {
+	if s == nil || id == "" {
+		return
+	}
+	m := s.lockID(id)
+	m.Lock()
+	defer m.Unlock()
+	rec, _ := s.load(id)
+	if rec.hasAnalysis() {
+		return
+	}
+	rec.PaperID = id
+	if title != "" {
+		rec.Title = title
+	}
+	rec.Status = reviewStatusFailed
+	rec.Error = userErr
+	rec.Analysis = paperReviewAnalysis{}
+	if rec.Ratings == nil {
+		rec.Ratings = []paperReviewRating{}
+	}
+	if err := s.persist(&rec); err != nil {
+		log.Printf("papers review mark-failed id=%s: %v", id, err)
+	}
 }
 
 const reviewSystemPrompt = `你是资深学术审稿人，擅长精读与评审 AI / 智能体 / 安全方向论文。
@@ -583,10 +632,6 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 	if client == nil {
 		client = &http.Client{Timeout: reviewHTTPTimeout}
 	}
-	urls := []string{base + "/chat/completions"}
-	if !strings.HasSuffix(base, "/v1") {
-		urls = append(urls, base+"/v1/chat/completions")
-	}
 	payload, err := json.Marshal(map[string]any{
 		"model": model,
 		"messages": []map[string]string{
@@ -600,40 +645,45 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 		return empty, "", err
 	}
 	var last error
-	for _, u := range urls {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(payload))
-		if err != nil {
-			last = err
-			continue
-		}
-		req.Header.Set("Authorization", "Bearer "+snap.APIKey)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := client.Do(req)
-		if err != nil {
-			last = err
-			continue
-		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		_ = resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			last = fmt.Errorf("chat HTTP %d", resp.StatusCode)
-			if resp.StatusCode == http.StatusNotFound {
-				continue
+	for attempt := 1; attempt <= reviewParseAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if last != nil {
+				return empty, "", last
 			}
-			return empty, "", last
+			return empty, "", err
+		}
+		body, err := postHubChat(ctx, client, base, snap.APIKey, payload)
+		if err != nil {
+			return empty, "", err
 		}
 		text, err := extractChatContent(body)
 		if err != nil {
-			return empty, "", err
+			last = err
+			if !retryableReviewContent(err) || attempt == reviewParseAttempts {
+				return empty, "", err
+			}
+			log.Printf("papers review: retry %d/%d after %v", attempt, reviewParseAttempts, err)
+			if berr := hubChatBackoff(ctx, attempt); berr != nil {
+				return empty, "", last
+			}
+			continue
 		}
 		analysis, err := parseReviewAnalysis(text)
 		if err != nil {
-			return empty, "", err
+			last = err
+			if !retryableReviewContent(err) || attempt == reviewParseAttempts {
+				return empty, "", err
+			}
+			log.Printf("papers review: retry %d/%d after %v", attempt, reviewParseAttempts, err)
+			if berr := hubChatBackoff(ctx, attempt); berr != nil {
+				return empty, "", last
+			}
+			continue
 		}
 		return analysis, model, nil
 	}
 	if last == nil {
-		last = fmt.Errorf("chat review failed")
+		last = errChatInvalid
 	}
 	return empty, "", last
 }
@@ -641,27 +691,97 @@ func generateReviewOpenAI(ctx context.Context, client *http.Client, snap transla
 func parseReviewAnalysis(raw string) (paperReviewAnalysis, error) {
 	var empty paperReviewAnalysis
 	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```JSON")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSpace(strings.TrimSuffix(s, "```"))
-	if i := strings.Index(s, "{"); i >= 0 {
-		if j := strings.LastIndex(s, "}"); j > i {
-			s = s[i : j+1]
+	if s == "" {
+		return empty, errReviewEmptyJSON
+	}
+	s = stripJSONFence(s)
+	if obj, ok := extractJSONObject(s); ok {
+		s = obj
+	} else if strings.Contains(s, "{") {
+		if a, ok := recoverReviewFields(s); ok {
+			return a, nil
 		}
+		return empty, errChatTruncated
 	}
 	var a paperReviewAnalysis
 	if err := json.Unmarshal([]byte(s), &a); err != nil {
-		return empty, err
+		if rec, ok := recoverReviewFields(s); ok {
+			return rec, nil
+		}
+		if isTruncatedJSONError(err) {
+			return empty, errChatTruncated
+		}
+		return empty, errChatInvalid
 	}
 	a.MethodPrinciples = strings.TrimSpace(a.MethodPrinciples)
 	a.MethodEssence = strings.TrimSpace(a.MethodEssence)
 	a.Experiment = strings.TrimSpace(a.Experiment)
 	a.Quality = strings.TrimSpace(a.Quality)
 	if !a.any() {
-		return empty, fmt.Errorf("empty analysis")
+		return empty, errReviewEmptyJSON
 	}
 	return a, nil
+}
+
+func stripJSONFence(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	s = strings.TrimPrefix(s, "```")
+	if nl := strings.IndexByte(s, '\n'); nl >= 0 {
+		lang := strings.TrimSpace(s[:nl])
+		if lang == "" || strings.EqualFold(lang, "json") {
+			s = s[nl+1:]
+		}
+	}
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndex(s, "```"); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
+func recoverReviewFields(s string) (paperReviewAnalysis, bool) {
+	var a paperReviewAnalysis
+	keys := []struct {
+		name string
+		dst  *string
+	}{
+		{"method_principles", &a.MethodPrinciples},
+		{"method_essence", &a.MethodEssence},
+		{"experiment", &a.Experiment},
+		{"quality", &a.Quality},
+	}
+	for _, k := range keys {
+		if v, ok := extractJSONStringField(s, k.name); ok {
+			*k.dst = strings.TrimSpace(v)
+		}
+	}
+	return a, a.any()
+}
+
+func extractJSONStringField(s, key string) (string, bool) {
+	needle := `"` + key + `"`
+	i := strings.Index(s, needle)
+	if i < 0 {
+		return "", false
+	}
+	rest := s[i+len(needle):]
+	colon := strings.Index(rest, ":")
+	if colon < 0 {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest[colon+1:])
+	if rest == "" || rest[0] != '"' {
+		return "", false
+	}
+	var val string
+	dec := json.NewDecoder(strings.NewReader(rest))
+	if err := dec.Decode(&val); err != nil {
+		return "", false
+	}
+	return val, true
 }
 
 func (ps *papersStore) findPaper(id string) (paperEntry, bool) {
@@ -702,6 +822,10 @@ func (s *Server) handlePapersReview(w http.ResponseWriter, r *http.Request) {
 		rev := s.papers().reviews
 		if rev == nil {
 			writeErr(w, http.StatusNotFound, "review not found", "papers", nil, "")
+			return
+		}
+		if rev.isGenerating(id) {
+			writeErr(w, http.StatusConflict, errReviewGenerating.Error(), search.CodeBusy, nil, "")
 			return
 		}
 		view, ok := rev.getPublic(id, rater)
@@ -756,12 +880,8 @@ func (s *Server) handlePapersReviewGenerate(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if err != nil {
-		if err == errReviewLLMNotReady {
-			writeErr(w, http.StatusServiceUnavailable, err.Error(), search.CodeEngine, nil, "")
-			return
-		}
 		log.Printf("papers review generate id=%s: %v", id, err)
-		writeErr(w, http.StatusBadGateway, "could not generate review", search.CodeEngine, nil, "")
+		writeReviewGenerateErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, rec.public(rater, skipped))
