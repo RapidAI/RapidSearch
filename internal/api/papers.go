@@ -23,15 +23,19 @@ var papersPageHTML []byte
 const defaultPapersDir = "/workspace/agent-papers"
 
 type paperEntry struct {
-	Title          string   `json:"title"`
-	Authors        []string `json:"authors,omitempty"`
-	Abstract       string   `json:"abstract,omitempty"`
-	Year           int      `json:"year,omitempty"`
-	SourceURL      string   `json:"source_url,omitempty"`
-	PDFURL         string   `json:"pdf_url,omitempty"`
-	ArxivID        string   `json:"arxiv_id,omitempty"`
-	DOI            string   `json:"doi,omitempty"`
-	TopicTags      []string `json:"topic_tags,omitempty"`
+	Title     string   `json:"title"`
+	Authors   []string `json:"authors,omitempty"`
+	Abstract  string   `json:"abstract,omitempty"`
+	Year      int      `json:"year,omitempty"`
+	SourceURL string   `json:"source_url,omitempty"`
+	PDFURL    string   `json:"pdf_url,omitempty"`
+	ArxivID   string   `json:"arxiv_id,omitempty"`
+	DOI       string   `json:"doi,omitempty"`
+	TopicTags []string `json:"topic_tags,omitempty"`
+	// Venue is a human-readable conference/journal name shown on the card.
+	// Suggested security-top values: "IEEE S&P / Oakland", "ACM CCS",
+	// "USENIX Security", "NDSS".
+	Venue          string   `json:"venue,omitempty"`
 	Score          float64  `json:"score,omitempty"`
 	PDFPath        string   `json:"pdf_path,omitempty"`
 	DownloadStatus string   `json:"download_status,omitempty"`
@@ -444,6 +448,7 @@ func filterPapers(in []paperEntry, q, tag string) []paperEntry {
 				p.Filename,
 				strings.Join(p.Authors, " "),
 				strings.Join(p.TopicTags, " "),
+				p.Venue,
 			}, " "))
 			if !strings.Contains(blob, q) {
 				continue

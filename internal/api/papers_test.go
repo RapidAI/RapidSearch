@@ -41,6 +41,7 @@ func TestFilterPapers(t *testing.T) {
 		{Title: "Alpha Security", TopicTags: []string{"security"}, Abstract: "foo", ArxivID: "1.2"},
 		{Title: "Beta Survey", TopicTags: []string{"survey"}, Abstract: "bar", ArxivID: "3.4"},
 		{Title: "Gamma AIoT", TopicTags: []string{"llm-iot"}, Abstract: "llm iot", ArxivID: "5.6"},
+		{Title: "Delta Oakland", TopicTags: []string{"security-top"}, Venue: "IEEE S&P / Oakland", Abstract: "top venue", ArxivID: "7.8"},
 	}
 	got := filterPapers(in, "alpha", "")
 	if len(got) != 1 || got[0].Title != "Alpha Security" {
@@ -53,6 +54,32 @@ func TestFilterPapers(t *testing.T) {
 	got = filterPapers(in, "", "llm-iot")
 	if len(got) != 1 || got[0].Title != "Gamma AIoT" {
 		t.Fatalf("llm-iot filter: %+v", got)
+	}
+	got = filterPapers(in, "", "security-top")
+	if len(got) != 1 || got[0].Title != "Delta Oakland" {
+		t.Fatalf("security-top filter: %+v", got)
+	}
+	got = filterPapers(in, "oakland", "")
+	if len(got) != 1 || got[0].Title != "Delta Oakland" {
+		t.Fatalf("venue search: %+v", got)
+	}
+}
+
+func TestPaperVenueJSON(t *testing.T) {
+	raw := []byte(`{"title":"Oakland paper","topic_tags":["security-top"],"venue":"IEEE S&P / Oakland"}`)
+	var p paperEntry
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Venue != "IEEE S&P / Oakland" {
+		t.Fatalf("venue=%q", p.Venue)
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"venue":`) || !strings.Contains(string(out), "Oakland") {
+		t.Fatalf("marshal=%s", out)
 	}
 }
 
@@ -199,7 +226,8 @@ func TestPapersPageLightTheme(t *testing.T) {
 		t.Fatal("search placeholder should cover title/authors/abstract/tags")
 	}
 	if !strings.Contains(body, "agent自进化") || !strings.Contains(body, "agent安全") ||
-		!strings.Contains(body, "agent安全自进化") || !strings.Contains(body, "LLM based 物联网") {
+		!strings.Contains(body, "agent安全自进化") || !strings.Contains(body, "LLM based 物联网") ||
+		!strings.Contains(body, "安全顶会") {
 		t.Fatal("papers page must show Chinese category labels")
 	}
 	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
@@ -216,6 +244,13 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `"other"`) || !strings.Contains(body, "其它") ||
 		!strings.Contains(body, "Other") {
 		t.Fatal("papers page must include other key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "security-top") || !strings.Contains(body, "安全顶会") ||
+		!strings.Contains(body, "Security top venues") {
+		t.Fatal("papers page must include security-top key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `class="venue"`) || !strings.Contains(body, "p.venue") {
+		t.Fatal("paper cards must render a venue chip when venue is set")
 	}
 	if !strings.Contains(body, `id="import-open"`) || !strings.Contains(body, `id="import-dialog"`) ||
 		!strings.Contains(body, "/papers/import") {

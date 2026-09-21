@@ -5,8 +5,12 @@ from __future__ import annotations
 import unittest
 
 from search_download_papers import (
+    INGEST_OVERLAY_TAGS,
+    SECURITY_TOP_VENUES,
     STABLE_TAGS,
     extract_arxiv_id,
+    keep_ingest_overlay_tags,
+    paper_to_manifest_dict,
     preserve_manual_tags,
     relevance_score,
     tag_topics,
@@ -90,6 +94,31 @@ class TestAutoTopicTags(unittest.TestCase):
         tags = tag_topics("A theory of everything", "No agents or language models here.")
         self.assertNotIn("other", tags)
         self.assertEqual(tags, [])
+
+    def test_security_top_never_auto(self):
+        tags = tag_topics(
+            "Accepted at IEEE S&P and USENIX Security",
+            "We present a jailbreak attack on LLM agents at NDSS and ACM CCS.",
+        )
+        self.assertNotIn("security-top", tags)
+        self.assertIn("security", tags)
+
+    def test_security_top_overlay_and_venue(self):
+        self.assertIn("security-top", STABLE_TAGS)
+        self.assertIn("security-top", INGEST_OVERLAY_TAGS)
+        self.assertEqual(validate_topic_tag(" Security-Top "), "security-top")
+        kept = keep_ingest_overlay_tags(["security"], ["security-top", "security"])
+        self.assertEqual(kept, ["security", "security-top"])
+        p = Paper(
+            title="Oakland paper",
+            topic_tags=["security-top"],
+            venue="IEEE S&P / Oakland",
+        )
+        d = paper_to_manifest_dict(p)
+        self.assertEqual(d["venue"], "IEEE S&P / Oakland")
+        self.assertEqual(paper_to_manifest_dict(Paper(title="x")).get("venue"), None)
+        for name in SECURITY_TOP_VENUES:
+            self.assertTrue(name)
 
 
 if __name__ == "__main__":

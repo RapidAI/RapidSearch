@@ -43,9 +43,9 @@ func TestParseArxivID(t *testing.T) {
 
 func TestValidateTopicTag(t *testing.T) {
 	ok := []string{
-		"self-evolution", "security", "both", "llm-iot", "survey",
+		"self-evolution", "security", "security-top", "both", "llm-iot", "survey",
 		"llm-training", "agent-tools-memory", "other",
-		"LLM-Training", " Other ",
+		"LLM-Training", " Other ", " Security-Top ",
 	}
 	for _, tag := range ok {
 		got, valid := validateTopicTag(tag)
@@ -328,6 +328,7 @@ func TestFilterPapersNewTags(t *testing.T) {
 		{Title: "Train", TopicTags: []string{"llm-training"}},
 		{Title: "Mem", TopicTags: []string{"agent-tools-memory"}},
 		{Title: "Misc", TopicTags: []string{"other"}},
+		{Title: "Oakland", TopicTags: []string{"security-top"}, Venue: "IEEE S&P / Oakland"},
 	}
 	if got := filterPapers(in, "", "llm-training"); len(got) != 1 || got[0].Title != "Train" {
 		t.Fatalf("%+v", got)
@@ -337,6 +338,25 @@ func TestFilterPapersNewTags(t *testing.T) {
 	}
 	if got := filterPapers(in, "", "other"); len(got) != 1 || got[0].Title != "Misc" {
 		t.Fatalf("%+v", got)
+	}
+	if got := filterPapers(in, "", "security-top"); len(got) != 1 || got[0].Title != "Oakland" {
+		t.Fatalf("%+v", got)
+	}
+	if got := filterPapers(in, "oakland", ""); len(got) != 1 || got[0].Title != "Oakland" {
+		t.Fatalf("venue query: %+v", got)
+	}
+}
+
+func TestMergeImportedPaperVenue(t *testing.T) {
+	got := mergeImportedPaper(
+		paperEntry{Title: "Old", TopicTags: []string{"security"}},
+		paperEntry{Title: "New", TopicTags: []string{"security-top"}, Venue: "ACM CCS"},
+	)
+	if got.Venue != "ACM CCS" {
+		t.Fatalf("venue=%q", got.Venue)
+	}
+	if len(got.TopicTags) != 1 || got.TopicTags[0] != "security-top" {
+		t.Fatalf("tags=%v", got.TopicTags)
 	}
 }
 

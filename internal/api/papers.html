@@ -152,12 +152,17 @@
     }
     article.paper h2 { font-size: 1.05rem; margin: 0 0 8px; line-height: 1.35; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-    .year, .pages, .status-pill {
+    .year, .pages, .status-pill, .venue {
       font-size: 12px;
       color: var(--muted);
       border: 1px solid var(--line);
       border-radius: 999px;
       padding: 2px 8px;
+    }
+    .venue {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: transparent;
     }
     .status-pill.queued { color: var(--warn); border-color: var(--warn); }
     .status-pill.running { color: var(--accent); border-color: var(--accent); }
@@ -953,13 +958,14 @@
   };
 
   const TAG_KEYS = [
-    "self-evolution", "security", "both", "llm-iot", "survey",
+    "self-evolution", "security", "security-top", "both", "llm-iot", "survey",
     "llm-training", "agent-tools-memory", "hf-daily", "other"
   ];
   const TAG_LABELS = {
     en: {
       "self-evolution": "Agent self-evolution",
       "security": "Agent security",
+      "security-top": "Security top venues",
       "both": "Secure self-evolution",
       "llm-iot": "LLM-based IoT",
       "survey": "Survey",
@@ -971,6 +977,7 @@
     zh: {
       "self-evolution": "agent自进化",
       "security": "agent安全",
+      "security-top": "安全顶会",
       "both": "agent安全自进化",
       "llm-iot": "LLM based 物联网",
       "survey": "综述",
@@ -1153,7 +1160,9 @@
       p.filename,
       (p.authors || []).join(" "),
       (p.topic_tags || []).join(" "),
-      (p.topic_tags || []).map(tagLabel).join(" ")
+      (p.topic_tags || []).map(tagLabel).join(" "),
+      p.venue,
+      p.conference
     ].join(" ").toLowerCase();
     return blob.indexOf(q) >= 0;
   }
@@ -1440,6 +1449,10 @@
       return '<span class="tag" data-tag="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</span>";
     }).join("");
     const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
+    const venueName = String(p.venue || p.conference || "").trim();
+    const venue = venueName
+      ? '<span class="venue" title="' + esc(venueName) + '">' + esc(venueName) + "</span>"
+      : "";
     const pageCount = Number(p.page_count) || 0;
     const pages = pageCount > 0
       ? '<span class="pages">' + esc(t("pages").replace("{n}", String(pageCount))) + "</span>"
@@ -1520,7 +1533,7 @@
       '<article class="paper">' +
         "<h2>" + esc(p.title || "") + "</h2>" +
         authors +
-        '<div class="row">' + year + pages + tags + "</div>" +
+        '<div class="row">' + year + venue + pages + tags + "</div>" +
         briefHtml +
         '<div class="actions">' + actions + "</div>" +
         errHtml +
