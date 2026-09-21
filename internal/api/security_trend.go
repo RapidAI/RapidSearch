@@ -161,7 +161,7 @@ type securityTrendService struct {
 	mu         sync.Mutex
 	generating map[string]chan struct{}
 	kick       chan struct{}
-	stop       chan struct{}
+	stopCh     chan struct{}
 	started    bool
 	stopped    bool
 }
@@ -181,7 +181,7 @@ func newSecurityTrendService(ps *papersStore) *securityTrendService {
 		autoGap:    securityTrendAutoGap,
 		generating: map[string]chan struct{}{},
 		kick:       make(chan struct{}, 1),
-		stop:       make(chan struct{}),
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -213,7 +213,7 @@ func (s *securityTrendService) stop() {
 		return
 	}
 	s.stopped = true
-	close(s.stop)
+	close(s.stopCh)
 	s.mu.Unlock()
 }
 
@@ -234,7 +234,7 @@ func (s *securityTrendService) loop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-s.stop:
+		case <-s.stopCh:
 			return
 		case <-s.kick:
 			s.generateMissing()
@@ -302,7 +302,7 @@ func (s *securityTrendService) generateMissing() {
 		}
 		if gap > 0 && i < len(groups)-1 {
 			select {
-			case <-s.stop:
+			case <-s.stopCh:
 				return
 			case <-time.After(gap):
 			}
