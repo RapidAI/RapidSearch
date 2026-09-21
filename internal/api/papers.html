@@ -495,6 +495,7 @@
     }
     .date-chip .n { opacity: 0.75; margin-left: 4px; font-size: 12px; }
     .daily-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+    .venue-trend-pending { color: var(--muted); font-size: 13px; }
     .trend-list { margin: 0 0 0 18px; padding: 0; }
     .trend-list li { margin: 0 0 6px; line-height: 1.5; }
   </style>
@@ -575,6 +576,7 @@
       <button type="button" class="primary" id="venue-trend-open" data-i18n="securityTrend">Research trends</button>
       <button type="button" id="venue-trend-view" hidden data-i18n="securityTrendView">View trend summary</button>
       <button type="button" id="venue-trend-regen" hidden data-i18n="securityTrendRegen">Regenerate</button>
+      <span id="venue-trend-pending" class="venue-trend-pending" hidden data-i18n="securityTrendPending">Trend summary is being generated. Please refresh later.</span>
     </div>
   </div>
 
@@ -738,6 +740,7 @@
       securityTrend: "Research trends",
       securityTrendView: "View trend summary",
       securityTrendRegen: "Regenerate",
+      securityTrendPending: "Trend summary is being generated. Please refresh later.",
       securityTrendKicker: "Venue research-trend summary",
       dailyMeta: "{count} papers · {date} · fetched {when}",
       dailyLoadErr: "Failed to load Hugging Face Daily Papers",
@@ -877,6 +880,7 @@
       securityTrend: "研究趋势",
       securityTrendView: "查看趋势综述",
       securityTrendRegen: "重新生成",
+      securityTrendPending: "趋势综述生成中，请稍后刷新",
       securityTrendKicker: "会议研究趋势综述",
       dailyMeta: "{count} 篇 · {date} · 获取于 {when}",
       dailyLoadErr: "加载 Hugging Face 每日论文失败",
@@ -2214,14 +2218,24 @@
       renderVenueYears();
     } catch (e) {}
   }
+  function venueYearInfo() {
+    return (venueYears || []).filter(function (y) { return y.year === venueYear; })[0] || null;
+  }
   function syncVenueTrendButtons() {
     const open = document.getElementById("venue-trend-open");
     const view = document.getElementById("venue-trend-view");
     const regen = document.getElementById("venue-trend-regen");
+    const pend = document.getElementById("venue-trend-pending");
     const inVenue = currentSection === "venue";
-    if (open) open.hidden = !inVenue || venueHasTrend;
+    const info = venueYearInfo();
+    const count = info ? (info.count || 0) : 0;
+    const missing = inVenue && count > 0 && !venueHasTrend;
+    // Generate is admin-only. Visitors never see a button that POSTs or
+    // opens an unauthorized / please-log-in modal.
+    if (open) open.hidden = !missing || !canManage;
     if (view) view.hidden = !inVenue || !venueHasTrend;
     if (regen) regen.hidden = !inVenue || !canManage || !venueHasTrend;
+    if (pend) pend.hidden = !missing;
   }
   function setTrendKicker(kind) {
     const el = document.querySelector("#trend-modal .modal-kicker");
@@ -2229,19 +2243,23 @@
   }
   async function openVenueTrend(force) {
     if (!currentVenue || !venueYear) return;
+    const info = venueYearInfo();
+    const count = info ? (info.count || 0) : 0;
+    // Visitors never POST. Missing cache → pending copy, not login/unauthorized.
+    if (!canManage && !venueHasTrend) {
+      const modal = document.getElementById("trend-modal");
+      if (modal) modal.hidden = true;
+      syncVenueTrendButtons();
+      return;
+    }
     const modal = document.getElementById("trend-modal");
     modal.hidden = false;
     document.getElementById("trend-body").hidden = true;
     setTrendKicker("security");
-    const generate = force || !venueHasTrend;
-    setTrendStatus(t(generate ? "trendGenerating" : "trendGenerating"), "busy");
+    const doPost = canManage && (force || !venueHasTrend);
+    setTrendStatus(t("trendGenerating"), "busy");
     try {
       const url = securityTrendURL(currentVenue, venueYear);
-      const doPost = generate && canManage;
-      if (generate && !canManage && !venueHasTrend) {
-        setTrendStatus(t("unauthorized"), "err");
-        return;
-      }
       const res = await fetch(url, {
         method: doPost ? "POST" : "GET",
         credentials: "same-origin",
@@ -2255,17 +2273,18 @@
         } else if (res.status === 404) {
           setTrendStatus(t("venueEmpty"), "");
         } else if (res.status === 401) {
-          setTrendStatus(t("unauthorized"), "err");
+          setTrendStatus(canManage ? t("unauthorized") : t("securityTrendPending"), canManage ? "err" : "");
         } else {
           setTrendStatus(t(force ? "trendGenFail" : "trendLoadFail"), "err");
         }
         return;
       }
       if (!data.headline && !data.overview && !data.has_trend) {
-        if (canManage && !doPost) {
-          return openVenueTrend(true);
+        if (count === 0) {
+          setTrendStatus(t("venueEmpty"), "");
+          return;
         }
-        setTrendStatus(t("venueEmpty"), "");
+        setTrendStatus(t("securityTrendPending"), "");
         return;
       }
       setTrendStatus("", "");

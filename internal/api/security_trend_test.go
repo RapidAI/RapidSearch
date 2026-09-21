@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestNormalizeSecurityVenue(t *testing.T) {
@@ -332,6 +333,11 @@ func TestPapersPageSecurityVenueUI(t *testing.T) {
 		"selectVenueYear",
 		"openVenueTrend",
 		"security-top",
+		`id="venue-trend-pending"`,
+		"securityTrendPending",
+		"趋势综述生成中，请稍后刷新",
+		"Trend summary is being generated. Please refresh later.",
+		"if (!canManage && !venueHasTrend)",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("papers.html missing %q", want)
@@ -339,5 +345,187 @@ func TestPapersPageSecurityVenueUI(t *testing.T) {
 	}
 	if !strings.Contains(body, `tabSP: "IEEE S&P"`) && !strings.Contains(body, "tabSP") {
 		t.Fatal("missing IEEE S&P i18n key")
+	}
+	// Visitors must not be sent to a login/unauthorized modal to see trends.
+	if strings.Contains(body, `if (generate && !canManage && !venueHasTrend)`) {
+		t.Fatal("openVenueTrend still auto-opens unauthorized for anonymous generate")
+	}
+}
+
+func TestSecurityTrendAutoGenerateWithoutHTTPAuth(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	writeSecurityManifest(t, dir, []paperEntry{
+		{
+			Title: "USENIX A", Venue: "USENIX Security", Year: 2025,
+			TopicTags: []string{"security-top"}, Abstract: "side channels",
+			ArxivID: "2501.00001",
+		},
+		{
+			Title: "CCS cached", Venue: "ACM CCS", Year: 2025,
+			TopicTags: []string{"security-top"}, Abstract: "already have trend",
+			ArxivID: "2501.00002",
+		},
+		{
+			Title: "Workshop", Venue: "Random WS", Year: 2025,
+			TopicTags: []string{"security-top"}, Abstract: "not a big-4",
+			ArxivID: "2501.00003",
+		},
+	})
+	// Valid cache for CCS 2025 — auto worker must skip it.
+	if err := os.MkdirAll(securityTrendDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cached := securityTrend{
+		Venue: "ACM CCS", Slug: "acm-ccs", Year: 2025,
+		Headline: "already", Overview: "cached",
+	}
+	raw, err := json.Marshal(cached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(securityTrendPath(dir, "acm-ccs", 2025), append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.papers().invalidateCatalog()
+	ps := srv.papers()
+	ps.secTrends.autoGap = 0
+
+	var calls atomic.Int32
+	var lastVenue atomic.Value
+	done := make(chan struct{}, 4)
+	ps.secTrends.generateFn = func(ctx context.Context, snap translateSnapshot, venue string, year int, papers []paperEntry) (securityTrend, error) {
+		calls.Add(1)
+		lastVenue.Store(venue)
+		if snap.APIKey == "" || snap.Model == "" {
+			t.Error("auto generate must reuse translate LLM snapshot")
+		}
+		if year != 2025 || !strings.Contains(venue, "USENIX") {
+			t.Errorf("unexpected auto target venue=%s year=%d", venue, year)
+		}
+		if len(papers) != 1 {
+			t.Errorf("want 1 usenix paper, got %d", len(papers))
+		}
+		select {
+		case done <- struct{}{}:
+		default:
+		}
+		return securityTrend{
+			Headline: "auto headline",
+			Overview: "auto overview",
+		}, nil
+	}
+	// Set LLM snapshot after generateFn so a pending start/invalidate kick
+	// cannot call the real Hub client.
+	ps.xlate.cfg.APIKey = "test-key"
+	ps.xlate.cfg.Model = "test-model"
+
+	// papersHandler stops the auto worker so HTTP tests stay isolated.
+	ps.secTrends.start()
+	// Background path: no HTTP, no authorizeSettings.
+	ps.secTrends.ensureMissing()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("background generate did not run, calls=%d", calls.Load())
+	}
+
+	if calls.Load() != 1 {
+		t.Fatalf("want one LLM call for the missing USENIX group, got %d", calls.Load())
+	}
+	if v, _ := lastVenue.Load().(string); !strings.Contains(v, "USENIX") {
+		t.Fatalf("generated venue=%v", lastVenue.Load())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(securityTrendPath(dir, "usenix-security", 2025)); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("auto generate did not persist trend JSON")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Years API reports has_trend after generate (public GET).
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/security-trend?venue=usenix-security", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("years status=%d %s", rr.Code, rr.Body.String())
+	}
+	var years securityVenueYearsResp
+	if err := json.Unmarshal(rr.Body.Bytes(), &years); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, y := range years.Years {
+		if y.Year == 2025 {
+			found = true
+			if y.Count != 1 || !y.HasTrend {
+				t.Fatalf("2025 after auto: %+v", y)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing 2025 in years: %+v", years.Years)
+	}
+
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/papers/security-trend?venue=usenix-security&year=2025", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("public GET after auto %d %s", rr.Code, rr.Body.String())
+	}
+	var view securityTrendView
+	if err := json.Unmarshal(rr.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if !view.HasTrend || view.Headline != "auto headline" {
+		t.Fatalf("public view after auto: %+v", view)
+	}
+
+	// Unauthenticated POST is still 401 (force-regenerate stays admin-only).
+	before := calls.Load()
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/papers/security-trend?venue=usenix-security&year=2025", strings.NewReader(`{"force":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("anon POST status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if calls.Load() != before {
+		t.Fatal("anon POST must not call LLM")
+	}
+}
+
+func TestSecurityTrendMissingGroupsSkipEmptyAndCached(t *testing.T) {
+	h, dir := papersHandler(t)
+	srv := h.(*Server)
+	writeSecurityManifest(t, dir, []paperEntry{
+		{Title: "USENIX", Venue: "USENIX Security", Year: 2025, TopicTags: []string{"security-top"}, Abstract: "a", ArxivID: "2501.1"},
+		{Title: "CCS", Venue: "ACM CCS", Year: 2024, TopicTags: []string{"security-top"}, Abstract: "b", ArxivID: "2501.2"},
+		{Title: "Other", Venue: "Workshop", Year: 2025, TopicTags: []string{"security-top"}, Abstract: "c", ArxivID: "2501.3"},
+	})
+	if err := os.MkdirAll(securityTrendDir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cached := securityTrend{Headline: "ccs", Overview: "done", Slug: "acm-ccs", Year: 2024}
+	raw, _ := json.Marshal(cached)
+	if err := os.WriteFile(securityTrendPath(dir, "acm-ccs", 2024), append(raw, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.papers().invalidateCatalog()
+	papers, err := srv.papers().secTrends.securityTopPapers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := srv.papers().secTrends.missingTrendGroups(papers)
+	if len(got) != 1 {
+		t.Fatalf("groups=%d %+v", len(got), got)
+	}
+	if got[0].Slug != "usenix-security" || got[0].Year != 2025 {
+		t.Fatalf("want usenix 2025, got %+v", got[0])
 	}
 }

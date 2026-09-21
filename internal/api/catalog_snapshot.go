@@ -731,4 +731,7 @@ func (s *Server) kickPapersSideEffects(canManage bool, papers []paperEntry) {
 	if abs := s.papers().absZH; abs != nil {
 		abs.ensureMissing(papers)
 	}
+	if sec := s.papers().secTrends; sec != nil {
+		sec.ensureMissing()
+	}
 }
