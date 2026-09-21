@@ -462,6 +462,7 @@
     .section-tabs button {
       border-radius: 999px;
       padding: 7px 14px;
+      white-space: nowrap;
     }
     .section-tabs button.active {
       background: var(--accent);
@@ -545,6 +546,10 @@
   <div class="section-tabs" role="tablist">
     <button type="button" id="tab-catalog" class="active" data-section="catalog" data-i18n="tabCatalog">Selected papers</button>
     <button type="button" id="tab-daily" data-section="daily" data-i18n="tabDaily">Hugging Face Daily Papers</button>
+    <button type="button" id="tab-ieee-sp" data-section="ieee-sp" title="IEEE S&P / Oakland" data-i18n="tabSP">IEEE S&P</button>
+    <button type="button" id="tab-acm-ccs" data-section="acm-ccs" title="ACM CCS" data-i18n="tabCCS">ACM CCS</button>
+    <button type="button" id="tab-usenix-security" data-section="usenix-security" title="USENIX Security" data-i18n="tabUSENIX">USENIX Security</button>
+    <button type="button" id="tab-ndss" data-section="ndss" title="NDSS" data-i18n="tabNDSS">NDSS</button>
   </div>
 
   <div id="daily-tools" hidden>
@@ -557,6 +562,19 @@
     <div class="daily-actions">
       <button type="button" class="primary" id="trend-open" data-i18n="trendView">View trend summary</button>
       <button type="button" id="trend-regen" hidden data-i18n="trendRegen">Regenerate trend</button>
+    </div>
+  </div>
+
+  <div id="venue-tools" hidden>
+    <div class="date-nav">
+      <button type="button" id="venue-prev" data-i18n="prevYear">Previous year</button>
+      <div class="date-chips" id="venue-years"></div>
+      <button type="button" id="venue-next" data-i18n="nextYear">Next year</button>
+    </div>
+    <div class="daily-actions">
+      <button type="button" class="primary" id="venue-trend-open" data-i18n="securityTrend">Research trends</button>
+      <button type="button" id="venue-trend-view" hidden data-i18n="securityTrendView">View trend summary</button>
+      <button type="button" id="venue-trend-regen" hidden data-i18n="securityTrendRegen">Regenerate</button>
     </div>
   </div>
 
@@ -707,8 +725,20 @@
       heading: "MaClaw Selected papers",
       tabCatalog: "Selected papers",
       tabDaily: "Hugging Face Daily Papers",
+      tabSP: "IEEE S&P",
+      tabCCS: "ACM CCS",
+      tabUSENIX: "USENIX Security",
+      tabNDSS: "NDSS",
       prevDay: "Previous day",
       nextDay: "Next day",
+      prevYear: "Previous year",
+      nextYear: "Next year",
+      venueMeta: "{count} papers · {venue} · {year}",
+      venueEmpty: "No papers for this conference year.",
+      securityTrend: "Research trends",
+      securityTrendView: "View trend summary",
+      securityTrendRegen: "Regenerate",
+      securityTrendKicker: "Venue research-trend summary",
       dailyMeta: "{count} papers · {date} · fetched {when}",
       dailyLoadErr: "Failed to load Hugging Face Daily Papers",
       trendView: "View trend summary",
@@ -834,8 +864,20 @@
       heading: "码卡龙论文精选",
       tabCatalog: "精选论文",
       tabDaily: "Hugging Face 每日论文",
+      tabSP: "IEEE S&P",
+      tabCCS: "ACM CCS",
+      tabUSENIX: "USENIX Security",
+      tabNDSS: "NDSS",
       prevDay: "上一天",
       nextDay: "下一天",
+      prevYear: "上一年",
+      nextYear: "下一年",
+      venueMeta: "{count} 篇 · {venue} · {year}",
+      venueEmpty: "该会议该年没有论文。",
+      securityTrend: "研究趋势",
+      securityTrendView: "查看趋势综述",
+      securityTrendRegen: "重新生成",
+      securityTrendKicker: "会议研究趋势综述",
       dailyMeta: "{count} 篇 · {date} · 获取于 {when}",
       dailyLoadErr: "加载 Hugging Face 每日论文失败",
       trendView: "查看趋势综述",
@@ -957,6 +999,36 @@
     }
   };
 
+  const VENUE_SLUGS = ["ieee-sp", "acm-ccs", "usenix-security", "ndss"];
+  const VENUE_LABELS = {
+    "ieee-sp": "IEEE S&P / Oakland",
+    "acm-ccs": "ACM CCS",
+    "usenix-security": "USENIX Security",
+    "ndss": "NDSS"
+  };
+  const VENUE_ALIASES = {
+    "ieee s and p oakland": "ieee-sp",
+    "ieee s and p": "ieee-sp",
+    "ieee sp oakland": "ieee-sp",
+    "ieee sp": "ieee-sp",
+    "s and p oakland": "ieee-sp",
+    "s and p": "ieee-sp",
+    "oakland": "ieee-sp",
+    "sp": "ieee-sp",
+    "ieee symposium on security and privacy": "ieee-sp",
+    "ieee security and privacy": "ieee-sp",
+    "acm ccs": "acm-ccs",
+    "ccs": "acm-ccs",
+    "acm conference on computer and communications security": "acm-ccs",
+    "computer and communications security": "acm-ccs",
+    "usenix security": "usenix-security",
+    "usenix sec": "usenix-security",
+    "usenix": "usenix-security",
+    "usenix security symposium": "usenix-security",
+    "ndss": "ndss",
+    "network and distributed system security": "ndss",
+    "network and distributed systems security": "ndss"
+  };
   const TAG_KEYS = [
     "self-evolution", "security", "security-top", "both", "llm-iot", "survey",
     "llm-training", "agent-tools-memory", "hf-daily", "other"
@@ -1045,8 +1117,9 @@
     document.getElementById("theme-light").classList.toggle("active", theme === "light");
     document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
     document.documentElement.setAttribute("data-i18n-ready", "1");
-    document.title = currentSection === "daily" ? t("tabDaily") : t("heading");
+    document.title = currentSection === "daily" ? t("tabDaily") : (currentSection === "venue" ? venueLabel(currentVenue) : t("heading"));
     if (currentSection === "daily") renderDateChips();
+    if (currentSection === "venue") renderVenueYears();
   }
   function setLang(lang) {
     if (lang !== "zh" && lang !== "en") lang = "en";
@@ -1114,6 +1187,20 @@
   let snapshotETag = "";
   let catalogFetch = null;
   let currentSection = "catalog";
+  let currentVenue = "";
+  let venueYear = 0;
+  let venueYears = [];
+  let venueHasTrend = false;
+  try {
+    const boot = new URLSearchParams(location.search);
+    const bootVenue = (boot.get("venue") || "").trim();
+    const bootYear = Number(boot.get("year") || 0);
+    if (VENUE_SLUGS.indexOf(bootVenue) >= 0) {
+      currentSection = "venue";
+      currentVenue = bootVenue;
+      if (bootYear > 0) venueYear = bootYear;
+    }
+  } catch (e) {}
   let dailyDates = [];
   let dailyDate = "";
   const CATALOG_CACHE_KEY = "rs_papers_catalog_v2";
@@ -1167,11 +1254,65 @@
     return blob.indexOf(q) >= 0;
   }
 
+  function canonVenueKey(s) {
+    return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function stripYearTokens(s) {
+    return String(s || "").split(" ").filter(function (tok) {
+      return !/^(19|20)\d{2}$/.test(tok);
+    }).join(" ").trim();
+  }
+  function normalizeSecurityVenue(raw) {
+    const canon = stripYearTokens(canonVenueKey(raw));
+    if (!canon) return "";
+    if (VENUE_ALIASES[canon]) return VENUE_ALIASES[canon];
+    let best = "";
+    let bestLen = 0;
+    Object.keys(VENUE_ALIASES).forEach(function (alias) {
+      if (alias.length < 8) return;
+      if (canon.indexOf(alias) >= 0 && alias.length > bestLen) {
+        best = VENUE_ALIASES[alias];
+        bestLen = alias.length;
+      }
+    });
+    return best;
+  }
+  function paperVenueSlug(p) {
+    return normalizeSecurityVenue((p && (p.venue || p.conference)) || "");
+  }
+  function paperYearOf(p) {
+    const y = Number(p && p.year) || 0;
+    if (y > 0) return y;
+    const pub = String((p && p.published) || "").trim();
+    if (/^(19|20)\d{2}/.test(pub)) return Number(pub.slice(0, 4));
+    return 0;
+  }
+  function paperHasSecurityTop(p) {
+    return (p.topic_tags || []).some(function (tg) {
+      return String(tg).toLowerCase() === "security-top";
+    });
+  }
+  function venueLabel(slug) {
+    return VENUE_LABELS[slug] || slug;
+  }
+  function isVenueSlug(s) {
+    return VENUE_SLUGS.indexOf(s) >= 0;
+  }
+  function isSpecialSection() {
+    return currentSection === "daily" || currentSection === "venue";
+  }
+
   function applyFilters(resetPage) {
     const q = document.getElementById("q").value.trim().toLowerCase();
-    const tag = currentSection === "daily" ? "" : document.getElementById("tag").value;
+    const tag = isSpecialSection() ? "" : document.getElementById("tag").value;
     const sort = document.getElementById("sort").value || "date-desc";
     let list = ((currentSection === "daily" ? lastDaily.papers : lastCatalog.papers) || []).slice();
+    if (currentSection === "venue" && currentVenue) {
+      list = list.filter(function (p) {
+        return paperHasSecurityTop(p) && paperVenueSlug(p) === currentVenue &&
+          (!venueYear || paperYearOf(p) === venueYear);
+      });
+    }
     if (tag) {
       const tagL = tag.toLowerCase();
       list = list.filter(function (p) {
@@ -1386,6 +1527,13 @@
         .replace("{when}", lastDaily.fetched_at || "—");
       return;
     }
+    if (currentSection === "venue") {
+      document.getElementById("meta").textContent = t("venueMeta")
+        .replace("{count}", String(filteredPapers.length))
+        .replace("{venue}", venueLabel(currentVenue))
+        .replace("{year}", venueYear ? String(venueYear) : "—");
+      return;
+    }
     const when = lastCatalog.generated_at || "—";
     const all = lastCatalog.papers || [];
     const total = typeof lastCatalog.count === "number" ? lastCatalog.count : all.length;
@@ -1429,19 +1577,26 @@
 
   function applyManageUI() {
     const pending = document.getElementById("xlate-pending");
-    if (pending) pending.hidden = !canManage || currentSection === "daily";
+    if (pending) pending.hidden = !canManage || isSpecialSection();
     const regen = document.getElementById("trend-regen");
     if (regen) regen.hidden = !canManage || currentSection !== "daily" || !lastDaily.has_trend;
     const tag = document.getElementById("tag");
-    if (tag) tag.hidden = currentSection === "daily";
+    if (tag) tag.hidden = isSpecialSection();
     const chips = document.getElementById("tag-chips");
-    if (chips) chips.hidden = currentSection === "daily";
+    if (chips) chips.hidden = isSpecialSection();
     const dailyTools = document.getElementById("daily-tools");
     if (dailyTools) dailyTools.hidden = currentSection !== "daily";
+    const venueTools = document.getElementById("venue-tools");
+    if (venueTools) venueTools.hidden = currentSection !== "venue";
     const tabCat = document.getElementById("tab-catalog");
     const tabDaily = document.getElementById("tab-daily");
     if (tabCat) tabCat.classList.toggle("active", currentSection === "catalog");
     if (tabDaily) tabDaily.classList.toggle("active", currentSection === "daily");
+    VENUE_SLUGS.forEach(function (slug) {
+      const el = document.getElementById("tab-" + slug);
+      if (el) el.classList.toggle("active", currentSection === "venue" && currentVenue === slug);
+    });
+    syncVenueTrendButtons();
   }
 
   function renderPaperCard(p) {
@@ -1548,7 +1703,7 @@
     renderMeta();
     renderPagers();
     if (!filteredPapers.length) {
-      list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
+      list.innerHTML = '<p class="empty">' + esc(currentSection === "venue" ? t("venueEmpty") : t("empty")) + "</p>";
     } else {
       list.innerHTML = pagePapers.map(renderPaperCard).join("");
       list.querySelectorAll(".xlate-one").forEach(function (btn) {
@@ -1866,7 +2021,8 @@
       if (got.notModified || !got.res || !got.res.ok || !got.data) return;
       applyCatalogData(got.data, { merge: true });
       writeCatalogCache(lastCatalog, snapshotETag);
-      if (currentSection === "catalog") renderAll(false);
+      if (currentSection === "venue") loadVenueYears();
+      if (currentSection === "catalog" || currentSection === "venue") renderAll(false);
     } catch (e) {
       if (!silent) {
         // Keep first-page cards; search will catch up on the next successful tail.
@@ -1900,15 +2056,35 @@
     return loadDaily(opts);
   }
   function setSection(section, date, opts) {
-    currentSection = section === "daily" ? "daily" : "catalog";
-    if (currentSection === "daily") {
+    if (section === "daily") {
+      currentSection = "daily";
+      currentVenue = "";
       const q = document.getElementById("q");
       if (q) q.value = "";
       if (date) dailyDate = date;
+    } else if (isVenueSlug(section)) {
+      const changing = currentVenue !== section;
+      currentSection = "venue";
+      currentVenue = section;
+      const q = document.getElementById("q");
+      if (q) q.value = "";
+      if (date && Number(date) > 0) venueYear = Number(date);
+      else if (changing) venueYear = 0;
+    } else {
+      currentSection = "catalog";
+      currentVenue = "";
     }
+    syncVenueURL();
     applyManageUI();
     applyI18n();
     if (currentSection === "daily") return selectDailyDate(dailyDate || date || todayYMD(), opts);
+    if (currentSection === "venue") {
+      renderAll(true);
+      return loadVenueYears().then(function () {
+        renderAll(true);
+        return load(opts);
+      });
+    }
     renderAll(true);
     return load(opts);
   }
@@ -1929,6 +2105,184 @@
     });
     const input = document.getElementById("daily-date");
     if (input && dailyDate) input.value = dailyDate;
+  }
+  function securityTrendURL(slug, year, extra) {
+    let u = prefix + "/papers/security-trend";
+    const params = new URLSearchParams();
+    if (slug) params.set("venue", slug);
+    if (year) params.set("year", String(year));
+    const s = params.toString();
+    if (s) u += "?" + s;
+    return extra ? u + extra : u;
+  }
+  function syncVenueURL() {
+    try {
+      const u = new URL(location.href);
+      if (currentSection === "venue" && currentVenue) {
+        u.searchParams.set("venue", currentVenue);
+        if (venueYear) u.searchParams.set("year", String(venueYear));
+        else u.searchParams.delete("year");
+      } else {
+        u.searchParams.delete("venue");
+        u.searchParams.delete("year");
+      }
+      const want = u.pathname + u.search + u.hash;
+      const cur = location.pathname + location.search + (location.hash || "");
+      if (want !== cur) history.replaceState(null, "", want);
+    } catch (e) {}
+  }
+  function yearsFromCatalog(slug) {
+    const counts = {};
+    (lastCatalog.papers || []).forEach(function (p) {
+      if (!paperHasSecurityTop(p) || paperVenueSlug(p) !== slug) return;
+      const y = paperYearOf(p);
+      if (y > 0) counts[y] = (counts[y] || 0) + 1;
+    });
+    const nowY = new Date().getUTCFullYear();
+    let floor = 2022;
+    Object.keys(counts).forEach(function (k) {
+      const y = Number(k);
+      if (y > 0 && y < floor) floor = y;
+    });
+    const out = [];
+    for (let y = nowY; y >= floor; y--) {
+      out.push({ year: y, count: counts[y] || 0, has_trend: false });
+    }
+    return out;
+  }
+  function defaultVenueYear(years) {
+    for (let i = 0; i < (years || []).length; i++) {
+      if (years[i].count > 0) return years[i].year;
+    }
+    return (years && years[0] && years[0].year) || new Date().getUTCFullYear();
+  }
+  function renderVenueYears() {
+    const box = document.getElementById("venue-years");
+    if (!box) return;
+    const years = venueYears || [];
+    box.innerHTML = years.map(function (y) {
+      const active = y.year === venueYear ? " active" : "";
+      const n = '<span class="n">' + esc(String(y.count || 0)) + "</span>";
+      return '<button type="button" class="date-chip' + active + '" data-year="' + esc(String(y.year)) + '">' +
+        esc(String(y.year)) + n + "</button>";
+    }).join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        selectVenueYear(Number(btn.getAttribute("data-year") || 0));
+      });
+    });
+    const idx = years.findIndex(function (y) { return y.year === venueYear; });
+    const prev = document.getElementById("venue-prev");
+    const next = document.getElementById("venue-next");
+    if (prev) prev.disabled = idx < 0 || idx >= years.length - 1;
+    if (next) next.disabled = idx <= 0;
+    syncVenueTrendButtons();
+  }
+  function selectVenueYear(year) {
+    const years = venueYears || [];
+    if (year) venueYear = year;
+    else venueYear = defaultVenueYear(years);
+    const hit = years.filter(function (y) { return y.year === venueYear; })[0];
+    venueHasTrend = !!(hit && hit.has_trend);
+    syncVenueURL();
+    applyManageUI();
+    renderVenueYears();
+    renderAll(true);
+  }
+  function shiftVenueYear(delta) {
+    const years = venueYears || [];
+    const idx = years.findIndex(function (y) { return y.year === venueYear; });
+    const next = years[idx - delta]; // years are newest-first; prev year = +index
+    if (next) selectVenueYear(next.year);
+  }
+  async function loadVenueYears() {
+    if (!currentVenue) return;
+    venueYears = yearsFromCatalog(currentVenue);
+    if (!venueYear) venueYear = defaultVenueYear(venueYears);
+    renderVenueYears();
+    try {
+      const res = await fetch(securityTrendURL(currentVenue), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.years) && data.years.length) {
+        venueYears = data.years;
+        if (data.default_year && !venueYear) venueYear = data.default_year;
+      }
+      if (!venueYear) venueYear = defaultVenueYear(venueYears);
+      const hit = venueYears.filter(function (y) { return y.year === venueYear; })[0];
+      venueHasTrend = !!(hit && hit.has_trend);
+      renderVenueYears();
+    } catch (e) {}
+  }
+  function syncVenueTrendButtons() {
+    const open = document.getElementById("venue-trend-open");
+    const view = document.getElementById("venue-trend-view");
+    const regen = document.getElementById("venue-trend-regen");
+    const inVenue = currentSection === "venue";
+    if (open) open.hidden = !inVenue || venueHasTrend;
+    if (view) view.hidden = !inVenue || !venueHasTrend;
+    if (regen) regen.hidden = !inVenue || !canManage || !venueHasTrend;
+  }
+  function setTrendKicker(kind) {
+    const el = document.querySelector("#trend-modal .modal-kicker");
+    if (el) el.textContent = kind === "security" ? t("securityTrendKicker") : t("trendKicker");
+  }
+  async function openVenueTrend(force) {
+    if (!currentVenue || !venueYear) return;
+    const modal = document.getElementById("trend-modal");
+    modal.hidden = false;
+    document.getElementById("trend-body").hidden = true;
+    setTrendKicker("security");
+    const generate = force || !venueHasTrend;
+    setTrendStatus(t(generate ? "trendGenerating" : "trendGenerating"), "busy");
+    try {
+      const url = securityTrendURL(currentVenue, venueYear);
+      const doPost = generate && canManage;
+      if (generate && !canManage && !venueHasTrend) {
+        setTrendStatus(t("unauthorized"), "err");
+        return;
+      }
+      const res = await fetch(url, {
+        method: doPost ? "POST" : "GET",
+        credentials: "same-origin",
+        headers: authHeaders(!!doPost),
+        body: doPost ? JSON.stringify({ force: !!force }) : undefined
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || data.error) {
+        if (data.error === "need_llm" || /not configured/i.test(String(data.error || ""))) {
+          setTrendStatus(t("trendNeedLLM"), "err");
+        } else if (res.status === 404) {
+          setTrendStatus(t("venueEmpty"), "");
+        } else if (res.status === 401) {
+          setTrendStatus(t("unauthorized"), "err");
+        } else {
+          setTrendStatus(t(force ? "trendGenFail" : "trendLoadFail"), "err");
+        }
+        return;
+      }
+      if (!data.headline && !data.overview && !data.has_trend) {
+        if (canManage && !doPost) {
+          return openVenueTrend(true);
+        }
+        setTrendStatus(t("venueEmpty"), "");
+        return;
+      }
+      setTrendStatus("", "");
+      venueHasTrend = true;
+      (venueYears || []).forEach(function (y) {
+        if (y.year === venueYear) y.has_trend = true;
+      });
+      applyManageUI();
+      document.getElementById("trend-title").textContent = data.headline || (venueLabel(currentVenue) + " · " + venueYear);
+      document.getElementById("trend-overview").textContent = data.overview || "";
+      document.getElementById("trend-themes").innerHTML = (data.themes || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+      document.getElementById("trend-highlights").innerHTML = (data.highlights || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+      document.getElementById("trend-outlook").textContent = data.outlook || "";
+      document.getElementById("trend-body").hidden = false;
+    } catch (e) {
+      setTrendStatus(t("trendLoadFail") + " — " + String(e), "err");
+    }
   }
   function readDailyCache() {
     try {
@@ -2034,6 +2388,7 @@
     const modal = document.getElementById("trend-modal");
     modal.hidden = false;
     document.getElementById("trend-body").hidden = true;
+    setTrendKicker("daily");
     setTrendStatus(t("trendGenerating"), "busy");
     try {
       const url = dailyURL(dailyDate || lastDaily.date || todayYMD(), "/trend");
@@ -2080,6 +2435,12 @@
 
   async function load(opts) {
     if (currentSection === "daily") return loadDaily(opts);
+    if (currentSection === "venue") {
+      await loadCatalog(opts);
+      await loadVenueYears();
+      renderAll(false);
+      return;
+    }
     const silent = !!(opts && opts.silent);
     const hadCache = catalogLoaded && (lastCatalog.papers || []).length > 0;
     await Promise.all([
@@ -2703,8 +3064,13 @@
     el.addEventListener("click", function () { closeReviewModal(); });
   });
   document.addEventListener("keydown", function (ev) {
-    if (ev.key === "Escape" && !document.getElementById("review-modal").hidden) {
+    if (ev.key !== "Escape") return;
+    if (!document.getElementById("review-modal").hidden) {
       closeReviewModal();
+      return;
+    }
+    if (!document.getElementById("trend-modal").hidden) {
+      closeTrendModal();
     }
   });
   document.getElementById("review-update-refs").addEventListener("click", updateOpenReviewRefs);
@@ -2728,6 +3094,15 @@
   document.getElementById("tab-daily").addEventListener("click", function () {
     setSection("daily");
   });
+  VENUE_SLUGS.forEach(function (slug) {
+    const el = document.getElementById("tab-" + slug);
+    if (el) el.addEventListener("click", function () { setSection(slug); });
+  });
+  document.getElementById("venue-prev").addEventListener("click", function () { shiftVenueYear(-1); });
+  document.getElementById("venue-next").addEventListener("click", function () { shiftVenueYear(1); });
+  document.getElementById("venue-trend-open").addEventListener("click", function () { openVenueTrend(false); });
+  document.getElementById("venue-trend-view").addEventListener("click", function () { openVenueTrend(false); });
+  document.getElementById("venue-trend-regen").addEventListener("click", function () { openVenueTrend(true); });
   document.getElementById("daily-prev").addEventListener("click", function () {
     selectDailyDate(shiftDate(dailyDate || todayYMD(), -1));
   });
@@ -2748,6 +3123,7 @@
   hydrateCatalogCache();
   hydrateDailyCache();
   loadDailyDates();
+  if (currentSection === "venue") loadVenueYears();
   load();
 })();
 </script>

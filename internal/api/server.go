@@ -97,6 +97,8 @@ func New(mgr *browser.Manager, debugDir string, c *cache.Cache, dl *download.Dow
 	s.mux.HandleFunc("/papers/daily/dates", s.handleHFDailyDates)
 	s.mux.HandleFunc("/papers/daily/{date}/trend", s.handleHFDailyTrend)
 	s.mux.HandleFunc("/papers/daily/{date}", s.handleHFDailyDay)
+	s.mux.HandleFunc("/papers/security-trend", s.handleSecurityTrend)
+	s.mux.HandleFunc("/papers/security-trend/{slug}/{year}", s.handleSecurityTrend)
 	s.mux.HandleFunc("/papers/import", s.handlePapersImport)
 	s.mux.HandleFunc("/papers/translate", s.handlePapersTranslate)
 	s.mux.HandleFunc("/papers/translate/config", s.handlePapersTranslateConfig)

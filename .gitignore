@@ -60,6 +60,10 @@ agent-papers/reviews/
 agent-papers/hf-daily/
 **/agent-papers/hf-daily/
 
+# Security top-venue year trend summaries (runtime)
+agent-papers/security-trends/
+**/agent-papers/security-trends/
+
 # Local rebuild leftovers
 search-proxy-linux
 search-service.prev
