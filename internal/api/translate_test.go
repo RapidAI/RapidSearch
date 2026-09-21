@@ -51,6 +51,9 @@ func papersHandler(t *testing.T) (http.Handler, string) {
 	t.Cleanup(func() {
 		if srv, ok := h.(*Server); ok && srv.papersStore != nil {
 			srv.papersStore.stopCatalogSnapshot()
+			if srv.papersStore.secTrends != nil {
+				srv.papersStore.secTrends.stop()
+			}
 		}
 		// Snapshot / daily refresh goroutines may still be closing files.
 		time.Sleep(30 * time.Millisecond)

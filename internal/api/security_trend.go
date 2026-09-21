@@ -29,6 +29,9 @@ const (
 	securityTrendAbstractRunes = 500
 	securityTrendOtherSlug     = "other"
 	securityTrendOtherLabel    = "Other venue"
+	// Background auto-generate: one venue×year at a time so we do not stampede Hub.
+	securityTrendAutoInterval = 20 * time.Minute
+	securityTrendAutoGap      = 3 * time.Second
 )
 
 type securityVenueInfo struct {
@@ -153,9 +156,14 @@ type securityTrendService struct {
 	root       string
 	generateFn securityTrendFn
 	now        func() time.Time
+	autoGap    time.Duration // default securityTrendAutoGap; tests may set 0
 
 	mu         sync.Mutex
 	generating map[string]chan struct{}
+	kick       chan struct{}
+	stop       chan struct{}
+	started    bool
+	stopped    bool
 }
 
 func newSecurityTrendService(ps *papersStore) *securityTrendService {
@@ -170,7 +178,135 @@ func newSecurityTrendService(ps *papersStore) *securityTrendService {
 		store:      ps,
 		root:       root,
 		now:        func() time.Time { return time.Now().UTC() },
+		autoGap:    securityTrendAutoGap,
 		generating: map[string]chan struct{}{},
+		kick:       make(chan struct{}, 1),
+		stop:       make(chan struct{}),
+	}
+}
+
+// start launches the background worker that fills missing venue×year trend
+// caches. Viewing cached trends is public; this path is the only unauthenticated
+// generator (POST /papers/security-trend stays admin force-regenerate).
+func (s *securityTrendService) start() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.started {
+		s.mu.Unlock()
+		return
+	}
+	s.started = true
+	s.mu.Unlock()
+	go s.loop()
+	s.ensureMissing()
+}
+
+func (s *securityTrendService) stop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if !s.started || s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	s.stopped = true
+	close(s.stop)
+	s.mu.Unlock()
+}
+
+// ensureMissing kicks a scan for Big-4 venue×year groups that have papers but
+// no valid trend JSON. Safe for anonymous catalog traffic; does not block.
+func (s *securityTrendService) ensureMissing() {
+	if s == nil || s.kick == nil {
+		return
+	}
+	select {
+	case s.kick <- struct{}{}:
+	default:
+	}
+}
+
+func (s *securityTrendService) loop() {
+	ticker := time.NewTicker(securityTrendAutoInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-s.kick:
+			s.generateMissing()
+		case <-ticker.C:
+			s.generateMissing()
+		}
+	}
+}
+
+func (s *securityTrendService) gap() time.Duration {
+	if s == nil {
+		return securityTrendAutoGap
+	}
+	return s.autoGap
+}
+
+// missingTrendGroups returns Big-4 venue×year buckets that have papers and no
+// valid cached trend. Empty groups and "other" venues are skipped.
+func (s *securityTrendService) missingTrendGroups(papers []paperEntry) []securityPaperGroup {
+	if s == nil {
+		return nil
+	}
+	out := make([]securityPaperGroup, 0)
+	for _, g := range groupSecurityPapers(papers) {
+		if !securityVenueSlugOK(g.Slug) || g.Year <= 0 || len(g.Papers) == 0 {
+			continue
+		}
+		if rec, ok := s.loadTrend(g.Slug, g.Year); ok && rec.any() {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
+}
+
+// generateMissing fills missing security-top venue×year trend caches one at a
+// time using the configured Hub/OpenAI-compatible review LLM. No HTTP auth.
+func (s *securityTrendService) generateMissing() {
+	if s == nil {
+		return
+	}
+	var snap translateSnapshot
+	if s.store != nil && s.store.xlate != nil {
+		snap = s.store.xlate.snapshot()
+	}
+	if !snap.ready() {
+		return
+	}
+	papers, err := s.securityTopPapers()
+	if err != nil {
+		log.Printf("papers security-trend auto catalog: %v", err)
+		return
+	}
+	groups := s.missingTrendGroups(papers)
+	gap := s.gap()
+	for i, g := range groups {
+		if rec, ok := s.loadTrend(g.Slug, g.Year); ok && rec.any() {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), securityTrendHTTPTimeout)
+		_, _, err := s.generateTrend(ctx, g.Slug, g.Year, g.Papers, false)
+		cancel()
+		if err != nil {
+			log.Printf("papers security-trend auto slug=%s year=%d: %v", g.Slug, g.Year, err)
+		}
+		if gap > 0 && i < len(groups)-1 {
+			select {
+			case <-s.stop:
+				return
+			case <-time.After(gap):
+			}
+		}
 	}
 }
 
@@ -830,6 +966,8 @@ func (s *Server) handleSecurityTrend(w http.ResponseWriter, r *http.Request) {
 			HasTrend:   false,
 		})
 	case http.MethodPost:
+		// Admin force-regenerate only. Visitors view GET caches; missing
+		// trends are filled by the background worker, not by anonymous POST.
 		if !s.authorizeSettings(w, r) {
 			return
 		}

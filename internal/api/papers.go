@@ -173,6 +173,7 @@ func newPapersStore(root string) *papersStore {
 	ps.secTrends = newSecurityTrendService(ps)
 	ps.xlate.start()
 	ps.absZH.start()
+	ps.secTrends.start()
 	ps.startCatalogSnapshot()
 	return ps
 }
@@ -196,8 +197,11 @@ func (ps *papersStore) invalidateCatalog() {
 	ps.modTime = time.Time{}
 	ps.mu.Unlock()
 	// Import / sync changed the manifest — refresh the static snapshot now,
-	// not only on the next timer tick.
+	// not only on the next timer tick. Also rescan missing security-top trends.
 	ps.requestCatalogSnapshot()
+	if ps.secTrends != nil {
+		ps.secTrends.ensureMissing()
+	}
 }
 
 func (ps *papersStore) catalog() (papersCatalog, error) {

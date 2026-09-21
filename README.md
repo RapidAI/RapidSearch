@@ -72,6 +72,8 @@ Browse already-downloaded agent papers (local PDFs under `PAPERS_DIR`, default `
 - `GET /papers` — public HTML. Cacheable (`ETag`, `Cache-Control: public, max-age=0, stale-while-revalidate=300`, gzip). Visit bumps still run on revalidation.
 - `GET /papers/api/catalog` (also `GET /papers/static/catalog-snapshot.json`) — **static card snapshot** for first paint. Abstracts truncated to card size (280 EN / 140 ZH runes); unused metadata (`brief`, `query_hits`, `pdf_url`, …) is omitted. `?offset=&limit=` returns a first-page slice (`partial`, `next_offset`, `count` = full size) so cards can paint before the tail arrives. Served with `ETag`, `Cache-Control: public, max-age=60, stale-while-revalidate=300`, and gzip. `can_manage` is always false here. The browser keeps the last good snapshot in `localStorage` (`rs_papers_catalog_v2`).
 - `GET /papers/daily/dates` and `GET /papers/daily/{YYYY-MM-DD}` — Hugging Face Daily. Cache-first: a local day file is returned immediately; stale days refresh in the background. Never 503s the tunnel when a cache exists. Gzip + the same public SWR headers. The last day is also stored in `localStorage` (`rs_papers_daily_v1`).
+- `GET /papers/security-trend` — public Big-4 venue×year index (`has_trend`). `GET ?venue=&year=` (or `/papers/security-trend/{slug}/{year}`) reads a cached 研究趋势. **Viewing is public** (no login). Missing IEEE S&P / ACM CCS / USENIX Security / NDSS groups that have papers are generated automatically in the background after the papers store is ready, when the security-top catalog changes, and every 20 minutes, one group at a time, using the Hub/OpenAI-compatible LLM from translate-config / review settings. Cache: `$PAPERS_DIR/security-trends/{slug}-{year}.json`. Empty groups and existing valid caches are skipped. Visitors see 「查看趋势综述」 when a cache exists, or 「趋势综述生成中，请稍后刷新」 while it is pending.
+- `POST /papers/security-trend?venue=&year=` — **auth required** (Hub global admin / `SEARCH_TOKEN`): force-regenerate only. Anonymous POST is 401; visitors never need POST to see a trend.
 - `GET /papers/api/progress` — tiny live JSON (`translate_progress`, `jobs`, `can_manage`, `visits`, `snapshot_etag`, `abstract_zh_pending`). `Cache-Control: no-store`. The page polls this (4s while work is active / 30s idle) and only refetches the catalog when `snapshot_etag` changes.
 - `GET /papers/pdf/{arxiv_id_or_filename}` — public stream of original local PDF (`?download=1` for attachment)
 - `GET /papers/pdf/zh/{id}` / `GET /papers/pdf/dual/{id}` — public Chinese-only (mono) and bilingual Chinese–English (dual) PDFs
@@ -91,6 +93,7 @@ pdfs/dual/{id}.dual.pdf    # bilingual Chinese–English (dual)
 translate-config.json      # LLM settings (secrets; not in git)
 translate_status.json      # queue/job status
 reviews/{id}.json          # 解读 + ratings (runtime; not in git)
+security-trends/{slug}-{year}.json  # Big-4 venue 研究趋势 (auto-written; public read)
 catalog-snapshot.json      # lean public catalog (auto-written)
 catalog-snapshot.json.gz   # precompressed sibling for gzip clients
 ```
