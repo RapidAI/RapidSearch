@@ -44,6 +44,7 @@ const (
 var allowedTopicTags = map[string]struct{}{
 	"self-evolution":     {},
 	"security":           {},
+	"security-top":       {},
 	"both":               {},
 	"llm-iot":            {},
 	"survey":             {},
@@ -684,6 +685,9 @@ func mergeImportedPaper(old, neu paperEntry) paperEntry {
 	}
 	if len(neu.TopicTags) > 0 {
 		out.TopicTags = neu.TopicTags
+	}
+	if neu.Venue != "" {
+		out.Venue = neu.Venue
 	}
 	if neu.Score > out.Score {
 		out.Score = neu.Score

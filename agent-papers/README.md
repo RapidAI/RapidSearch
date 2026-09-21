@@ -105,11 +105,14 @@ Stable English keys (storage / API); Chinese labels shown in the papers UI.
 |-----|----------|---------|
 | `self-evolution` | agent自进化 | self-evolving / self-improving / self-modifying / continual agents |
 | `security` | agent安全 | LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection |
+| `security-top` | 安全顶会 | Security top-4 venues (IEEE S&P / Oakland, ACM CCS, USENIX Security, NDSS). Ingest/import only — not assigned by `tag_topics`. Optional catalog field `venue` holds the conference name shown on the card. |
 | `both` | agent安全自进化 | intersection: safe/secure self-evolution & alignment of self-modifying agents |
 | `llm-iot` | LLM based 物联网 | LLM/AIoT / LLM agents for IoT, edge, smart home/city, CPS (**not** generic IoT hardware) |
 | `survey` | 综述 | secondary chip when title/abstract matches survey\|review\|综述 |
 
 `llm-iot` is a **primary** when the paper is IoT+LLM and not clearly evolve/security; it can also attach as an **additional** tag on overlapping agent papers.
+
+`security-top` is **not** assigned by daily search/`tag_topics` (keep `security` = agent安全). Ingest should set `topic_tags` to include `security-top` and set `venue` to one of: `IEEE S&P / Oakland`, `ACM CCS`, `USENIX Security`, `NDSS`. The catalog card shows `venue` next to the year and topic chips.
 
 Retag existing corpus (no PDF changes):
 

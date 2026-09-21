@@ -4,10 +4,13 @@ Search & download academic papers on agent self-evolution, agent security,
 LLM-based IoT (AIoT), LLM training, and agent tools/memory.
 Primary source: ArXiv API. Optional: Semantic Scholar, local RapidSearch + Crawl4AI.
 
-Stable topic_tags keys: self-evolution | security | both | llm-iot | survey
-    | llm-training | agent-tools-memory | other
+Stable topic_tags keys: self-evolution | security | security-top | both | llm-iot
+    | survey | llm-training | agent-tools-memory | other
 Auto search/sync tags llm-training and agent-tools-memory. `other` is
-manual-import only. Manual imports set source=manual and keep the user-chosen tag.
+manual-import only. `security-top` is ingest/import only (security top-4
+venues); keep existing `security` (agent安全) unchanged. Optional catalog
+field `venue` holds a human-readable conference name. Manual imports set
+source=manual and keep the user-chosen tag.
 There is no checked-in search_keywords.json — daily exhaust uses DEFAULT_QUERIES
 and/or a runtime file produced by maintain_keywords.py (seed = DEFAULT_QUERIES).
 """
@@ -266,6 +269,7 @@ PRIMARY_TAGS = (
 STABLE_TAGS = (
     "self-evolution",
     "security",
+    "security-top",
     "both",
     "llm-iot",
     "survey",
@@ -274,7 +278,16 @@ STABLE_TAGS = (
     "other",
 )
 # `other` is never assigned by tag_topics / search — operator import only.
+# `security-top` is set by ingest (or import), never by title/abstract heuristics.
 MANUAL_ONLY_TAGS = frozenset({"other"})
+INGEST_OVERLAY_TAGS = frozenset({"security-top"})
+# Suggested `venue` strings for security-top papers (shown on the card).
+SECURITY_TOP_VENUES = (
+    "IEEE S&P / Oakland",
+    "ACM CCS",
+    "USENIX Security",
+    "NDSS",
+)
 
 ARXIV_ID_RE = re.compile(
     r"(?:https?://)?(?:[\w.-]+\.)?arxiv\.org/(?:abs|pdf|html|src)/"
@@ -303,6 +316,7 @@ class Paper:
     arxiv_id: str = ""
     doi: str = ""
     topic_tags: list[str] = field(default_factory=list)
+    venue: str = ""  # human-readable conference/journal, e.g. "IEEE S&P / Oakland"
     score: float = 0.0
     query_hits: list[str] = field(default_factory=list)
     pdf_path: str = ""
@@ -396,6 +410,22 @@ def preserve_manual_tags(paper: Paper, old_tags: Optional[list[str]] = None) -> 
     return bool(set(tags) & MANUAL_ONLY_TAGS)
 
 
+def keep_ingest_overlay_tags(tags: list[str], old_tags: list[str]) -> list[str]:
+    """Re-attach ingest-only tags (e.g. security-top) after heuristic retag."""
+    out = list(tags or [])
+    for t in old_tags or []:
+        if t in INGEST_OVERLAY_TAGS and t not in out:
+            out.append(t)
+    return out
+
+
+def paper_to_manifest_dict(p: Paper) -> dict:
+    d = asdict(p)
+    if not str(d.get("venue") or "").strip():
+        d.pop("venue", None)
+    return d
+
+
 def extract_doi(text: str) -> str:
     m = DOI_RE.search(text or "")
     return m.group(0).rstrip(".") if m else ""
@@ -459,8 +489,9 @@ def tag_topics(title: str, abstract: str) -> list[str]:
     Primary (mutually exclusive): both | self-evolution | security | llm-iot
         | agent-tools-memory | llm-training
     Overlay: llm-iot / agent-tools-memory / llm-training may also attach
-    when they overlap an agent primary. `other` is never auto-assigned.
-    Secondary: survey
+    when they overlap an agent primary. `other` and `security-top` are never
+    auto-assigned (`security-top` is ingest/import only; `security` stays
+    agent安全). Secondary: survey
     """
     text = f"{title} {abstract}"
     evo = bool(EVOLVE_RE.search(text))
@@ -1012,7 +1043,7 @@ def load_existing_manifest(out: Path) -> dict[str, Paper]:
             if not preserve_manual_tags(p):
                 fresh_tags = tag_topics(p.title, p.abstract)
                 if fresh_tags:
-                    p.topic_tags = fresh_tags
+                    p.topic_tags = keep_ingest_overlay_tags(fresh_tags, p.topic_tags)
             p.score = max(p.score, relevance_score(p.title, p.abstract))
             out_map[p.dedupe_key()] = p
         except Exception:
@@ -1040,7 +1071,11 @@ def merge_papers(existing: dict[str, Paper], newcomers: Iterable[Paper], query_l
                 old.year = p.year
             if p.score > old.score:
                 old.score = p.score
-                old.topic_tags = p.topic_tags or old.topic_tags
+                old.topic_tags = keep_ingest_overlay_tags(
+                    p.topic_tags or old.topic_tags, old.topic_tags
+                )
+            if (p.venue or "").strip() and not (old.venue or "").strip():
+                old.venue = p.venue
             if query_label not in old.query_hits:
                 old.query_hits.append(query_label)
         else:
@@ -1054,7 +1089,7 @@ def write_manifest(out: Path, papers: list[Paper], stats: dict) -> None:
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "stats": stats,
-        "papers": [asdict(p) for p in papers],
+        "papers": [paper_to_manifest_dict(p) for p in papers],
     }
     (out / "manifest.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
@@ -1078,6 +1113,7 @@ def write_index(out: Path, papers: list[Paper], stats: dict) -> None:
         "",
         "- **self-evolution** — agent自进化: self-evolving / self-improving / self-modifying / continual agents",
         "- **security** — agent安全: LLM agent security, agentic safety, jailbreak, red-teaming, prompt injection",
+        "- **security-top** — 安全顶会: IEEE S&P / Oakland, ACM CCS, USENIX Security, NDSS (ingest sets `venue`)",
         "- **both** — agent安全自进化: safe/secure self-evolution & alignment of self-modifying agents",
         "- **llm-iot** — LLM based 物联网: LLM/AIoT / LLM agents for IoT, edge, smart home/city, CPS (not generic IoT hardware)",
         "- **survey** — 综述: survey / review (secondary flag when detected in title/abstract)",
@@ -1101,7 +1137,8 @@ def write_index(out: Path, papers: list[Paper], stats: dict) -> None:
             authors += " et al."
         lines.append(f"### {i}. {p.title}")
         lines.append("")
-        lines.append(f"- **Tags:** {tags} | **Year:** {p.year or '?'} | **Score:** {p.score:.1f}")
+        venue = f" | **Venue:** {p.venue}" if (p.venue or "").strip() else ""
+        lines.append(f"- **Tags:** {tags} | **Year:** {p.year or '?'} | **Score:** {p.score:.1f}{venue}")
         if authors:
             lines.append(f"- **Authors:** {authors}")
         if p.arxiv_id:
@@ -1166,7 +1203,9 @@ def retag_corpus(out: Path) -> dict:
         if preserve_manual_tags(p, old_tags):
             p.topic_tags = old_tags
         else:
-            p.topic_tags = tag_topics(p.title, p.abstract)
+            p.topic_tags = keep_ingest_overlay_tags(
+                tag_topics(p.title, p.abstract), old_tags
+            )
         p.score = relevance_score(p.title, p.abstract)
         if p.topic_tags != old_tags:
             changed += 1

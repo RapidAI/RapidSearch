@@ -8,6 +8,7 @@ from pathlib import Path
 TAG_CN = {
     "self-evolution": "agent自进化",
     "security": "agent安全",
+    "security-top": "安全顶会",
     "both": "agent安全自进化",
     "llm-iot": "LLM based 物联网",
     "survey": "综述",
@@ -28,6 +29,8 @@ def brief(title, abstract, tags):
         return "自改进 agent 护栏与约束相关讨论。"
     if "audit" in t:
         return "面向 agent 应用的安全审计/分析。"
+    if "security-top" in tags:
+        return "安全顶会论文（S&P / CCS / USENIX Security / NDSS）。"
     if "security" in tags or "safety" in t or "security" in t:
         if any(x in t for x in ("evolv", "improv", "self-")):
             return "交叉：自改进与安全/治理。"
