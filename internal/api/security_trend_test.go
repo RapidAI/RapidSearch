@@ -421,6 +421,8 @@ func TestSecurityTrendAutoGenerateWithoutHTTPAuth(t *testing.T) {
 	ps.xlate.cfg.APIKey = "test-key"
 	ps.xlate.cfg.Model = "test-model"
 
+	// papersHandler stops the auto worker so HTTP tests stay isolated.
+	ps.secTrends.start()
 	// Background path: no HTTP, no authorizeSettings.
 	ps.secTrends.ensureMissing()
 	select {

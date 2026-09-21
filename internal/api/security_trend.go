@@ -193,11 +193,15 @@ func (s *securityTrendService) start() {
 		return
 	}
 	s.mu.Lock()
-	if s.started {
+	if s.started && !s.stopped {
 		s.mu.Unlock()
 		return
 	}
+	if s.stopCh == nil || s.stopped {
+		s.stopCh = make(chan struct{})
+	}
 	s.started = true
+	s.stopped = false
 	s.mu.Unlock()
 	go s.loop()
 	s.ensureMissing()

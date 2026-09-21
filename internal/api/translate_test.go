@@ -48,6 +48,13 @@ func papersHandler(t *testing.T) (http.Handler, string) {
 		t.Fatal(err)
 	}
 	h := New(nil, "", nil, nil)
+	if srv, ok := h.(*Server); ok {
+		// Tests opt in to the security-trend auto worker. Starting it here
+		// would race generateFn hooks used by HTTP generate tests.
+		if svc := srv.papers().secTrends; svc != nil {
+			svc.stop()
+		}
+	}
 	t.Cleanup(func() {
 		if srv, ok := h.(*Server); ok && srv.papersStore != nil {
 			srv.papersStore.stopCatalogSnapshot()
