@@ -116,16 +116,17 @@ type translateProgress struct {
 }
 
 type papersStore struct {
-	mu      sync.Mutex
-	root    string
-	loaded  time.Time
-	modTime time.Time
-	cat     papersCatalog
-	xlate   *translateService
-	absZH   *abstractZHService
-	reviews *reviewService
-	visits  *visitCounter
-	daily   *hfDailyService
+	mu        sync.Mutex
+	root      string
+	loaded    time.Time
+	modTime   time.Time
+	cat       papersCatalog
+	xlate     *translateService
+	absZH     *abstractZHService
+	reviews   *reviewService
+	visits    *visitCounter
+	daily     *hfDailyService
+	secTrends *securityTrendService
 
 	importMu          sync.Mutex
 	importLimit       *importLimiter
@@ -169,6 +170,7 @@ func newPapersStore(root string) *papersStore {
 		ps.allowPrivateFetch = true
 	}
 	ps.daily = newHFDailyService(ps)
+	ps.secTrends = newSecurityTrendService(ps)
 	ps.xlate.start()
 	ps.absZH.start()
 	ps.startCatalogSnapshot()
