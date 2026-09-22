@@ -286,6 +286,11 @@
       color: #fff;
       border-color: var(--accent);
     }
+    button.zh-pdf-only.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
     #import-open { font-size: 13px; }
     dialog#import-dialog {
       border: 1px solid var(--line);
@@ -590,6 +595,7 @@
       <option value="date-asc" data-i18n="sortOldest">Oldest first</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+    <button type="button" id="zh-pdf-only" class="zh-pdf-only" data-i18n="zhPdfOnly" data-i18n-aria="zhPdfOnlyAria" aria-pressed="false">Chinese PDF</button>
     <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
   </div>
   <div class="chips" id="tag-chips" role="group" data-i18n-aria="tagChips" aria-label="Tags"></div>
@@ -763,6 +769,8 @@
       searchPh: "Search title, authors, abstract, tags…",
       tagAll: "All",
       apply: "Filter",
+      zhPdfOnly: "Chinese PDF",
+      zhPdfOnlyAria: "Show only papers with a Chinese PDF",
       sortNewest: "Newest first",
       sortOldest: "Oldest first",
       meta: "{matched} match · {total} in catalog · {zh} with Chinese PDF · page {page}/{pages} · {visits} visits · generated {when}",
@@ -903,6 +911,8 @@
       searchPh: "搜索标题、作者、摘要、标签…",
       tagAll: "全部",
       apply: "筛选",
+      zhPdfOnly: "有中文 PDF",
+      zhPdfOnlyAria: "仅显示有中文 PDF",
       sortNewest: "最新优先",
       sortOldest: "最早优先",
       meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 已有中文译本 {zh} 篇 · 第 {page}/{pages} 页 · 访问 {visits} · 生成于 {when}",
@@ -1121,6 +1131,7 @@
     document.getElementById("theme-light").classList.toggle("active", theme === "light");
     document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
     document.documentElement.setAttribute("data-i18n-ready", "1");
+    syncZhPDFToggle();
     document.title = currentSection === "daily" ? t("tabDaily") : (currentSection === "venue" ? venueLabel(currentVenue) : t("heading"));
     if (currentSection === "daily") renderDateChips();
     if (currentSection === "venue") renderVenueYears();
@@ -1194,6 +1205,7 @@
   let currentVenue = "";
   let venueYear = 0;
   let venueYears = [];
+  let zhPDFOnly = false;
   let venueHasTrend = false;
   try {
     const boot = new URLSearchParams(location.search);
@@ -1204,6 +1216,7 @@
       currentVenue = bootVenue;
       if (bootYear > 0) venueYear = bootYear;
     }
+    zhPDFOnly = zhPDFQueryOn(boot.get("zh_pdf"));
   } catch (e) {}
   let dailyDates = [];
   let dailyDate = "";
@@ -1237,6 +1250,33 @@
     const y = Number(p.year) || 0;
     if (y > 0) return String(y).padStart(4, "0") + "-01-01T00:00:00Z";
     return "";
+  }
+
+  function zhPDFQueryOn(v) {
+    v = String(v || "").trim().toLowerCase();
+    return v === "1" || v === "true" || v === "yes" || v === "on";
+  }
+  // Same signal as the 中文版 link: a non-empty zh_pdf path. Status "done"
+  // without that path, and queued/running jobs that have not written the file,
+  // do not count.
+  function paperHasZhPDF(p) {
+    return !!(p && String(p.zh_pdf || "").trim());
+  }
+  function syncZhPDFToggle() {
+    const btn = document.getElementById("zh-pdf-only");
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", zhPDFOnly ? "true" : "false");
+    btn.classList.toggle("active", !!zhPDFOnly);
+  }
+  function syncZhPDFURL() {
+    try {
+      const u = new URL(location.href);
+      if (zhPDFOnly) u.searchParams.set("zh_pdf", "1");
+      else u.searchParams.delete("zh_pdf");
+      const want = u.pathname + u.search + u.hash;
+      const cur = location.pathname + location.search + (location.hash || "");
+      if (want !== cur) history.replaceState(null, "", want);
+    } catch (e) {}
   }
 
   function matchesQuery(p, q) {
@@ -1327,6 +1367,9 @@
     }
     if (q) {
       list = list.filter(function (p) { return matchesQuery(p, q); });
+    }
+    if (zhPDFOnly) {
+      list = list.filter(paperHasZhPDF);
     }
     list.sort(function (a, b) {
       const ka = paperDateKey(a);
@@ -2958,6 +3001,12 @@
   document.getElementById("theme-light").addEventListener("click", function () { setTheme("light"); });
   document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
   document.getElementById("apply").addEventListener("click", function () { renderAll(true); });
+  document.getElementById("zh-pdf-only").addEventListener("click", function () {
+    zhPDFOnly = !zhPDFOnly;
+    syncZhPDFToggle();
+    syncZhPDFURL();
+    renderAll(true);
+  });
   document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
   document.getElementById("q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); renderAll(true); }

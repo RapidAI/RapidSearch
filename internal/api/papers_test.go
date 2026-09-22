@@ -65,6 +65,68 @@ func TestFilterPapers(t *testing.T) {
 	}
 }
 
+func TestPaperHasZhPDF(t *testing.T) {
+	cases := []struct {
+		name string
+		p    paperEntry
+		want bool
+	}{
+		{name: "openable", p: paperEntry{ZhPDF: "/papers/pdf/zh/2401.05459"}, want: true},
+		{name: "retranslate still openable", p: paperEntry{ZhPDF: "/papers/pdf/zh/2401.05459", TranslateStatus: "running"}, want: true},
+		{name: "empty", p: paperEntry{}},
+		{name: "whitespace", p: paperEntry{ZhPDF: "  "}},
+		{name: "queued", p: paperEntry{TranslateStatus: "queued"}},
+		{name: "running", p: paperEntry{TranslateStatus: "running"}},
+		{name: "done without file", p: paperEntry{TranslateStatus: "done"}},
+		{name: "dual only", p: paperEntry{DualPDF: "/papers/pdf/dual/2401.05459", TranslateStatus: "done"}},
+	}
+	for _, tc := range cases {
+		if got := paperHasZhPDF(tc.p); got != tc.want {
+			t.Fatalf("%s: got %v want %v (%+v)", tc.name, got, tc.want, tc.p)
+		}
+	}
+	if !zhPDFOnlyQuery("1") || !zhPDFOnlyQuery(" TRUE ") || !zhPDFOnlyQuery("yes") || !zhPDFOnlyQuery("on") {
+		t.Fatal("expected zh_pdf query truthy values")
+	}
+	if zhPDFOnlyQuery("") || zhPDFOnlyQuery("0") || zhPDFOnlyQuery("false") || zhPDFOnlyQuery("done") {
+		t.Fatal("expected zh_pdf query to stay off")
+	}
+}
+
+func TestFilterPapersZhPDFOnly(t *testing.T) {
+	in := []paperEntry{
+		{Title: "Has ZH", TopicTags: []string{"survey"}, ZhPDF: "/papers/pdf/zh/1"},
+		{Title: "Done no file", TopicTags: []string{"survey"}, TranslateStatus: "done"},
+		{Title: "Queued", TopicTags: []string{"security"}, TranslateStatus: "queued"},
+		{Title: "Dual only", TopicTags: []string{"survey"}, DualPDF: "/papers/pdf/dual/2", TranslateStatus: "done"},
+		{Title: "Security ZH", TopicTags: []string{"security-top"}, Venue: "NDSS", ZhPDF: "/papers/pdf/zh/3"},
+	}
+	got := filterPapersQuery(in, "", "", true)
+	if len(got) != 2 || got[0].Title != "Has ZH" || got[1].Title != "Security ZH" {
+		t.Fatalf("zh only: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "", "survey", true)
+	if len(got) != 1 || got[0].Title != "Has ZH" {
+		t.Fatalf("tag+zh: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "ndss", "", true)
+	if len(got) != 1 || got[0].Title != "Security ZH" {
+		t.Fatalf("q+zh: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "", "survey", false)
+	if len(got) != 3 {
+		t.Fatalf("tag without zh filter: %+v", titlesOf(got))
+	}
+}
+
+func titlesOf(in []paperEntry) []string {
+	out := make([]string, len(in))
+	for i, p := range in {
+		out[i] = p.Title
+	}
+	return out
+}
+
 func TestPaperVenueJSON(t *testing.T) {
 	raw := []byte(`{"title":"Oakland paper","topic_tags":["security-top"],"venue":"IEEE S&P / Oakland"}`)
 	var p paperEntry
@@ -289,6 +351,15 @@ func TestPapersPageLightTheme(t *testing.T) {
 	if !strings.Contains(body, `id="tag-chips"`) {
 		t.Fatal("papers page must show tag filter chips")
 	}
+	if !strings.Contains(body, `id="zh-pdf-only"`) || !strings.Contains(body, "有中文 PDF") || !strings.Contains(body, "仅显示有中文 PDF") {
+		t.Fatal("papers page must offer a Chinese-PDF-only filter")
+	}
+	if !strings.Contains(body, "function paperHasZhPDF") || !strings.Contains(body, "list.filter(paperHasZhPDF)") {
+		t.Fatal("Chinese PDF filter must use the same zh_pdf signal as the 中文版 link")
+	}
+	if !strings.Contains(body, `if (p.zh_pdf)`) {
+		t.Fatal("中文版 link must stay gated on zh_pdf")
+	}
 	if !strings.Contains(body, "已有中文译本 {zh} 篇") || !strings.Contains(body, "{zh} with Chinese PDF") {
 		t.Fatal("papers meta line must show catalog-wide Chinese PDF count")
 	}
@@ -351,6 +422,54 @@ func TestPapersAPIAnonymousPublic(t *testing.T) {
 	raw := rr.Body.String()
 	if strings.Contains(raw, "api_key") || strings.Contains(raw, "APIKey") || strings.Contains(raw, "api-key") {
 		t.Fatal("anonymous papers API must not expose translate API keys")
+	}
+}
+
+func TestPapersAPIFilterZhPDF(t *testing.T) {
+	h, dir := papersHandler(t)
+	get := func(path string) papersCatalog {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var cat papersCatalog
+		if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+			t.Fatal(err)
+		}
+		if cat.CanManage {
+			t.Fatal("anonymous zh_pdf filter must stay public")
+		}
+		return cat
+	}
+	missing := get("/papers/api?zh_pdf=1")
+	if missing.Count != 0 || len(missing.Papers) != 0 {
+		t.Fatalf("no file: %+v", missing)
+	}
+	all := get("/papers/api")
+	if all.Count != 1 || all.Papers[0].ZhPDF != "" {
+		t.Fatalf("unfiltered without file: %+v", all)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	only := get("/papers/api?zh_pdf=1")
+	if only.Count != 1 || len(only.Papers) != 1 || only.Papers[0].ZhPDF != "/papers/pdf/zh/2401.05459" {
+		t.Fatalf("with file: %+v", only)
+	}
+	if got := get("/papers/api?zh_pdf=true&tag=survey"); got.Count != 1 || got.Papers[0].Title == "" {
+		t.Fatalf("tag+zh: %+v", got)
+	}
+	if got := get("/papers/api?zh_pdf=1&tag=security"); got.Count != 0 || len(got.Papers) != 0 {
+		t.Fatalf("other tag: %+v", got)
+	}
+	if got := get("/papers/api?zh_pdf=0"); got.Count != 1 {
+		t.Fatalf("zh_pdf=0 should not filter: %+v", got)
 	}
 }
 

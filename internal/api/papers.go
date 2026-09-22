@@ -407,6 +407,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	canManage := s.settingsAuthed(r)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	zhPDFOnly := zhPDFOnlyQuery(r.URL.Query().Get("zh_pdf"))
 	// Progress is always from the full catalog so filters cannot hide in-flight work.
 	progress := summarizeTranslateProgress(cat.Papers)
 	out := cat
@@ -415,8 +416,8 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	if ps := s.papers(); ps != nil && ps.visits != nil {
 		out.Visits = ps.visits.Total()
 	}
-	if q != "" || tag != "" {
-		filtered := filterPapers(cat.Papers, q, tag)
+	if q != "" || tag != "" || zhPDFOnly {
+		filtered := filterPapersQuery(cat.Papers, q, tag, zhPDFOnly)
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
@@ -428,10 +429,34 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func filterPapers(in []paperEntry, q, tag string) []paperEntry {
+	return filterPapersQuery(in, q, tag, false)
+}
+
+// paperHasZhPDF reports an openable Chinese PDF. The papers page shows the
+// 中文版 link exactly when zh_pdf is non-empty, which overlay sets only after
+// pdfs/zh/{id}.zh.pdf is on disk. Queued, running, skipped, or done-without-file
+// jobs do not match. A re-translate still matches while the previous file remains.
+func paperHasZhPDF(p paperEntry) bool {
+	return strings.TrimSpace(p.ZhPDF) != ""
+}
+
+func zhPDFOnlyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterPapersQuery(in []paperEntry, q, tag string, zhPDFOnly bool) []paperEntry {
 	q = strings.ToLower(strings.TrimSpace(q))
 	tag = strings.ToLower(strings.TrimSpace(tag))
 	out := make([]paperEntry, 0, len(in))
 	for _, p := range in {
+		if zhPDFOnly && !paperHasZhPDF(p) {
+			continue
+		}
 		if tag != "" {
 			ok := false
 			for _, t := range p.TopicTags {
