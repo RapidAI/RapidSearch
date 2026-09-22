@@ -407,6 +407,7 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	canManage := s.settingsAuthed(r)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	zhOnly := queryFlag(r.URL.Query().Get("zh"))
 	// Progress is always from the full catalog so filters cannot hide in-flight work.
 	progress := summarizeTranslateProgress(cat.Papers)
 	out := cat
@@ -415,8 +416,8 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	if ps := s.papers(); ps != nil && ps.visits != nil {
 		out.Visits = ps.visits.Total()
 	}
-	if q != "" || tag != "" {
-		filtered := filterPapers(cat.Papers, q, tag)
+	if q != "" || tag != "" || zhOnly {
+		filtered := filterPapersQuery(cat.Papers, paperQuery{Q: q, Tag: tag, ZhOnly: zhOnly})
 		out.Papers = filtered
 		out.Count = len(filtered)
 	}
@@ -427,11 +428,26 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// paperQuery is the public catalog filter. ZhOnly keeps papers that already
+// have a completed Chinese-only PDF (see paperHasChineseTranslation).
+type paperQuery struct {
+	Q      string
+	Tag    string
+	ZhOnly bool
+}
+
 func filterPapers(in []paperEntry, q, tag string) []paperEntry {
-	q = strings.ToLower(strings.TrimSpace(q))
-	tag = strings.ToLower(strings.TrimSpace(tag))
+	return filterPapersQuery(in, paperQuery{Q: q, Tag: tag})
+}
+
+func filterPapersQuery(in []paperEntry, query paperQuery) []paperEntry {
+	q := strings.ToLower(strings.TrimSpace(query.Q))
+	tag := strings.ToLower(strings.TrimSpace(query.Tag))
 	out := make([]paperEntry, 0, len(in))
 	for _, p := range in {
+		if query.ZhOnly && !paperHasChineseTranslation(p) {
+			continue
+		}
 		if tag != "" {
 			ok := false
 			for _, t := range p.TopicTags {
@@ -463,6 +479,25 @@ func filterPapers(in []paperEntry, q, tag string) []paperEntry {
 		out = append(out, p)
 	}
 	return out
+}
+
+// paperHasChineseTranslation reports a completed Chinese translation the UI
+// can open. It is true exactly when catalog field zh_pdf is non-empty.
+// overlayOne sets zh_pdf only after pdfs/zh/{id}.zh.pdf exists on disk — the
+// same condition as the public 「中文版」 link. translate_status is not used:
+// queued and running jobs have no finished file yet, and a re-translate can
+// be queued while the previous Chinese PDF is still openable.
+func paperHasChineseTranslation(p paperEntry) bool {
+	return strings.TrimSpace(p.ZhPDF) != ""
+}
+
+func queryFlag(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {

@@ -127,6 +127,13 @@
     }
     button.primary { background: #0b63ce; border-color: #0b63ce; color: #fff; }
     html[data-theme="dark"] button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button.zh-only { border-radius: 999px; font-size: 13px; }
+    button.zh-only.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    html[data-theme="light"] button.zh-only.active { background: #0b63ce; }
     button:disabled { opacity: 0.45; cursor: default; }
     a.btn {
       display: inline-block;
@@ -590,6 +597,7 @@
       <option value="date-asc" data-i18n="sortOldest">Oldest first</option>
     </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+    <button type="button" id="zh-only" class="zh-only" aria-pressed="false" data-i18n="zhOnly">Has Chinese translation</button>
     <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
   </div>
   <div class="chips" id="tag-chips" role="group" data-i18n-aria="tagChips" aria-label="Tags"></div>
@@ -763,6 +771,7 @@
       searchPh: "Search title, authors, abstract, tags…",
       tagAll: "All",
       apply: "Filter",
+      zhOnly: "Has Chinese translation",
       sortNewest: "Newest first",
       sortOldest: "Oldest first",
       meta: "{matched} match · {total} in catalog · {zh} with Chinese PDF · page {page}/{pages} · {visits} visits · generated {when}",
@@ -903,6 +912,7 @@
       searchPh: "搜索标题、作者、摘要、标签…",
       tagAll: "全部",
       apply: "筛选",
+      zhOnly: "仅显示有中文翻译",
       sortNewest: "最新优先",
       sortOldest: "最早优先",
       meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 已有中文译本 {zh} 篇 · 第 {page}/{pages} 页 · 访问 {visits} · 生成于 {when}",
@@ -1204,6 +1214,8 @@
       currentVenue = bootVenue;
       if (bootYear > 0) venueYear = bootYear;
     }
+    // ?zh=1 is the shareable form of the Chinese-translation chip.
+    if (boot.get("zh") === "1" || boot.get("zh") === "true") setZhOnly(true, { silent: true });
   } catch (e) {}
   let dailyDates = [];
   let dailyDate = "";
@@ -1306,6 +1318,38 @@
     return currentSection === "daily" || currentSection === "venue";
   }
 
+  // Completed Chinese translation available to open. Same signal as the
+  // public 「中文版」 link: catalog zh_pdf is set only after pdfs/zh/{id}.zh.pdf
+  // exists. Queued or in-progress jobs without that file do not match.
+  // A re-translate keeps the previous zh_pdf, so those papers still match.
+  function paperHasChinesePDF(p) {
+    return !!(p && p.zh_pdf);
+  }
+  function zhOnlyOn() {
+    const el = document.getElementById("zh-only");
+    return !!(el && el.getAttribute("aria-pressed") === "true");
+  }
+  function setZhOnly(on, opts) {
+    const el = document.getElementById("zh-only");
+    if (el) {
+      el.setAttribute("aria-pressed", on ? "true" : "false");
+      el.classList.toggle("active", !!on);
+    }
+    if (opts && opts.silent) return;
+    syncZhURL();
+    renderAll(true);
+  }
+  function syncZhURL() {
+    try {
+      const u = new URL(location.href);
+      if (zhOnlyOn()) u.searchParams.set("zh", "1");
+      else u.searchParams.delete("zh");
+      const want = u.pathname + u.search + u.hash;
+      const cur = location.pathname + location.search + (location.hash || "");
+      if (want !== cur) history.replaceState(null, "", want);
+    } catch (e) {}
+  }
+
   function applyFilters(resetPage) {
     const q = document.getElementById("q").value.trim().toLowerCase();
     const tag = isSpecialSection() ? "" : document.getElementById("tag").value;
@@ -1327,6 +1371,9 @@
     }
     if (q) {
       list = list.filter(function (p) { return matchesQuery(p, q); });
+    }
+    if (zhOnlyOn()) {
+      list = list.filter(paperHasChinesePDF);
     }
     list.sort(function (a, b) {
       const ka = paperDateKey(a);
@@ -2958,6 +3005,9 @@
   document.getElementById("theme-light").addEventListener("click", function () { setTheme("light"); });
   document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
   document.getElementById("apply").addEventListener("click", function () { renderAll(true); });
+  document.getElementById("zh-only").addEventListener("click", function () {
+    setZhOnly(!zhOnlyOn());
+  });
   document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
   document.getElementById("q").addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") { ev.preventDefault(); renderAll(true); }
