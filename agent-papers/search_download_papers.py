@@ -419,6 +419,20 @@ def keep_ingest_overlay_tags(tags: list[str], old_tags: list[str]) -> list[str]:
     return out
 
 
+def merge_overlay_tags(old_tags: list[str] | None, new_tags: list[str] | None) -> list[str]:
+    """Keep security-top and venue-* tags when a heuristic retag replaces the list.
+
+    ``old_tags`` is the catalog row. ``new_tags`` is the fresh ``tag_topics`` result.
+    """
+    out = list(new_tags or [])
+    for tag in old_tags or []:
+        if not tag or tag in out:
+            continue
+        if tag in INGEST_OVERLAY_TAGS or str(tag).startswith("venue-"):
+            out.append(tag)
+    return out
+
+
 def paper_to_manifest_dict(p: Paper) -> dict:
     d = asdict(p)
     if not str(d.get("venue") or "").strip():
@@ -590,6 +604,43 @@ def relevance_score(title: str, abstract: str) -> float:
 
 def is_relevant(paper: Paper) -> bool:
     return paper.score >= 3.0 and bool(paper.topic_tags)
+
+
+def retain_official_security_top(
+    selected: list[Paper], existing: dict[str, Paper]
+) -> list[Paper]:
+    """Keep official security-top rows even when they are not agent-relevant.
+
+    Full search caps new hits with ``--max``. Proceedings ingest records
+    every main-conference paper, including ones with no arXiv PDF. Those
+    must survive a later search pass.
+    """
+    if not existing:
+        return selected
+    have = {p.dedupe_key() for p in selected}
+    for key, paper in existing.items():
+        if "security-top" not in (paper.topic_tags or []):
+            continue
+        ident = paper.dedupe_key()
+        if key in have or ident in have:
+            continue
+        selected.append(paper)
+        have.add(ident)
+    return selected
+
+
+def should_skip_paywall_crawl(paper: Paper) -> bool:
+    """Skip Crawl4AI on DOI/DBLP landings for official security-top rows.
+
+    Open PDFs are downloaded by the official ingest when an arXiv or
+    open-access URL exists. A general search should not walk paywalled
+    publisher pages for the rest of the proceedings list.
+    """
+    if "security-top" not in (paper.topic_tags or []):
+        return False
+    if (paper.pdf_url or "").strip() or (paper.arxiv_id or "").strip():
+        return False
+    return True
 
 
 # -------------------- ArXiv --------------------
@@ -1456,6 +1507,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             selected.append(p)
             counts[primary_tag(p)] = counts.get(primary_tag(p), 0) + 1
 
+    selected = retain_official_security_top(selected, existing)
+
     log(f"Selected {len(selected)} / {len(candidates)} relevant (pool={len(pool)}, searched_raw={searched})")
     log(f"Theme mix: {counts}")
 
@@ -1467,6 +1520,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Download
     downloaded = skipped = failures = 0
     for i, p in enumerate(selected, 1):
+        if should_skip_paywall_crawl(p):
+            if not (p.download_status or "").strip():
+                p.download_status = "no-pdf"
+            skipped += 1
+            continue
         log(f"PDF [{i}/{len(selected)}]: {p.title[:70]}…")
         download_pdf(p, paths["pdfs"], dry_run=args.dry_run)
         if p.download_status == "ok":
