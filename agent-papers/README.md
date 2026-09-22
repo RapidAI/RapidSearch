@@ -112,62 +112,58 @@ Stable English keys (storage / API); Chinese labels shown in the papers UI.
 
 `llm-iot` is a **primary** when the paper is IoT+LLM and not clearly evolve/security; it can also attach as an **additional** tag on overlapping agent papers.
 
-`security-top` is **not** assigned by daily search/`tag_topics` (keep `security` = agent安全). Ingest should set `topic_tags` to include `security-top` and set `venue` to one of: `IEEE S&P / Oakland`, `ACM CCS`, `USENIX Security`, `NDSS`. The catalog card shows `venue` next to the year and topic chips.
+`security-top` is **not** assigned by daily search/`tag_topics` (keep `security` = agent安全). Official ingest sets `topic_tags` to include `security-top` and sets `venue` to `IEEE S&P`, `ACM CCS`, `USENIX Security`, or `NDSS`. The papers UI also accepts `IEEE S&P / Oakland` as the same IEEE S&P chip. The catalog card shows `venue` next to the year and topic chips.
 
 ## Official Big-4 proceedings / 安全顶会官方列表
 
-`ingest_security_top_official.py` fills `security-top` from **DBLP main-volume tables of contents**, not from arXiv comments that claim acceptance. Papers with no arXiv preprint are still upserted. Open PDFs (arXiv, USENIX, NDSS, IEEE S&P web) are downloaded; IEEE Xplore / ACM DL links stay metadata-only.
+`ingest_security_top_official.py` fills `security-top` from each year's **DBLP conference TOC HTML** (`https://dblp.org/db/conf/...`). That is the list ops already ran against the live catalog (2026-09-22: 4595 DBLP inproceedings, security-top 973 → 4854). It is not an arXiv comment heuristic. DBLP sits behind Anubis proof-of-work; the script solves that challenge and caches cookies under `{out}/cache/dblp/`.
 
-This does **not** publish to papers.maclaw.top. After a local run, ops regenerate the catalog snapshot separately.
+A 404 (CCS 2026 and USENIX Security 2026 as of that run) leaves prior arXiv-tagged rows in place. Editor front-matter is skipped. Poster/demo titles, workshop titles, and workshop keys (WOOT and similar) are skipped. Papers with no arXiv id are still upserted as metadata. PDFs download only when an arXiv id is known from a DBLP `ee` link or from `--arxiv-lookup`. Paywalled IEEE/ACM PDFs stay metadata-only.
+
+This repo copy does not itself update papers.maclaw.top. Ops run the script on the papers host; the search-service snapshot refreshes after the manifest write.
 
 ```bash
 cd /workspace/agent-papers
-python3 ingest_security_top_official.py --out /workspace/agent-papers --dry-run
-python3 ingest_security_top_official.py --out /workspace/agent-papers --venue ndss --year 2024
-python3 ingest_security_top_official.py --out /workspace/agent-papers --venue sp --year 2022-2026
-python3 ingest_security_top_official.py --out /workspace/agent-papers --new-only
+python3 ingest_security_top_official.py --gap-report
+python3 ingest_security_top_official.py --dry-run --venue sp --year 2024
+python3 ingest_security_top_official.py --new-only --arxiv-lookup
+python3 ingest_security_top_official.py --venue usenix --year 2023
+python3 ingest_security_top_official.py --out /workspace/agent-papers
 ```
 
 | Flag | Meaning |
 |------|---------|
-| `--venue` | `sp` / `ccs` / `uss` (or `usenix`) / `ndss`, repeatable or comma-separated. Default: all four. |
-| `--year` | `YYYY`, `YYYY-YYYY`, or a comma list. Default: **2022 through the current year**. |
-| `--dry-run` | Fetch lists and write `security_top_official_report.json` only. No manifest, DB, or PDF writes. |
-| `--new-only` | Insert titles that are not already in the catalog. Do not refresh matches. |
-| `--no-fetch-oa` | Do not GET USENIX/NDSS landing pages looking for a `.pdf` href. |
-| `--out DIR` | Catalog root (`manifest.json`, `pdfs/`, `cache/`). |
-| `--db PATH` | SQLite path (default `OUT/papers.db`). |
-
-DBLP is requested one page at a time with User-Agent `AgentPapersBot/1.0`. The gap defaults to 3s (`DBLP_MIN_INTERVAL`). Open-access landing pages use `OA_MIN_INTERVAL` (default 1s).
+| `--venue` | `usenix` / `ccs` / `sp` / `ndss` (repeatable). Default: all four. |
+| `--year` | Conference year (repeatable). Default: `--years-from` through `--years-to` (2022–2026). |
+| `--gap-report` | Compare DBLP vs the catalog and exit. Writes `/workspace/sec-official-gap-report.txt` and `{out}/ingest_security_top_official_gap.json`. |
+| `--dry-run` | Fetch lists and write the gap report. No DB, manifest, or PDF writes. |
+| `--new-only` | Skip rows that already have `security-top` and the same venue. |
+| `--arxiv-lookup` | Search arXiv by title for papers that have no arXiv id (cap `--arxiv-lookup-max`, default 80). |
+| `--skip-download` | Do not download PDFs even when an arXiv id is known. |
+| `--force-fetch` | Ignore the 7-day DBLP list cache. |
+| `--dblp-interval` | Seconds between DBLP requests (default 4). |
+| `--out DIR` | Catalog root (default `/workspace/agent-papers`). DB is `OUT/papers.db`. |
 
 ### Venue × year → DBLP key
 
-Catalog `venue` strings are the ones the papers UI already matches.
-
-| `--venue` | `venue` field | DBLP key | TOC page |
-|-----------|---------------|----------|----------|
-| `sp`, `oakland`, `ieee-sp` | `IEEE S&P / Oakland` | `conf/sp/spYYYY` | `https://dblp.org/db/conf/sp/spYYYY.html` |
-| `ccs`, `acm-ccs` | `ACM CCS` | `conf/ccs/ccsYYYY` | `https://dblp.org/db/conf/ccs/ccsYYYY.html` |
-| `uss`, `usenix`, `usenix-security` | `USENIX Security` | `conf/uss/ussYYYY` | `https://dblp.org/db/conf/uss/ussYYYY.html` |
-| `ndss` | `NDSS` | `conf/ndss/ndssYYYY` | `https://dblp.org/db/conf/ndss/ndssYYYY.html` |
-
-Only those main keys are requested. Workshop and co-located volumes are out of scope: `conf/sp/spYYYYw`, `conf/uss/csetYYYY`, `conf/soups/soupsYYYY`, `conf/woot/wootYYYY`. A "Workshops" heading on a main TOC, or a book title containing "workshop", is skipped. The preferred parse is schema.org + COinS on the HTML TOC (the same pages security-paper-mcp-server uses). The DBLP **search** API is not used. If HTML cannot be fetched, SPARQL reads `dblp:Inproceedings` whose `listedOnTocPage` is that same TOC URI.
-
-A year DBLP has not published yet is `source=unavailable` (`official_count=0`). Leave those rows out of coverage totals.
+| `--venue` | `venue` stored | TOC page |
+|-----------|----------------|----------|
+| `sp`, `oakland`, `ieee-sp` | `IEEE S&P` | `https://dblp.org/db/conf/sp/spYYYY.html` |
+| `ccs`, `acm-ccs` | `ACM CCS` | `https://dblp.org/db/conf/ccs/ccsYYYY.html` |
+| `usenix`, `uss`, `usenix-security` | `USENIX Security` | `https://dblp.org/db/conf/uss/ussYYYY.html` |
+| `ndss` | `NDSS` | `https://dblp.org/db/conf/ndss/ndssYYYY.html` |
 
 ### Coverage vs DBLP
 
-Each run prints, and writes `{out}/security_top_official_report.json`, one row per venue × year:
+A real run writes `/workspace/sec-official-ingest-report.txt` and `{out}/ingest_security_top_official_report.json`. Per venue × year:
 
-| Field | Meaning |
-|-------|---------|
-| `official_count` | Main-volume inproceedings (editorship records excluded) |
-| `in_catalog` | How many of those already matched a catalog row (DOI, then arXiv id, then normalized title + year) |
-| `missing` | `official_count - in_catalog` before this run |
-| `pdf_ok` | Local PDF already on disk, or downloaded this run |
-| `coverage_pct` | `100 * in_catalog / official_count` |
+| Column | Meaning |
+|--------|---------|
+| `official` | DBLP TOC inproceedings (editor front-matter skipped) |
+| `before` / `after` | `papers.db` rows tagged `security-top` with that venue and year |
+| `cov%` | `100 * after / official` |
 
-Metadata coverage against DBLP is `in_catalog / official_count` on a **dry-run** (or on the first real run, `missing` is the gap). After a successful non-dry run, a second dry-run should show `missing=0` and `coverage_pct=100` for every available volume. Open-PDF coverage is `pdf_ok / official_count` and will stay lower: many S&P and CCS papers have no open PDF.
+Coverage can sit a little above 100% when older arXiv-heuristic rows share the venue and year but are not on the DBLP TOC. `official == 0` means DBLP returned 404; those prior rows are kept. Open-PDF coverage stays near the existing arXiv set unless `--arxiv-lookup` finds more.
 
 ```bash
 python3 -m unittest test_security_top_official.py

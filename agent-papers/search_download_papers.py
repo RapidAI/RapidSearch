@@ -419,6 +419,20 @@ def keep_ingest_overlay_tags(tags: list[str], old_tags: list[str]) -> list[str]:
     return out
 
 
+def merge_overlay_tags(old_tags: list[str] | None, new_tags: list[str] | None) -> list[str]:
+    """Keep security-top and venue-* tags when a heuristic retag replaces the list.
+
+    ``old_tags`` is the catalog row. ``new_tags`` is the fresh ``tag_topics`` result.
+    """
+    out = list(new_tags or [])
+    for tag in old_tags or []:
+        if not tag or tag in out:
+            continue
+        if tag in INGEST_OVERLAY_TAGS or str(tag).startswith("venue-"):
+            out.append(tag)
+    return out
+
+
 def paper_to_manifest_dict(p: Paper) -> dict:
     d = asdict(p)
     if not str(d.get("venue") or "").strip():

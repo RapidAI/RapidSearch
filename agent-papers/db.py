@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS papers (
     updated TEXT,
     first_seen TEXT,
     last_seen TEXT,
-    content_hash TEXT
+    content_hash TEXT,
+    venue TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
@@ -104,8 +105,16 @@ def connect(db_path: Path | str = DEFAULT_DB) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_venue_column(conn: sqlite3.Connection) -> None:
+    """Add papers.venue on databases created before the official-list ingest."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)")}
+    if "venue" not in cols:
+        conn.execute("ALTER TABLE papers ADD COLUMN venue TEXT")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    _ensure_venue_column(conn)
     conn.commit()
 
 
@@ -149,6 +158,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: dict[str, Any]) -> str:
     pdf_path = paper.get("pdf_path") or ""
     published = paper.get("published") or ""
     updated = paper.get("updated") or ""
+    venue = (paper.get("venue") or "").strip()
     ch = paper.get("content_hash") or content_hash(title, abstract, authors, tags)
     now = _now_iso()
 
@@ -162,6 +172,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: dict[str, Any]) -> str:
                 source_url=?, pdf_url=?, pdf_path=?,
                 published=COALESCE(NULLIF(?, ''), published),
                 updated=COALESCE(NULLIF(?, ''), updated),
+                venue=COALESCE(NULLIF(?, ''), venue),
                 last_seen=?, content_hash=?
             WHERE id=?
             """,
@@ -176,6 +187,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: dict[str, Any]) -> str:
                 pdf_path,
                 published,
                 updated,
+                venue,
                 now,
                 ch,
                 pid,
@@ -188,8 +200,8 @@ def upsert_paper(conn: sqlite3.Connection, paper: dict[str, Any]) -> str:
             INSERT INTO papers (
                 id, title, authors, abstract, year, tags,
                 source_url, pdf_url, pdf_path, published, updated,
-                first_seen, last_seen, content_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                first_seen, last_seen, content_hash, venue
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 pid,
@@ -206,6 +218,7 @@ def upsert_paper(conn: sqlite3.Connection, paper: dict[str, Any]) -> str:
                 first_seen,
                 now,
                 ch,
+                venue,
             ),
         )
     conn.commit()
