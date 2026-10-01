@@ -23,26 +23,49 @@ var papersPageHTML []byte
 const defaultPapersDir = "/workspace/agent-papers"
 
 type paperEntry struct {
-	Title          string   `json:"title"`
-	Authors        []string `json:"authors,omitempty"`
-	Abstract       string   `json:"abstract,omitempty"`
-	Year           int      `json:"year,omitempty"`
-	SourceURL      string   `json:"source_url,omitempty"`
-	PDFURL         string   `json:"pdf_url,omitempty"`
-	ArxivID        string   `json:"arxiv_id,omitempty"`
-	DOI            string   `json:"doi,omitempty"`
-	TopicTags      []string `json:"topic_tags,omitempty"`
+	Title     string   `json:"title"`
+	Authors   []string `json:"authors,omitempty"`
+	Abstract  string   `json:"abstract,omitempty"`
+	Year      int      `json:"year,omitempty"`
+	SourceURL string   `json:"source_url,omitempty"`
+	PDFURL    string   `json:"pdf_url,omitempty"`
+	ArxivID   string   `json:"arxiv_id,omitempty"`
+	DOI       string   `json:"doi,omitempty"`
+	TopicTags []string `json:"topic_tags,omitempty"`
+	// Venue is a human-readable conference/journal name shown on the card.
+	// Suggested security-top values: "IEEE S&P / Oakland", "ACM CCS",
+	// "USENIX Security", "NDSS".
+	Venue          string   `json:"venue,omitempty"`
 	Score          float64  `json:"score,omitempty"`
 	PDFPath        string   `json:"pdf_path,omitempty"`
 	DownloadStatus string   `json:"download_status,omitempty"`
 	Published      string   `json:"published,omitempty"`
 	Updated        string   `json:"updated,omitempty"`
+	QueryHits      []string `json:"query_hits,omitempty"`
+	Source         string   `json:"source,omitempty"` // "manual" for user imports
 
 	// Filled for API/HTML consumers.
-	Filename  string `json:"filename,omitempty"`
-	HasLocal  bool   `json:"has_local"`
-	LocalPDF  string `json:"local_pdf,omitempty"` // relative download path
-	Brief     string `json:"brief,omitempty"`
+	Filename        string `json:"filename,omitempty"`
+	HasLocal        bool   `json:"has_local,omitempty"`
+	LocalPDF        string `json:"local_pdf,omitempty"` // relative download path
+	Brief           string `json:"brief,omitempty"`
+	ID              string `json:"id,omitempty"`
+	AbstractZH      string `json:"abstract_zh,omitempty"`
+	ZhPDF           string `json:"zh_pdf,omitempty"`
+	DualPDF         string `json:"dual_pdf,omitempty"`
+	TranslateStatus string `json:"translate_status,omitempty"`
+	TranslateError  string `json:"translate_error,omitempty"`
+	// PageCount is the local PDF page count (0 when unknown / no local file).
+	PageCount int `json:"page_count,omitempty"`
+	// TranslateSkipReason is a machine-readable gate, e.g. too_many_pages.
+	TranslateSkipReason string `json:"translate_skip_reason,omitempty"`
+	// TranslateLane is "fast" (≤50 pages) or "slow" (51–100). Empty when skipped.
+	TranslateLane string `json:"translate_lane,omitempty"`
+
+	// Review flags for catalog cards (no rater list).
+	HasReview   bool    `json:"has_review,omitempty"`
+	AvgStars    float64 `json:"avg_stars,omitempty"`
+	RatingCount int     `json:"rating_count,omitempty"`
 }
 
 type papersManifest struct {
@@ -52,18 +75,78 @@ type papersManifest struct {
 }
 
 type papersCatalog struct {
-	GeneratedAt string                 `json:"generated_at"`
-	Stats       map[string]interface{} `json:"stats,omitempty"`
-	Count       int                    `json:"count"`
-	Papers      []paperEntry           `json:"papers"`
+	GeneratedAt       string                 `json:"generated_at"`
+	Stats             map[string]interface{} `json:"stats,omitempty"`
+	Count             int                    `json:"count"`
+	Papers            []paperEntry           `json:"papers"`
+	TranslateProgress *translateProgress     `json:"translate_progress,omitempty"`
+	// AbstractZHPending is the number of papers still missing a cached Chinese abstract.
+	// Used by the ZH UI to keep polling until translations land.
+	AbstractZHPending int `json:"abstract_zh_pending,omitempty"`
+	// CanManage is true when the caller may enqueue translations / open admin UI.
+	// Anonymous catalog readers get false; Hub admin / SEARCH_TOKEN get true.
+	CanManage bool `json:"can_manage"`
+	// Visits is unique GET /papers HTML opens (one per visitor cookie
+	// per 12h window). Not API polls, HEAD, PDFs, or obvious bots.
+	Visits int64 `json:"visits"`
+	// SnapshotAt / SnapshotETag identify the static catalog file used for first paint.
+	// Live /papers/api may omit them; /papers/api/catalog and /papers/api/progress set them.
+	SnapshotAt   string `json:"snapshot_at,omitempty"`
+	SnapshotETag string `json:"snapshot_etag,omitempty"`
+	// Offset / Limit / NextOffset describe a paged first-paint slice.
+	// Count stays the full catalog size so the client can fetch the tail.
+	Offset     int  `json:"offset,omitempty"`
+	Limit      int  `json:"limit,omitempty"`
+	NextOffset int  `json:"next_offset,omitempty"`
+	Partial    bool `json:"partial,omitempty"`
+}
+
+// translateProgress is a page-level summary of background BabelDOC jobs.
+type translateProgress struct {
+	Queued        int      `json:"queued"`
+	Running       int      `json:"running"`
+	Active        bool     `json:"active"`
+	RunningID     string   `json:"running_id,omitempty"`
+	RunningTitle  string   `json:"running_title,omitempty"`
+	RunningIDs    []string `json:"running_ids,omitempty"`
+	RunningTitles []string `json:"running_titles,omitempty"`
+	FastQueued    int      `json:"fast_queued,omitempty"`
+	SlowQueued    int      `json:"slow_queued,omitempty"`
+	FastRunning   int      `json:"fast_running,omitempty"`
+	SlowRunning   int      `json:"slow_running,omitempty"`
 }
 
 type papersStore struct {
-	mu      sync.Mutex
-	root    string
-	loaded  time.Time
-	modTime time.Time
-	cat     papersCatalog
+	mu        sync.Mutex
+	root      string
+	loaded    time.Time
+	modTime   time.Time
+	cat       papersCatalog
+	xlate     *translateService
+	absZH     *abstractZHService
+	reviews   *reviewService
+	visits    *visitCounter
+	daily     *hfDailyService
+	secTrends *securityTrendService
+
+	recoverClient *http.Client // optional; PDF recover tests override arxiv.org hosts
+
+	importMu          sync.Mutex
+	importLimit       *importLimiter
+	importClient      *http.Client
+	allowPrivateFetch bool   // tests: httptest.Server on loopback
+	arxivAPIBase      string // tests: override export.arxiv.org
+
+	snapMu      sync.RWMutex
+	snapCat     papersCatalog
+	snapRaw     []byte
+	snapGZ      []byte
+	snapETag    string
+	snapReady   bool
+	snapKick    chan struct{}
+	snapStop    chan struct{}
+	snapStopped bool
+	snapWG      sync.WaitGroup
 }
 
 func papersRoot() string {
@@ -73,17 +156,92 @@ func papersRoot() string {
 	return defaultPapersDir
 }
 
+func newPapersStore(root string) *papersStore {
+	if root == "" {
+		root = papersRoot()
+	}
+	xlate := newTranslateService(root)
+	ps := &papersStore{
+		root:        root,
+		xlate:       xlate,
+		absZH:       newAbstractZHService(root, xlate),
+		reviews:     newReviewService(root, xlate),
+		visits:      newVisitCounter(root),
+		importLimit: newImportLimiter(),
+	}
+	if strings.TrimSpace(os.Getenv("PAPERS_IMPORT_ALLOW_PRIVATE")) == "1" {
+		ps.allowPrivateFetch = true
+	}
+	ps.daily = newHFDailyService(ps)
+	ps.secTrends = newSecurityTrendService(ps)
+	ps.xlate.start()
+	ps.absZH.start()
+	ps.secTrends.start()
+	ps.startCatalogSnapshot()
+	return ps
+}
+
 func (s *Server) papers() *papersStore {
 	if s == nil {
 		return nil
 	}
+	s.papersMu.Lock()
+	defer s.papersMu.Unlock()
 	if s.papersStore == nil {
-		s.papersStore = &papersStore{root: papersRoot()}
+		s.papersStore = newPapersStore(papersRoot())
 	}
 	return s.papersStore
 }
 
+func (ps *papersStore) invalidateCatalog() {
+	if ps == nil {
+		return
+	}
+	ps.mu.Lock()
+	ps.loaded = time.Time{}
+	ps.modTime = time.Time{}
+	ps.mu.Unlock()
+	// Import / sync changed the manifest — refresh the static snapshot now,
+	// not only on the next timer tick. Also rescan missing security-top trends.
+	ps.requestCatalogSnapshot()
+	if ps.secTrends != nil {
+		ps.secTrends.ensureMissing()
+	}
+}
+
 func (ps *papersStore) catalog() (papersCatalog, error) {
+	base, err := ps.catalogBase()
+	if err != nil {
+		return papersCatalog{}, err
+	}
+	out := papersCatalog{
+		GeneratedAt: base.GeneratedAt,
+		Stats:       base.Stats,
+		Count:       base.Count,
+		Papers:      append([]paperEntry(nil), base.Papers...),
+	}
+	ps.decoratePapers(out.Papers)
+	return out, nil
+}
+
+func (ps *papersStore) decoratePapers(papers []paperEntry) {
+	if ps == nil || len(papers) == 0 {
+		return
+	}
+	var jobs map[string]translateJob
+	if ps.xlate != nil {
+		jobs = ps.xlate.jobsCopy()
+	}
+	overlayTranslations(papers, ps.root, jobs)
+	if ps.absZH != nil {
+		ps.absZH.overlay(papers)
+	}
+	if ps.reviews != nil {
+		ps.reviews.overlay(papers)
+	}
+}
+
+func (ps *papersStore) catalogBase() (papersCatalog, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	root := ps.root
@@ -149,9 +307,13 @@ func enrichPaper(p paperEntry, pdfDir string) paperEntry {
 		if st, err := os.Stat(full); err == nil && !st.IsDir() {
 			p.HasLocal = true
 			p.LocalPDF = "/papers/pdf/" + name
+			p = attachPageCount(p, full)
 		}
 	}
+	p.ID = paperTranslateID(p)
 	p.Brief = briefText(p.Abstract, 280)
+	p.TranslateSkipReason = paperTranslateSkipReason(p)
+	p.TranslateLane = paperTranslateLane(p.PageCount)
 	// Do not leak absolute host paths in API responses.
 	p.PDFPath = ""
 	return p
@@ -218,12 +380,17 @@ func (s *Server) handlePapersPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.Method {
-	case http.MethodGet, http.MethodHead:
-		if !s.settingsAuthed(r) {
-			writeSettingsHTML(w, r, loginPageHTML)
-			return
+	case http.MethodGet:
+		// Count HTML page views only (not HEAD, not /papers/api polls).
+		if ps := s.papers(); ps != nil && ps.visits != nil {
+			ps.visits.Hit(w, r)
 		}
-		writeSettingsHTML(w, r, papersPageHTML)
+		// Catalog page is public; Settings link always shown. Translate actions
+		// are gated in the UI via /papers/api can_manage, and mutations still
+		// require authorizeSettings. Unauthenticated /settings shows login.
+		writePapersHTML(w, r, papersPageHTML)
+	case http.MethodHead:
+		writePapersHTML(w, r, papersPageHTML)
 	default:
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 	}
@@ -234,31 +401,68 @@ func (s *Server) handlePapersAPI(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
-	if !s.authorizeSettings(w, r) {
-		return
-	}
+	// Public catalog listing. can_manage reflects Hub admin / SEARCH_TOKEN.
+	// Do not expose translate LLM config or API keys here.
 	cat, err := s.papers().catalog()
 	if err != nil {
 		log.Printf("papers catalog: %v", err)
 		writeErr(w, http.StatusBadGateway, "papers catalog unavailable", "papers", nil, "")
 		return
 	}
+	canManage := s.settingsAuthed(r)
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
+	zhPDFOnly := zhPDFOnlyQuery(r.URL.Query().Get("zh_pdf"))
+	// Progress is always from the full catalog so filters cannot hide in-flight work.
+	progress := summarizeTranslateProgress(cat.Papers)
 	out := cat
-	if q != "" || tag != "" {
-		filtered := filterPapers(cat.Papers, q, tag)
+	out.CanManage = canManage
+	out.TranslateProgress = progress
+	if ps := s.papers(); ps != nil && ps.visits != nil {
+		out.Visits = ps.visits.Total()
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if q != "" || tag != "" || zhPDFOnly {
+		filtered := filterPapersQuery(cat.Papers, q, tag, zhPDFOnly)
 		out.Papers = filtered
 		out.Count = len(filtered)
+	}
+	s.kickPapersSideEffects(canManage, cat.Papers)
+	if abs := s.papers().absZH; abs != nil {
+		out.AbstractZHPending = abs.pendingCount(out.Papers)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func filterPapers(in []paperEntry, q, tag string) []paperEntry {
+	return filterPapersQuery(in, q, tag, false)
+}
+
+// paperHasZhPDF reports an openable Chinese PDF. The papers page shows the
+// 中文版 link exactly when zh_pdf is non-empty, which overlay sets only after
+// pdfs/zh/{id}.zh.pdf is on disk. Queued, running, skipped, or done-without-file
+// jobs do not match. A re-translate still matches while the previous file remains.
+func paperHasZhPDF(p paperEntry) bool {
+	return strings.TrimSpace(p.ZhPDF) != ""
+}
+
+func zhPDFOnlyQuery(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterPapersQuery(in []paperEntry, q, tag string, zhPDFOnly bool) []paperEntry {
 	q = strings.ToLower(strings.TrimSpace(q))
 	tag = strings.ToLower(strings.TrimSpace(tag))
 	out := make([]paperEntry, 0, len(in))
 	for _, p := range in {
+		if zhPDFOnly && !paperHasZhPDF(p) {
+			continue
+		}
 		if tag != "" {
 			ok := false
 			for _, t := range p.TopicTags {
@@ -275,10 +479,13 @@ func filterPapers(in []paperEntry, q, tag string) []paperEntry {
 			blob := strings.ToLower(strings.Join([]string{
 				p.Title,
 				p.Abstract,
+				p.AbstractZH,
 				p.ArxivID,
+				p.ID,
 				p.Filename,
 				strings.Join(p.Authors, " "),
 				strings.Join(p.TopicTags, " "),
+				p.Venue,
 			}, " "))
 			if !strings.Contains(blob, q) {
 				continue
@@ -294,18 +501,10 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusMethodNotAllowed, "method not allowed", search.CodeBadRequest, nil, "")
 		return
 	}
-	if !s.authorizeSettings(w, r) {
-		return
-	}
+	// Existing local / zh / dual PDFs are publicly downloadable.
 	raw := strings.TrimPrefix(r.URL.Path, "/papers/pdf/")
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == r.URL.Path {
-		http.NotFound(w, r)
-		return
-	}
-	// URL path may encode spaces etc.; Go already decodes Path.
-	name, err := resolveLocalPDFName(s.papers().root, raw)
-	if err != nil || name == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -313,26 +512,27 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 	if root == "" {
 		root = papersRoot()
 	}
-	full := filepath.Join(root, "pdfs", name)
-	full, err = filepath.Abs(full)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	pdfRoot, err := filepath.Abs(filepath.Join(root, "pdfs"))
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	rel, err := filepath.Rel(pdfRoot, full)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		http.NotFound(w, r)
-		return
-	}
-	st, err := os.Stat(full)
-	if err != nil || st.IsDir() {
-		http.NotFound(w, r)
-		return
+	kind, rest, isXlate := splitTranslatePDFPath(raw)
+	var full, serveName string
+	var err error
+	if isXlate {
+		full, serveName, err = resolveTranslatedPDFName(root, kind, rest)
+		if err != nil || full == "" {
+			http.NotFound(w, r)
+			return
+		}
+	} else {
+		name, err := resolveLocalPDFName(root, raw)
+		if err != nil || name == "" {
+			http.NotFound(w, r)
+			return
+		}
+		full, err = originalPDFAbs(root, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		serveName = name
 	}
 	disp := "inline"
 	if strings.EqualFold(r.URL.Query().Get("download"), "1") ||
@@ -340,9 +540,20 @@ func (s *Server) handlePapersPDF(w http.ResponseWriter, r *http.Request) {
 		disp = "attachment"
 	}
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", disp+`; filename="`+sanitizeDisposition(name)+`"`)
+	w.Header().Set("Content-Disposition", disp+`; filename="`+sanitizeDisposition(serveName)+`"`)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	http.ServeFile(w, r, full)
+}
+
+func splitTranslatePDFPath(raw string) (kind, rest string, ok bool) {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), `\`, "/")
+	if strings.HasPrefix(raw, "zh/") {
+		return translateKindZH, strings.TrimPrefix(raw, "zh/"), true
+	}
+	if strings.HasPrefix(raw, "dual/") {
+		return translateKindDual, strings.TrimPrefix(raw, "dual/"), true
+	}
+	return "", raw, false
 }
 
 // resolveLocalPDFName maps an arxiv id or filename to a basename under pdfs/.

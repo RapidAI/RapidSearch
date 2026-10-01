@@ -90,11 +90,23 @@ func TestPathNeedsStreamAndPassthrough(t *testing.T) {
 	if !PathNeedsStream("/download") || !PathNeedsStream("/papers/pdf/a.pdf") {
 		t.Fatal("need stream")
 	}
-	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api") {
-		t.Fatal("html/api should not stream")
+	if !PathNeedsStream("/papers/pdf/zh/2401.05459") || !PathNeedsStream("/papers/pdf/dual/2401.05459") {
+		t.Fatal("translated pdfs must stream")
 	}
-	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") {
+	if PathNeedsStream("/papers") || PathNeedsStream("/papers/api/progress") || PathNeedsStream("/papers/translate/config") {
+		t.Fatal("html/progress should not stream")
+	}
+	if PathNeedsStream("/papers/api") || PathNeedsStream("/papers/api/catalog") {
+		t.Fatal("catalog JSON should buffer when slim; oversized still streams via ContentLength")
+	}
+	if !PathIsPapersCatalogAPI("/papers/api") || !PathIsPapersCatalogAPI("/papers/api/catalog") {
+		t.Fatal("catalog API paths still identified")
+	}
+	if !PathPassthroughAuth("/settings") || !PathPassthroughAuth("/papers/api") || !PathPassthroughAuth("/papers/translate/test") {
 		t.Fatal("passthrough")
+	}
+	if !PathIsPapers("/papers/import") || !PathPassthroughAuth("/papers/import") {
+		t.Fatal("manual import must reach the search process")
 	}
 	if PathPassthroughAuth("/search") {
 		t.Fatal("search is not passthrough")

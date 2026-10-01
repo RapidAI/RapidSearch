@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +40,8 @@ func TestFilterPapers(t *testing.T) {
 	in := []paperEntry{
 		{Title: "Alpha Security", TopicTags: []string{"security"}, Abstract: "foo", ArxivID: "1.2"},
 		{Title: "Beta Survey", TopicTags: []string{"survey"}, Abstract: "bar", ArxivID: "3.4"},
+		{Title: "Gamma AIoT", TopicTags: []string{"llm-iot"}, Abstract: "llm iot", ArxivID: "5.6"},
+		{Title: "Delta Oakland", TopicTags: []string{"security-top"}, Venue: "IEEE S&P / Oakland", Abstract: "top venue", ArxivID: "7.8"},
 	}
 	got := filterPapers(in, "alpha", "")
 	if len(got) != 1 || got[0].Title != "Alpha Security" {
@@ -45,6 +50,98 @@ func TestFilterPapers(t *testing.T) {
 	got = filterPapers(in, "", "survey")
 	if len(got) != 1 || got[0].Title != "Beta Survey" {
 		t.Fatalf("%+v", got)
+	}
+	got = filterPapers(in, "", "llm-iot")
+	if len(got) != 1 || got[0].Title != "Gamma AIoT" {
+		t.Fatalf("llm-iot filter: %+v", got)
+	}
+	got = filterPapers(in, "", "security-top")
+	if len(got) != 1 || got[0].Title != "Delta Oakland" {
+		t.Fatalf("security-top filter: %+v", got)
+	}
+	got = filterPapers(in, "oakland", "")
+	if len(got) != 1 || got[0].Title != "Delta Oakland" {
+		t.Fatalf("venue search: %+v", got)
+	}
+}
+
+func TestPaperHasZhPDF(t *testing.T) {
+	cases := []struct {
+		name string
+		p    paperEntry
+		want bool
+	}{
+		{name: "openable", p: paperEntry{ZhPDF: "/papers/pdf/zh/2401.05459"}, want: true},
+		{name: "retranslate still openable", p: paperEntry{ZhPDF: "/papers/pdf/zh/2401.05459", TranslateStatus: "running"}, want: true},
+		{name: "empty", p: paperEntry{}},
+		{name: "whitespace", p: paperEntry{ZhPDF: "  "}},
+		{name: "queued", p: paperEntry{TranslateStatus: "queued"}},
+		{name: "running", p: paperEntry{TranslateStatus: "running"}},
+		{name: "done without file", p: paperEntry{TranslateStatus: "done"}},
+		{name: "dual only", p: paperEntry{DualPDF: "/papers/pdf/dual/2401.05459", TranslateStatus: "done"}},
+	}
+	for _, tc := range cases {
+		if got := paperHasZhPDF(tc.p); got != tc.want {
+			t.Fatalf("%s: got %v want %v (%+v)", tc.name, got, tc.want, tc.p)
+		}
+	}
+	if !zhPDFOnlyQuery("1") || !zhPDFOnlyQuery(" TRUE ") || !zhPDFOnlyQuery("yes") || !zhPDFOnlyQuery("on") {
+		t.Fatal("expected zh_pdf query truthy values")
+	}
+	if zhPDFOnlyQuery("") || zhPDFOnlyQuery("0") || zhPDFOnlyQuery("false") || zhPDFOnlyQuery("done") {
+		t.Fatal("expected zh_pdf query to stay off")
+	}
+}
+
+func TestFilterPapersZhPDFOnly(t *testing.T) {
+	in := []paperEntry{
+		{Title: "Has ZH", TopicTags: []string{"survey"}, ZhPDF: "/papers/pdf/zh/1"},
+		{Title: "Done no file", TopicTags: []string{"survey"}, TranslateStatus: "done"},
+		{Title: "Queued", TopicTags: []string{"security"}, TranslateStatus: "queued"},
+		{Title: "Dual only", TopicTags: []string{"survey"}, DualPDF: "/papers/pdf/dual/2", TranslateStatus: "done"},
+		{Title: "Security ZH", TopicTags: []string{"security-top"}, Venue: "NDSS", ZhPDF: "/papers/pdf/zh/3"},
+	}
+	got := filterPapersQuery(in, "", "", true)
+	if len(got) != 2 || got[0].Title != "Has ZH" || got[1].Title != "Security ZH" {
+		t.Fatalf("zh only: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "", "survey", true)
+	if len(got) != 1 || got[0].Title != "Has ZH" {
+		t.Fatalf("tag+zh: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "ndss", "", true)
+	if len(got) != 1 || got[0].Title != "Security ZH" {
+		t.Fatalf("q+zh: %+v", titlesOf(got))
+	}
+	got = filterPapersQuery(in, "", "survey", false)
+	if len(got) != 3 {
+		t.Fatalf("tag without zh filter: %+v", titlesOf(got))
+	}
+}
+
+func titlesOf(in []paperEntry) []string {
+	out := make([]string, len(in))
+	for i, p := range in {
+		out[i] = p.Title
+	}
+	return out
+}
+
+func TestPaperVenueJSON(t *testing.T) {
+	raw := []byte(`{"title":"Oakland paper","topic_tags":["security-top"],"venue":"IEEE S&P / Oakland"}`)
+	var p paperEntry
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Venue != "IEEE S&P / Oakland" {
+		t.Fatalf("venue=%q", p.Venue)
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"venue":`) || !strings.Contains(string(out), "Oakland") {
+		t.Fatalf("marshal=%s", out)
 	}
 }
 
@@ -55,5 +152,378 @@ func TestBriefText(t *testing.T) {
 	s := briefText("one two three four five six seven eight nine ten eleven twelve thirteen", 40)
 	if len([]rune(s)) < 10 || !strings.HasSuffix(s, "…") {
 		t.Fatalf("brief=%q", s)
+	}
+}
+
+func TestPapersPageLightTheme(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `data-theme="light"`) {
+		t.Fatal("default theme is not light")
+	}
+	if !strings.Contains(body, "--bg: #f5f6f8") && !strings.Contains(body, "--bg:#f5f6f8") {
+		t.Fatal("missing light background token")
+	}
+	if strings.Contains(body, `id="base-url"`) || strings.Contains(body, `id="api-key"`) ||
+		strings.Contains(body, `id="test-cfg"`) || strings.Contains(body, `id="save-cfg"`) ||
+		strings.Contains(body, `id="save-xlate"`) || strings.Contains(body, `id="test-xlate"`) ||
+		strings.Contains(body, `id="auto-xlate"`) || strings.Contains(body, `id="qps"`) {
+		t.Fatal("LLM settings panel should have moved to /settings")
+	}
+	if !strings.Contains(body, `id="llm-settings-link"`) || !strings.Contains(body, `href="/settings"`) {
+		t.Fatal("papers page should link Translation LLM settings to /settings")
+	}
+	if !strings.Contains(body, "Configure the PDF translation engine") || !strings.Contains(body, "中配置 PDF 翻译引擎") {
+		t.Fatal("papers page missing EN/ZH note pointing at Settings")
+	}
+	if !strings.Contains(body, "hasOwnProperty.call(table, k)") {
+		t.Fatal("i18n lookup must treat empty strings as valid (EN hintAfter must not leak the key name)")
+	}
+	if !strings.Contains(body, "中文版") || !strings.Contains(body, "中英对照") {
+		t.Fatal("missing translated download labels")
+	}
+	if !strings.Contains(body, `Authorization`) || !strings.Contains(body, "withToken") {
+		t.Fatal("page must forward operator ?token= to API and PDF links")
+	}
+	if !strings.Contains(body, `id="settings-link"`) {
+		t.Fatal("settings link must always be present on papers page")
+	}
+	if !strings.Contains(body, "canManage") || !strings.Contains(body, "can_manage") {
+		t.Fatal("papers page must gate translate UI on can_manage")
+	}
+	if !strings.Contains(body, "canManage && p.has_local") {
+		t.Fatal("translate / re-translate buttons must require canManage")
+	}
+	if !strings.Contains(body, "page_count") || !strings.Contains(body, `class="pages"`) {
+		t.Fatal("papers page must render page_count near year/tags")
+	}
+	if !strings.Contains(body, "Over 100 pages — skipped translation") || !strings.Contains(body, "超过 100 页，不翻译") {
+		t.Fatal("papers page must label the over-100-pages skip reason in EN and ZH")
+	}
+	if !strings.Contains(body, "too_many_pages") || !strings.Contains(body, "TRANSLATE_MAX_PAGES") {
+		t.Fatal("papers page must hide translate when too_many_pages")
+	}
+	if !strings.Contains(body, "paperTooManyPages") || !strings.Contains(body, "xlate-skip") {
+		t.Fatal("over-limit papers must show skip reason instead of a silent skip")
+	}
+	if !strings.Contains(body, "慢速翻译队列") || !strings.Contains(body, "Slow translation queue") {
+		t.Fatal("papers page must label the 51–100 page slow lane")
+	}
+	if !strings.Contains(body, `skipped: "Skipped"`) || !strings.Contains(body, `skipped: "已跳过"`) {
+		t.Fatal("papers page must label permanently skipped timeout jobs")
+	}
+	if !strings.Contains(body, "TRANSLATE_FAST_MAX_PAGES") || !strings.Contains(body, "paperSlowLane") {
+		t.Fatal("papers page must classify fast vs slow translate lanes")
+	}
+	if !strings.Contains(body, `id="xlate-banner"`) || !strings.Contains(body, "翻译进行中") {
+		t.Fatal("papers page must show page-level translation progress banner")
+	}
+	if !strings.Contains(body, "POLL_ACTIVE_MS") && !strings.Contains(body, "4000") {
+		t.Fatal("expected active polling while translations run")
+	}
+	if !strings.Contains(body, "PAGE_SIZE") || !strings.Contains(body, "pager-top") || !strings.Contains(body, "pager-bottom") {
+		t.Fatal("papers page must paginate with top/bottom controls")
+	}
+	if !strings.Contains(body, `id="sort"`) || !strings.Contains(body, "sortNewest") {
+		t.Fatal("papers page must offer publication-date sort")
+	}
+	if !strings.Contains(body, "reXlate") || !strings.Contains(body, "再次翻译") {
+		t.Fatal("papers page must offer force re-translate control")
+	}
+	if !strings.Contains(body, `xlate: "Translate"`) || !strings.Contains(body, `xlate: "翻译"`) {
+		t.Fatal("untranslated cards must show Translate / 翻译")
+	}
+	if !strings.Contains(body, `xlatePriority: "Prioritize"`) || !strings.Contains(body, `xlatePriority: "优先"`) {
+		t.Fatal("queued cards must offer Prioritize / 优先 to bump near the lane head")
+	}
+	if !strings.Contains(body, "priority: true") || !strings.Contains(body, "prioritizedOk") {
+		t.Fatal("card Translate/Prioritize must POST priority:true")
+	}
+	if !strings.Contains(body, "Moved to the front of the queue.") || !strings.Contains(body, "已移到队列最近位置。") {
+		t.Fatal("priority enqueue must confirm near-front placement in EN and ZH")
+	}
+	if !strings.Contains(body, "xlate-err") {
+		t.Fatal("papers page must surface translate errors")
+	}
+	if !strings.Contains(body, "authors, abstract, tags") && !strings.Contains(body, "作者、摘要、标签") {
+		t.Fatal("search placeholder should cover title/authors/abstract/tags")
+	}
+	if !strings.Contains(body, "agent自进化") || !strings.Contains(body, "agent安全") ||
+		!strings.Contains(body, "agent安全自进化") || !strings.Contains(body, "LLM based 物联网") ||
+		!strings.Contains(body, "安全顶会") {
+		t.Fatal("papers page must show Chinese category labels")
+	}
+	if !strings.Contains(body, "llm-iot") || !strings.Contains(body, "LLM-based IoT") {
+		t.Fatal("papers page must include llm-iot key and English label")
+	}
+	if !strings.Contains(body, "llm-training") || !strings.Contains(body, "LLM 训练") ||
+		!strings.Contains(body, "LLM training") {
+		t.Fatal("papers page must include llm-training key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "agent-tools-memory") || !strings.Contains(body, "agent工具与记忆") ||
+		!strings.Contains(body, "Agent tools & memory") {
+		t.Fatal("papers page must include agent-tools-memory key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "llm-quantum") || !strings.Contains(body, "大语言模型+量子") ||
+		!strings.Contains(body, "LLM + Quantum") {
+		t.Fatal("papers page must include llm-quantum key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `"other"`) || !strings.Contains(body, "其它") ||
+		!strings.Contains(body, "Other") {
+		t.Fatal("papers page must include other key and ZH/EN labels")
+	}
+	if !strings.Contains(body, "security-top") || !strings.Contains(body, "安全顶会") ||
+		!strings.Contains(body, "Security top venues") {
+		t.Fatal("papers page must include security-top key and ZH/EN labels")
+	}
+	if !strings.Contains(body, `class="venue"`) || !strings.Contains(body, "p.venue") {
+		t.Fatal("paper cards must render a venue chip when venue is set")
+	}
+	if !strings.Contains(body, `id="import-open"`) || !strings.Contains(body, `id="import-dialog"`) ||
+		!strings.Contains(body, "/papers/import") {
+		t.Fatal("papers page must offer public import paper control")
+	}
+	if !strings.Contains(body, `id="import-pdf"`) || !strings.Contains(body, `accept="application/pdf,.pdf"`) {
+		t.Fatal("import dialog must offer PDF upload")
+	}
+	if !strings.Contains(body, `id="import-tag" required`) && !strings.Contains(body, `id="import-tag" required>`) {
+		t.Fatal("category select must stay required for every import path")
+	}
+	if !strings.Contains(body, "importNeedTag") || !strings.Contains(body, "请选择分类") {
+		t.Fatal("import UI must keep the required-category message")
+	}
+	if !strings.Contains(body, "if (!tag)") {
+		t.Fatal("submitImport must reject a missing category before URL or upload")
+	}
+	if !strings.Contains(body, "FormData") || !strings.Contains(body, `fd.append("tag", tag)`) {
+		t.Fatal("upload path must send the required tag in multipart form")
+	}
+	if !strings.Contains(body, "importChecking") || !strings.Contains(body, "importUploading") {
+		t.Fatal("upload UI must show checking and uploading status")
+	}
+	if !strings.Contains(body, "importErr_not_a_paper") || !strings.Contains(body, "不像传统学术论文") {
+		t.Fatal("import UI must localize structure-check failures")
+	}
+	if !strings.Contains(body, "导入论文") || !strings.Contains(body, "Import paper") {
+		t.Fatal("papers page must localize the import button")
+	}
+	if !strings.Contains(body, `source: "Source"`) || !strings.Contains(body, `source: "来源"`) {
+		t.Fatal("paper card source link must use Source / 来源, not arXiv-only copy")
+	}
+	if strings.Contains(body, `t("arxiv")`) || strings.Contains(body, `arxiv: "arXiv"`) {
+		t.Fatal("card action i18n key arxiv should have been renamed to source")
+	}
+	if !strings.Contains(body, `id="tag-chips"`) {
+		t.Fatal("papers page must show tag filter chips")
+	}
+	if !strings.Contains(body, `id="zh-pdf-only"`) || !strings.Contains(body, "有中文 PDF") || !strings.Contains(body, "仅显示有中文 PDF") {
+		t.Fatal("papers page must offer a Chinese-PDF-only filter")
+	}
+	if !strings.Contains(body, "function paperHasZhPDF") || !strings.Contains(body, "list.filter(paperHasZhPDF)") {
+		t.Fatal("Chinese PDF filter must use the same zh_pdf signal as the 中文版 link")
+	}
+	if !strings.Contains(body, `if (p.zh_pdf)`) {
+		t.Fatal("中文版 link must stay gated on zh_pdf")
+	}
+	if !strings.Contains(body, "已有中文译本 {zh} 篇") || !strings.Contains(body, "{zh} with Chinese PDF") {
+		t.Fatal("papers meta line must show catalog-wide Chinese PDF count")
+	}
+	if !strings.Contains(body, "countCatalogZhPDFs") || !strings.Contains(body, "lastCatalog.papers") {
+		t.Fatal("ZH PDF count must come from the full catalog, not the filtered list")
+	}
+	if !strings.Contains(body, `TAG_KEYS`) || !strings.Contains(body, "tagLabel") {
+		t.Fatal("papers page must map stable tag keys to localized labels")
+	}
+}
+
+func TestPapersPageAnonymousOK(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="settings-link"`) || !strings.Contains(body, `href="/settings"`) {
+		t.Fatal("anonymous papers page must still show Settings link")
+	}
+	if strings.Contains(body, `id="username"`) && strings.Contains(body, `id="password"`) && !strings.Contains(body, `id="list"`) {
+		t.Fatal("anonymous /papers must not redirect to login HTML")
+	}
+	if !strings.Contains(body, `id="xlate-pending"`) || !strings.Contains(body, "hidden") {
+		t.Fatal("translate-pending should start hidden until can_manage")
+	}
+}
+
+func TestPapersAPIAnonymousPublic(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("anonymous /papers/api status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if cat.CanManage {
+		t.Fatal("anonymous can_manage must be false")
+	}
+	if len(cat.Papers) != 1 {
+		t.Fatalf("%+v", cat)
+	}
+	p := cat.Papers[0]
+	if p.ZhPDF != "/papers/pdf/zh/2401.05459" {
+		t.Fatalf("anonymous must still see zh_pdf: %+v", p)
+	}
+	raw := rr.Body.String()
+	if strings.Contains(raw, "api_key") || strings.Contains(raw, "APIKey") || strings.Contains(raw, "api-key") {
+		t.Fatal("anonymous papers API must not expose translate API keys")
+	}
+}
+
+func TestPapersAPIFilterZhPDF(t *testing.T) {
+	h, dir := papersHandler(t)
+	get := func(path string) papersCatalog {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		var cat papersCatalog
+		if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+			t.Fatal(err)
+		}
+		if cat.CanManage {
+			t.Fatal("anonymous zh_pdf filter must stay public")
+		}
+		return cat
+	}
+	missing := get("/papers/api?zh_pdf=1")
+	if missing.Count != 0 || len(missing.Papers) != 0 {
+		t.Fatalf("no file: %+v", missing)
+	}
+	all := get("/papers/api")
+	if all.Count != 1 || all.Papers[0].ZhPDF != "" {
+		t.Fatalf("unfiltered without file: %+v", all)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	only := get("/papers/api?zh_pdf=1")
+	if only.Count != 1 || len(only.Papers) != 1 || only.Papers[0].ZhPDF != "/papers/pdf/zh/2401.05459" {
+		t.Fatalf("with file: %+v", only)
+	}
+	if got := get("/papers/api?zh_pdf=true&tag=survey"); got.Count != 1 || got.Papers[0].Title == "" {
+		t.Fatalf("tag+zh: %+v", got)
+	}
+	if got := get("/papers/api?zh_pdf=1&tag=security"); got.Count != 0 || len(got.Papers) != 0 {
+		t.Fatalf("other tag: %+v", got)
+	}
+	if got := get("/papers/api?zh_pdf=0"); got.Count != 1 {
+		t.Fatalf("zh_pdf=0 should not filter: %+v", got)
+	}
+}
+
+func TestPapersAPIAdminCanManage(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/papers/api", nil)
+	papersAuth(req)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d %s", rr.Code, rr.Body.String())
+	}
+	var cat papersCatalog
+	if err := json.Unmarshal(rr.Body.Bytes(), &cat); err != nil {
+		t.Fatal(err)
+	}
+	if !cat.CanManage {
+		t.Fatal("authed admin can_manage must be true")
+	}
+}
+
+func TestPapersPDFAnonymousOK(t *testing.T) {
+	h, dir := papersHandler(t)
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "zh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "pdfs", "dual"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "zh", "2401.05459.zh.pdf"), []byte("%PDF-1.4 zh-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pdfs", "dual", "2401.05459.dual.pdf"), []byte("%PDF-1.4 dual-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/papers/pdf/2401.05459",
+		"/papers/pdf/zh/2401.05459",
+		"/papers/pdf/dual/2401.05459",
+	} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Header().Get("Content-Type"), "pdf") {
+			t.Fatalf("%s ct=%s", path, rr.Header().Get("Content-Type"))
+		}
+	}
+}
+
+func TestPapersTranslatePostAnonymous401(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/papers/translate", strings.NewReader(`{"id":"2401.05459"}`))
+	req.Header.Set("Content-Type", "application/json")
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("POST /papers/translate status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSettingsStillGatedFromPapersFlow(t *testing.T) {
+	h, _ := papersHandler(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `id="username"`) || !strings.Contains(body, `id="password"`) {
+		t.Fatal("unauthenticated /settings must show login UI")
+	}
+	if strings.Contains(body, `id="serper"`) || strings.Contains(body, "serper_api_key") {
+		t.Fatal("unauthenticated /settings must not show settings form")
+	}
+	rr = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/settings/config", nil)
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("/settings/config status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

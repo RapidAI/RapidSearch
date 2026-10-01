@@ -1,11 +1,28 @@
 <!DOCTYPE html>
-<html lang="en" data-accept-lang="en">
+<html lang="en" data-accept-lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Papers</title>
+  <title>码卡龙论文精选</title>
   <style>
-    :root {
+    :root, html[data-theme="light"] {
+      --bg: #f5f6f8;
+      --card: #ffffff;
+      --ink: #1b2430;
+      --muted: #536270;
+      --line: #d5dde6;
+      --accent: #0b63ce;
+      --ok: #157a42;
+      --bad: #b42318;
+      --warn: #9a6700;
+      --btn: #eef2f6;
+      --tag: #e7f3ea;
+      --tag-ink: #1b6b3a;
+      --input: #ffffff;
+      --focus: #0b63ce;
+      --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    }
+    html[data-theme="dark"] {
       --bg: #0f1419;
       --card: #1a2332;
       --ink: #e8eef6;
@@ -14,32 +31,69 @@
       --accent: #4ea1ff;
       --ok: #3dcc8a;
       --bad: #f07178;
+      --warn: #f0b429;
       --btn: #243044;
       --tag: #243a28;
       --tag-ink: #9ad4a0;
+      --input: #0d1218;
+      --focus: #4ea1ff;
+      --shadow: none;
     }
     html:not([data-i18n-ready]) body { visibility: hidden; }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
       margin: 0;
-      font: 15px/1.45 system-ui, -apple-system, Segoe UI, sans-serif;
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
       background: var(--bg);
       color: var(--ink);
     }
-    .top {
+    .title-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 16px 18px 0;
+      gap: 12px 16px;
       flex-wrap: wrap;
+      margin: 0 0 6px;
     }
-    .lang-switch { display: flex; gap: 4px; }
-    .lang-switch button.active { background: #1d4e89; border-color: #2d6cb5; }
-    main { max-width: 960px; margin: 0 auto; padding: 12px 18px 48px; }
+    .title-row h1 { margin: 0; flex: 0 1 auto; }
+    .title-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .title-actions .nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-actions .nav a {
+      display: inline-block;
+      background: var(--btn);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 12px;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .lang-switch, .theme-switch { display: flex; gap: 4px; }
+    .theme-switch button, .lang-switch button { padding: 6px 10px; }
+    .lang-switch button.active, .theme-switch button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    html[data-theme="light"] .lang-switch button.active,
+    html[data-theme="light"] .theme-switch button.active {
+      background: #0b63ce;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 16px 18px 48px; }
     h1 { font-size: 1.45rem; margin: 0 0 6px; }
+    h2 { font-size: 1.05rem; margin: 0 0 10px; }
     p.lead { color: var(--muted); margin: 0 0 18px; }
     .toolbar {
       display: flex;
@@ -48,23 +102,19 @@
       margin-bottom: 16px;
       align-items: center;
     }
-    input[type="search"] {
-      flex: 1 1 220px;
-      min-width: 180px;
+    input[type="search"], input[type="text"], input[type="password"], input[type="number"], select {
       padding: 9px 12px;
       border-radius: 8px;
       border: 1px solid var(--line);
-      background: #0d1218;
+      background: var(--input);
       color: var(--ink);
       font: inherit;
     }
-    select {
-      padding: 9px 10px;
-      border-radius: 8px;
-      border: 1px solid var(--line);
-      background: #0d1218;
-      color: var(--ink);
-      font: inherit;
+    input[type="search"] { flex: 1 1 260px; min-width: 180px; }
+    select#sort { flex: 0 1 auto; }
+    input:focus, select:focus, button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
     }
     button {
       background: var(--btn);
@@ -75,7 +125,9 @@
       cursor: pointer;
       font: inherit;
     }
-    button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button.primary { background: #0b63ce; border-color: #0b63ce; color: #fff; }
+    html[data-theme="dark"] button.primary { background: #1d4e89; border-color: #2d6cb5; }
+    button:disabled { opacity: 0.45; cursor: default; }
     a.btn {
       display: inline-block;
       background: var(--btn);
@@ -86,30 +138,38 @@
       text-decoration: none;
       font-size: 13px;
     }
-    a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
-    a.btn:hover { filter: brightness(1.08); }
+    a.btn.primary { background: #0b63ce; border-color: #0b63ce; color: #fff; }
+    html[data-theme="dark"] a.btn.primary { background: #1d4e89; border-color: #2d6cb5; }
+    a.btn:hover { filter: brightness(0.97); }
     .meta { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-    .meta strong { color: var(--ink); }
     article.paper {
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 16px 18px 14px;
       margin-bottom: 12px;
+      box-shadow: var(--shadow);
     }
-    article.paper h2 {
-      font-size: 1.05rem;
-      margin: 0 0 8px;
-      line-height: 1.35;
-    }
+    article.paper h2 { font-size: 1.05rem; margin: 0 0 8px; line-height: 1.35; }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
-    .year {
+    .year, .pages, .status-pill, .venue {
       font-size: 12px;
       color: var(--muted);
       border: 1px solid var(--line);
       border-radius: 999px;
       padding: 2px 8px;
     }
+    .venue {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: transparent;
+    }
+    .status-pill.queued { color: var(--warn); border-color: var(--warn); }
+    .status-pill.running { color: var(--accent); border-color: var(--accent); }
+    .status-pill.failed { color: var(--bad); border-color: var(--bad); }
+    .status-pill.done { color: var(--ok); border-color: var(--ok); }
+    .status-pill.skipped { color: var(--warn); border-color: var(--warn); }
+    .status-pill.slow { color: var(--accent); border-color: var(--accent); }
     .tag {
       font-size: 12px;
       background: var(--tag);
@@ -117,18 +177,342 @@
       border-radius: 999px;
       padding: 2px 8px;
     }
-    .brief { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+    .brief {
+      color: var(--muted);
+      font-size: 14px;
+      margin: 0 0 12px;
+      cursor: help;
+      line-height: 1.45;
+    }
+    .brief.pending { font-style: italic; cursor: default; opacity: 0.85; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .card-msg { font-size: 12px; align-self: center; }
+    .card-msg.ok { color: var(--ok); }
+    .card-msg.err { color: var(--bad); }
+    .xlate-err {
+      color: var(--bad);
+      font-size: 12px;
+      margin: 8px 0 0;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .xlate-skip {
+      color: var(--warn);
+      font-size: 12px;
+      margin: 8px 0 0;
+      line-height: 1.4;
+    }
     #status { min-height: 1.3em; color: var(--muted); font-size: 13px; margin: 8px 0; }
+    #xlate-banner {
+      display: none;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 0 0 14px;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid #b6d4fe;
+      background: #eef5ff;
+      color: #0b3d7a;
+      font-size: 14px;
+      box-shadow: var(--shadow);
+    }
+    html[data-theme="dark"] #xlate-banner {
+      border-color: #2d6cb5;
+      background: #1a2a40;
+      color: #cfe3ff;
+    }
+    #xlate-banner.active { display: flex; }
+    #xlate-banner .pulse {
+      flex: 0 0 auto;
+      width: 10px;
+      height: 10px;
+      margin-top: 5px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(11, 99, 206, 0.45);
+      animation: xlate-pulse 1.4s ease-out infinite;
+    }
+    @keyframes xlate-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(11, 99, 206, 0.45); }
+      70% { box-shadow: 0 0 0 8px rgba(11, 99, 206, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(11, 99, 206, 0); }
+    }
+    #xlate-banner .banner-body { flex: 1 1 auto; min-width: 0; }
+    #xlate-banner .banner-title { font-weight: 600; margin: 0 0 2px; }
+    #xlate-banner .banner-detail {
+      margin: 0;
+      color: inherit;
+      opacity: 0.88;
+      font-size: 13px;
+      white-space: pre-line;
+    }
+    #xlate-banner .banner-meta {
+      flex: 0 0 auto;
+      font-size: 12px;
+      opacity: 0.75;
+      white-space: nowrap;
+      margin-top: 2px;
+    }
     #status.err { color: var(--bad); }
+    #status.ok { color: var(--ok); }
     .empty { color: var(--muted); padding: 24px 0; }
-    .nav a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .nav a, .hint-line a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    .hint-line { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+    .hint-line a { font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+    .pager {
+      display: none;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 14px;
+      padding: 8px 0;
+    }
+    .pager.visible { display: flex; }
+    .pager.bottom { margin: 16px 0 0; }
+    .pager-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .pager-info { color: var(--muted); font-size: 13px; }
+    .authors { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: -6px 0 14px;
+    }
+    .chips button {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 999px;
+    }
+    .chips button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    button.zh-pdf-only.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    #import-open { font-size: 13px; }
+    dialog#import-dialog {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      padding: 18px 18px 14px;
+      width: min(480px, calc(100vw - 32px));
+    }
+    dialog#import-dialog::backdrop { background: rgba(16, 24, 40, 0.35); }
+    dialog#import-dialog h2 { margin: 0 0 6px; }
+    dialog#import-dialog .lead { margin: 0 0 14px; font-size: 13px; }
+    dialog#import-dialog label {
+      display: block;
+      font-size: 13px;
+      margin: 0 0 4px;
+      color: var(--muted);
+    }
+    dialog#import-dialog input, dialog#import-dialog select {
+      width: 100%;
+      margin: 0 0 12px;
+    }
+    dialog#import-dialog input[type="file"] {
+      font-size: 13px;
+      padding: 6px 0;
+    }
+    dialog#import-dialog .import-hint {
+      margin: -6px 0 12px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    dialog#import-dialog .import-or {
+      margin: -4px 0 10px;
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+    dialog#import-dialog .dlg-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    #import-status { min-height: 1.2em; font-size: 13px; margin: 0 0 8px; }
+    #import-status.err { color: var(--bad); }
+    #import-status.ok { color: var(--ok); }
+    button.review-btn.busy { opacity: 0.7; cursor: wait; }
+    .review-stars-inline {
+      color: #c48a00;
+      font-size: 12px;
+      margin-left: 4px;
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px 24px;
+    }
+    .modal[hidden] { display: none !important; }
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(16, 24, 40, 0.42);
+    }
+    html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.58); }
+    .modal-panel {
+      position: relative;
+      z-index: 1;
+      width: min(740px, 100%);
+      max-height: calc(100vh - 64px);
+      overflow: auto;
+      background: var(--card);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: 0 16px 48px rgba(16, 24, 40, 0.2);
+      padding: 18px 22px 20px;
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .modal-head h2 {
+      font-size: 1.12rem;
+      margin: 0;
+      line-height: 1.35;
+    }
+    .modal-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 4px;
+    }
+    .modal-close {
+      flex: 0 0 auto;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .review-section { margin: 0 0 14px; }
+    .review-section h3 {
+      font-size: 0.95rem;
+      margin: 0 0 6px;
+    }
+    .review-section p {
+      margin: 0;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      color: var(--ink);
+    }
+    .review-rate {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      margin-top: 8px;
+    }
+    .review-rate-label { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+    .star-row { display: flex; gap: 2px; align-items: center; }
+    .star-btn {
+      background: none;
+      border: none;
+      padding: 0 3px;
+      font-size: 24px;
+      line-height: 1;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .star-btn.on { color: #e3a008; }
+    .star-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+    .review-rate.locked .star-btn { pointer-events: none; }
+    .review-rate-hint { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+    .review-avg { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+    .review-status { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+    .review-status.err { color: var(--bad); }
+    .review-status.busy { font-style: italic; }
+    .review-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      flex-wrap: wrap;
+    }
+    .review-toolbar button { font-size: 13px; }
+    .review-refs-status { font-size: 13px; color: var(--muted); margin: 0; }
+    .review-refs-status.ok { color: var(--ok); }
+    .review-refs-status.err { color: var(--bad); }
+    .review-refs-status.busy { font-style: italic; }
+    a.review-ref {
+      color: var(--accent);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
+    .review-refs-list {
+      margin: 0;
+      padding-left: 1.2em;
+      line-height: 1.55;
+    }
+    .review-refs-list li { margin: 0 0 6px; }
+    .review-ref-missing { color: var(--muted); font-size: 12px; }
+    .section-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 16px;
+    }
+    .section-tabs button {
+      border-radius: 999px;
+      padding: 7px 14px;
+      white-space: nowrap;
+    }
+    .section-tabs button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .date-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 12px;
+    }
+    .date-nav input[type="date"] { padding: 8px 10px; }
+    .date-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .date-chip {
+      font-size: 13px;
+      border-radius: 999px;
+      padding: 5px 10px;
+    }
+    .date-chip.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .date-chip .n { opacity: 0.75; margin-left: 4px; font-size: 12px; }
+    .daily-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+    .venue-trend-pending { color: var(--muted); font-size: 13px; }
+    .trend-list { margin: 0 0 0 18px; padding: 0; }
+    .trend-list li { margin: 0 0 6px; line-height: 1.5; }
   </style>
   <script>
   (function () {
-    var KEY = "rs_settings_lang";
+    var LANG_KEY = "rs_settings_lang";
+    var THEME_KEY = "rs_papers_theme";
     var lang = "";
-    try { lang = localStorage.getItem(KEY) || ""; } catch (e) {}
+    try { lang = localStorage.getItem(LANG_KEY) || ""; } catch (e) {}
     if (lang !== "zh" && lang !== "en") {
       var nav = String(navigator.language || navigator.userLanguage || "").toLowerCase();
       var acc = document.documentElement.getAttribute("data-accept-lang") || "";
@@ -136,80 +520,599 @@
     }
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
+    var theme = "light";
+    try { theme = localStorage.getItem(THEME_KEY) || "light"; } catch (e) {}
+    if (theme !== "dark") theme = "light";
+    document.documentElement.setAttribute("data-theme", theme);
   })();
   </script>
 </head>
 <body>
-<div class="top">
-  <div class="nav">
-    <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
-  </div>
-  <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
-    <button type="button" id="lang-zh" data-lang="zh">中文</button>
-    <button type="button" id="lang-en" data-lang="en">EN</button>
-  </div>
-</div>
 <main>
-  <h1 data-i18n="heading">Agent papers</h1>
-  <p class="lead" data-i18n="lead">Browse the local catalog and download already-cached PDFs.</p>
+  <div class="title-row">
+    <h1 data-i18n="heading">码卡龙论文精选</h1>
+    <div class="title-actions">
+      <div class="nav">
+        <a id="settings-link" href="/settings" data-i18n="settingsLink">Settings</a>
+        <button type="button" class="primary" id="import-open" data-i18n="importOpen">Import paper</button>
+      </div>
+      <div class="theme-switch" role="group" data-i18n-aria="themeLabel" aria-label="Theme">
+        <button type="button" id="theme-light" data-theme="light">Aa</button>
+        <button type="button" id="theme-dark" data-theme="dark">◐</button>
+      </div>
+      <div class="lang-switch" role="group" data-i18n-aria="langLabel" aria-label="Language">
+        <button type="button" id="lang-zh" data-lang="zh">中文</button>
+        <button type="button" id="lang-en" data-lang="en">EN</button>
+      </div>
+    </div>
+  </div>
+  <p class="lead" data-i18n="lead">Browse the local catalog, download cached PDFs, and queue Chinese translations.</p>
+
+  <p class="hint-line">
+    <span data-i18n="llmSettingsHint">Configure the PDF translation engine and Hub LLM in </span><a id="llm-settings-link" href="/settings" data-i18n="llmSettingsLink">Settings</a><span data-i18n="llmSettingsHintAfter">.</span>
+  </p>
+
+  <div class="section-tabs" role="tablist">
+    <button type="button" id="tab-catalog" class="active" data-section="catalog" data-i18n="tabCatalog">Selected papers</button>
+    <button type="button" id="tab-daily" data-section="daily" data-i18n="tabDaily">Hugging Face Daily Papers</button>
+    <button type="button" id="tab-ieee-sp" data-section="ieee-sp" title="IEEE S&P / Oakland" data-i18n="tabSP">IEEE S&P</button>
+    <button type="button" id="tab-acm-ccs" data-section="acm-ccs" title="ACM CCS" data-i18n="tabCCS">ACM CCS</button>
+    <button type="button" id="tab-usenix-security" data-section="usenix-security" title="USENIX Security" data-i18n="tabUSENIX">USENIX Security</button>
+    <button type="button" id="tab-ndss" data-section="ndss" title="NDSS" data-i18n="tabNDSS">NDSS</button>
+  </div>
+
+  <div id="daily-tools" hidden>
+    <div class="date-nav">
+      <button type="button" id="daily-prev" data-i18n="prevDay">Previous day</button>
+      <input id="daily-date" type="date" aria-label="Date">
+      <button type="button" id="daily-next" data-i18n="nextDay">Next day</button>
+      <div class="date-chips" id="daily-dates"></div>
+    </div>
+    <div class="daily-actions">
+      <button type="button" class="primary" id="trend-open" data-i18n="trendView">View trend summary</button>
+      <button type="button" id="trend-regen" hidden data-i18n="trendRegen">Regenerate trend</button>
+    </div>
+  </div>
+
+  <div id="venue-tools" hidden>
+    <div class="date-nav">
+      <button type="button" id="venue-prev" data-i18n="prevYear">Previous year</button>
+      <div class="date-chips" id="venue-years"></div>
+      <button type="button" id="venue-next" data-i18n="nextYear">Next year</button>
+    </div>
+    <div class="daily-actions">
+      <button type="button" class="primary" id="venue-trend-open" data-i18n="securityTrend">Research trends</button>
+      <button type="button" id="venue-trend-view" hidden data-i18n="securityTrendView">View trend summary</button>
+      <button type="button" id="venue-trend-regen" hidden data-i18n="securityTrendRegen">Regenerate</button>
+      <span id="venue-trend-pending" class="venue-trend-pending" hidden data-i18n="securityTrendPending">Trend summary is being generated. Please refresh later.</span>
+    </div>
+  </div>
 
   <div class="toolbar">
-    <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, arXiv id…" autocomplete="off">
+    <input id="q" type="search" data-i18n-placeholder="searchPh" placeholder="Search title, authors, abstract, tags…" autocomplete="off">
     <select id="tag">
       <option value="" data-i18n="tagAll">All tags</option>
     </select>
+    <select id="sort" aria-label="Sort">
+      <option value="date-desc" data-i18n="sortNewest">Newest first</option>
+      <option value="date-asc" data-i18n="sortOldest">Oldest first</option>
+    </select>
     <button type="button" class="primary" id="apply" data-i18n="apply">Filter</button>
+    <button type="button" id="zh-pdf-only" class="zh-pdf-only" data-i18n="zhPdfOnly" data-i18n-aria="zhPdfOnlyAria" aria-pressed="false">Chinese PDF</button>
+    <button type="button" id="xlate-pending" data-i18n="xlatePending" hidden>Translate pending</button>
+    <button type="button" id="recover-all" hidden data-i18n="recoverAll">Recover missing PDFs</button>
   </div>
+  <div class="chips" id="tag-chips" role="group" data-i18n-aria="tagChips" aria-label="Tags"></div>
   <p class="meta" id="meta"></p>
+  <div id="xlate-banner" role="status" aria-live="polite" hidden>
+    <span class="pulse" aria-hidden="true"></span>
+    <div class="banner-body">
+      <p class="banner-title" id="xlate-banner-title"></p>
+      <p class="banner-detail" id="xlate-banner-detail"></p>
+    </div>
+    <span class="banner-meta" id="xlate-banner-meta"></span>
+  </div>
   <p id="status"></p>
+  <div class="pager" id="pager-top">
+    <span class="pager-info" id="pager-top-info"></span>
+    <div class="pager-controls">
+      <button type="button" class="pager-prev" data-i18n="prev">Previous</button>
+      <button type="button" class="pager-next" data-i18n="next">Next</button>
+    </div>
+  </div>
   <div id="list"></div>
+  <div class="pager bottom" id="pager-bottom">
+    <span class="pager-info" id="pager-bottom-info"></span>
+    <div class="pager-controls">
+      <button type="button" class="pager-prev" data-i18n="prev">Previous</button>
+      <button type="button" class="pager-next" data-i18n="next">Next</button>
+    </div>
+  </div>
+  <div id="review-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="review-backdrop" data-review-close="1"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="review-title">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" data-i18n="reviewKicker">Critical reading</p>
+          <h2 id="review-title"></h2>
+        </div>
+        <button type="button" class="modal-close" id="review-close" data-review-close="1" data-i18n-aria="reviewClose" aria-label="Close">×</button>
+      </div>
+      <p id="review-status" class="review-status" hidden></p>
+      <div class="review-toolbar" id="review-toolbar" hidden>
+        <button type="button" id="review-retry" hidden data-i18n="reviewRetry">Generate review</button>
+        <button type="button" id="review-update-refs" data-i18n="reviewUpdateRefs" disabled>Update references</button>
+        <p id="review-refs-status" class="review-refs-status" hidden></p>
+      </div>
+      <div id="review-body" hidden>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec1">方法原理与创新</h3>
+          <p id="rev-method-principles"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec2">方法本质</h3>
+          <p id="rev-method-essence"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec3">实验完整性</h3>
+          <p id="rev-experiment"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="reviewSec4">论文质量总评</h3>
+          <p id="rev-quality"></p>
+        </section>
+        <section class="review-section" id="review-refs-section" hidden>
+          <h3 data-i18n="reviewRefs">Related papers</h3>
+          <ul id="review-refs-list" class="review-refs-list"></ul>
+        </section>
+      </div>
+      <div class="review-rate" id="review-rate" hidden>
+        <p class="review-rate-label" data-i18n="reviewRate">Rate this review</p>
+        <div class="star-row" id="review-stars" role="radiogroup" data-i18n-aria="reviewRate" aria-label="Rate this review"></div>
+        <p class="review-avg" id="review-avg"></p>
+        <p class="review-rate-hint" id="review-rate-hint" data-i18n="reviewRateLocked" hidden>Rating unlocks after the review is generated.</p>
+      </div>
+    </div>
+  </div>
+  <div id="trend-modal" class="modal" hidden>
+    <div class="modal-backdrop" id="trend-backdrop" data-trend-close="1"></div>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="trend-title">
+      <div class="modal-head">
+        <div>
+          <p class="modal-kicker" data-i18n="trendKicker">Daily tech-trend summary</p>
+          <h2 id="trend-title"></h2>
+        </div>
+        <button type="button" class="modal-close" id="trend-close" data-trend-close="1" data-i18n-aria="trendClose" aria-label="Close">×</button>
+      </div>
+      <p id="trend-status" class="review-status" hidden></p>
+      <div id="trend-body" hidden>
+        <section class="review-section">
+          <h3 data-i18n="trendOverview">Overview</h3>
+          <p id="trend-overview"></p>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendThemes">Themes</h3>
+          <ul class="trend-list" id="trend-themes"></ul>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendHighlights">Highlights</h3>
+          <ul class="trend-list" id="trend-highlights"></ul>
+        </section>
+        <section class="review-section">
+          <h3 data-i18n="trendOutlook">Outlook</h3>
+          <p id="trend-outlook"></p>
+        </section>
+      </div>
+    </div>
+  </div>
 </main>
+<dialog id="import-dialog" aria-labelledby="import-title">
+  <h2 id="import-title" data-i18n="importTitle">Import paper</h2>
+  <p class="lead" data-i18n="importLead">Provide an arXiv id/URL or a PDF file, and choose a required category.</p>
+  <label for="import-url" data-i18n="importURL">arXiv URL / id or PDF URL</label>
+  <input id="import-url" type="text" data-i18n-placeholder="importURLPh" placeholder="2504.01990 or https://arxiv.org/abs/…" autocomplete="off">
+  <p class="import-or" data-i18n="importOr">or</p>
+  <label for="import-pdf" data-i18n="importPDF">Upload PDF</label>
+  <input id="import-pdf" type="file" accept="application/pdf,.pdf">
+  <p class="import-hint" data-i18n="importSourceHint">Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.</p>
+  <label for="import-tag" data-i18n="importTag">Category</label>
+  <select id="import-tag" required></select>
+  <p id="import-status"></p>
+  <div class="dlg-actions">
+    <button type="button" id="import-cancel" data-i18n="importCancel">Cancel</button>
+    <button type="button" class="primary" id="import-submit" data-i18n="importSubmit">Import</button>
+  </div>
+</dialog>
 <script>
 (function () {
-  const KEY = "rs_settings_lang";
+  const LANG_KEY = "rs_settings_lang";
+  const THEME_KEY = "rs_papers_theme";
+  const PAGE_SIZE = 25;
+  const TRANSLATE_MAX_PAGES = 100;
+  const TRANSLATE_FAST_MAX_PAGES = 50;
   const I18N = {
     en: {
       langLabel: "Language",
-      heading: "Agent papers",
-      lead: "Browse the local catalog and download already-cached PDFs.",
+      themeLabel: "Theme",
+      heading: "MaClaw Selected papers",
+      tabCatalog: "Selected papers",
+      tabDaily: "Hugging Face Daily Papers",
+      tabSP: "IEEE S&P",
+      tabCCS: "ACM CCS",
+      tabUSENIX: "USENIX Security",
+      tabNDSS: "NDSS",
+      prevDay: "Previous day",
+      nextDay: "Next day",
+      prevYear: "Previous year",
+      nextYear: "Next year",
+      venueMeta: "{count} papers · {venue} · {year}",
+      venueEmpty: "No papers for this conference year.",
+      securityTrend: "Research trends",
+      securityTrendView: "View trend summary",
+      securityTrendRegen: "Regenerate",
+      securityTrendPending: "Trend summary is being generated. Please refresh later.",
+      securityTrendKicker: "Venue research-trend summary",
+      dailyMeta: "{count} papers · {date} · fetched {when}",
+      dailyLoadErr: "Failed to load Hugging Face Daily Papers",
+      trendView: "View trend summary",
+      trendGen: "Generate trend summary",
+      trendRegen: "Regenerate trend",
+      trendKicker: "Daily tech-trend summary",
+      trendOverview: "Overview",
+      trendThemes: "Themes",
+      trendHighlights: "Highlights",
+      trendOutlook: "Outlook",
+      trendClose: "Close",
+      trendGenerating: "Generating trend summary…",
+      trendGenFail: "Could not generate trend summary.",
+      trendLoadFail: "Failed to load trend summary.",
+      trendNeedLLM: "Configure the PDF translation engine and Hub LLM in Settings first.",
+      trendEmpty: "No trend summary yet — generating…",
+      trendNoPapers: "No papers for this date.",
+      lead: "Browse the local catalog, download cached PDFs, and queue Chinese translations.",
       settingsLink: "Settings",
-      searchPh: "Search title, authors, arXiv id…",
-      tagAll: "All tags",
+      searchPh: "Search title, authors, abstract, tags…",
+      tagAll: "All",
       apply: "Filter",
-      meta: "{shown} shown · {total} in catalog · generated {when}",
+      zhPdfOnly: "Chinese PDF",
+      zhPdfOnlyAria: "Show only papers with a Chinese PDF",
+      sortNewest: "Newest first",
+      sortOldest: "Oldest first",
+      meta: "{matched} match · {total} in catalog · {zh} with Chinese PDF · page {page}/{pages} · {visits} visits · generated {when}",
+      pageInfo: "Showing {from}–{to} of {matched}",
+      prev: "Previous",
+      next: "Next",
       empty: "No papers match.",
       download: "Download PDF",
       view: "Open PDF",
-      arxiv: "arXiv",
+      source: "Source",
       noLocal: "No local PDF",
       loadErr: "Failed to load catalog",
-      unauthorized: "Unauthorized — sign in via Settings first."
+      loadingCatalog: "Loading catalog…",
+      updatingCatalog: "Updating catalog…",
+      catalogUnavailable: "Catalog snapshot is unavailable.",
+      recover: "Recover PDF",
+      recoverBusy: "Recovering…",
+      recoverOk: "PDF recovered.",
+      recoverFail: "Recover failed: {error}",
+      recoverAll: "Recover missing PDFs",
+      recoverAllBusy: "Recovering missing PDFs…",
+      recoverAllOk: "Recovered {n} PDF(s).",
+      recoverAllPartial: "Recovered {ok}, failed {fail}.",
+      recoverAllNone: "No missing local PDFs to recover.",
+      unauthorized: "Unauthorized — sign in via Settings first.",
+      llmSettingsHint: "Configure the PDF translation engine and Hub LLM in ",
+      llmSettingsLink: "Settings",
+      llmSettingsHintAfter: ".",
+      zh: "中文版",
+      dual: "中英对照",
+      queued: "Queued",
+      running: "Translating…",
+      failed: "Failed",
+      skipped: "Skipped",
+      reXlate: "Re-translate",
+      xlateBusy: "Translation already in progress",
+      xlateErrPrefix: "Error: ",
+      xlate: "Translate",
+      xlatePriority: "Prioritize",
+      xlatePending: "Translate pending",
+      prioritizedOk: "Moved to the front of the queue.",
+      pages: "{n} pages",
+      xlateSkipPages: "Over 100 pages — skipped translation",
+      xlateSlowLane: "Slow translation queue",
+      xlateBannerLanes: "fast {fast} / slow {slow}",
+      queuedOk: "Queued {n} paper(s).",
+      queueFail: "Could not queue translation.",
+      xlateBanner: "Translation in progress: {queued} queued / {running} translating",
+      xlateBannerTitle: "Currently translating",
+      xlatePolling: "Auto-refreshing…",
+      absTranslating: "Translating abstract…",
+      importOpen: "Import paper",
+      importTitle: "Import paper",
+      importLead: "Provide an arXiv id/URL or a PDF file, and choose a required category.",
+      importURL: "arXiv URL / id or PDF URL",
+      importURLPh: "2504.01990 or https://arxiv.org/abs/…",
+      importOr: "or",
+      importPDF: "Upload PDF",
+      importSourceHint: "Use a URL/id or a PDF. If both are set, the uploaded file is used. A category is required for every import.",
+      importTag: "Category",
+      importCancel: "Cancel",
+      importSubmit: "Import",
+      importWorking: "Importing…",
+      importChecking: "Checking that this looks like an academic paper…",
+      importUploading: "Uploading…",
+      importOk: "Imported “{title}”.",
+      importFail: "Could not import that paper.",
+      importNeedURL: "Enter an arXiv id, arXiv URL, or PDF URL.",
+      importNeedSource: "Enter a URL/id or choose a PDF file.",
+      importNeedTag: "Choose a category.",
+      importErr_not_a_paper: "This PDF does not look like a traditional academic paper (need abstract / introduction / references).",
+      importErr_not_pdf: "That file is not a PDF.",
+      importErr_too_large: "That PDF is too large.",
+      importErr_too_small: "That file is too small to be a paper PDF.",
+      importErr_scanned: "That PDF looks like a scan with no extractable paper text.",
+      importErr_tag_required: "Choose a category.",
+      importErr_need_input: "Enter a URL/id or choose a PDF file.",
+      tagChips: "Tags",
+      reviewView: "View review",
+      reviewGen: "Generate review",
+      reviewGenerating: "Generating review…",
+      reviewKicker: "Critical reading",
+      reviewSec1: "Method principles & innovation",
+      reviewSec2: "Essence of the approach",
+      reviewSec3: "Experimental completeness",
+      reviewSec4: "Overall quality",
+      reviewRate: "Rate this review",
+      reviewAvg: "Average {avg} · {n} ratings",
+      reviewNoRatings: "No ratings yet",
+      reviewClose: "Close",
+      reviewGenFail: "Could not generate review.",
+      reviewRetry: "Retry review",
+      reviewTruncated: "The model response was cut off. Please retry.",
+      reviewEmpty: "The model returned an empty review. Please retry.",
+      reviewRateFail: "Could not save rating.",
+      reviewRateLocked: "Rating unlocks after the review is generated.",
+      reviewNotReady: "Review is not ready yet.",
+      reviewNeedLLM: "Configure the PDF translation engine and Hub LLM in Settings first.",
+      reviewLoadFail: "Failed to load review.",
+      reviewUpdateRefs: "Update references",
+      reviewRefs: "Related papers",
+      reviewRefsUpdating: "Updating references…",
+      reviewRefsUpdated: "Updated {n} reference(s).",
+      reviewRefsFail: "Could not update references.",
+      reviewRefNoReview: "No review yet",
+      reviewRefOpen: "Open review"
     },
     zh: {
       langLabel: "语言",
-      heading: "Agent 论文库",
-      lead: "浏览本地目录并下载已缓存的 PDF（不重新从 ArXiv 拉取）。",
+      themeLabel: "主题",
+      heading: "码卡龙论文精选",
+      tabCatalog: "精选论文",
+      tabDaily: "Hugging Face 每日论文",
+      tabSP: "IEEE S&P",
+      tabCCS: "ACM CCS",
+      tabUSENIX: "USENIX Security",
+      tabNDSS: "NDSS",
+      prevDay: "上一天",
+      nextDay: "下一天",
+      prevYear: "上一年",
+      nextYear: "下一年",
+      venueMeta: "{count} 篇 · {venue} · {year}",
+      venueEmpty: "该会议该年没有论文。",
+      securityTrend: "研究趋势",
+      securityTrendView: "查看趋势综述",
+      securityTrendRegen: "重新生成",
+      securityTrendPending: "趋势综述生成中，请稍后刷新",
+      securityTrendKicker: "会议研究趋势综述",
+      dailyMeta: "{count} 篇 · {date} · 获取于 {when}",
+      dailyLoadErr: "加载 Hugging Face 每日论文失败",
+      trendView: "查看趋势综述",
+      trendGen: "生成趋势综述",
+      trendRegen: "重新生成综述",
+      trendKicker: "每日技术趋势综述",
+      trendOverview: "总体图景",
+      trendThemes: "主题聚类",
+      trendHighlights: "要点",
+      trendOutlook: "展望",
+      trendClose: "关闭",
+      trendGenerating: "正在生成趋势综述…",
+      trendGenFail: "无法生成趋势综述。",
+      trendLoadFail: "加载趋势综述失败。",
+      trendNeedLLM: "请先在设置中配置 PDF 翻译引擎与 Hub LLM。",
+      trendEmpty: "尚未生成趋势综述，正在生成…",
+      trendNoPapers: "这一天没有论文。",
+      lead: "浏览本地目录、下载已缓存 PDF，并排队生成中文翻译。",
       settingsLink: "设置",
-      searchPh: "搜索标题、作者、arXiv 编号…",
-      tagAll: "全部标签",
+      searchPh: "搜索标题、作者、摘要、标签…",
+      tagAll: "全部",
       apply: "筛选",
-      meta: "显示 {shown} 篇 · 目录共 {total} 篇 · 生成于 {when}",
+      zhPdfOnly: "有中文 PDF",
+      zhPdfOnlyAria: "仅显示有中文 PDF",
+      sortNewest: "最新优先",
+      sortOldest: "最早优先",
+      meta: "匹配 {matched} 篇 · 目录共 {total} 篇 · 已有中文译本 {zh} 篇 · 第 {page}/{pages} 页 · 访问 {visits} · 生成于 {when}",
+      pageInfo: "显示第 {from}–{to} 篇，共 {matched} 篇",
+      prev: "上一页",
+      next: "下一页",
       empty: "没有匹配的论文。",
       download: "下载 PDF",
       view: "打开 PDF",
-      arxiv: "arXiv",
+      source: "来源",
       noLocal: "无本地 PDF",
       loadErr: "加载目录失败",
-      unauthorized: "未授权 — 请先在设置页登录。"
+      loadingCatalog: "正在加载目录…",
+      updatingCatalog: "正在更新目录…",
+      catalogUnavailable: "目录快照不可用。",
+      recover: "恢复 PDF",
+      recoverBusy: "正在恢复…",
+      recoverOk: "PDF 已恢复。",
+      recoverFail: "恢复失败：{error}",
+      recoverAll: "恢复缺失 PDF",
+      recoverAllBusy: "正在恢复缺失 PDF…",
+      recoverAllOk: "已恢复 {n} 篇 PDF。",
+      recoverAllPartial: "恢复成功 {ok} 篇，失败 {fail} 篇。",
+      recoverAllNone: "没有可恢复的缺失 PDF。",
+      unauthorized: "未授权 — 请先在设置页登录。",
+      llmSettingsHint: "在",
+      llmSettingsLink: "设置",
+      llmSettingsHintAfter: "中配置 PDF 翻译引擎与 Hub LLM",
+      zh: "中文版",
+      dual: "中英对照",
+      queued: "排队中",
+      running: "翻译中…",
+      failed: "失败",
+      skipped: "已跳过",
+      reXlate: "再次翻译",
+      xlateBusy: "正在翻译中",
+      xlateErrPrefix: "错误：",
+      xlate: "翻译",
+      xlatePriority: "优先",
+      xlatePending: "翻译待处理",
+      prioritizedOk: "已移到队列最近位置。",
+      pages: "{n} 页",
+      xlateSkipPages: "超过 100 页，不翻译",
+      xlateSlowLane: "慢速翻译队列",
+      xlateBannerLanes: "快速 {fast} / 慢速 {slow}",
+      queuedOk: "已排队 {n} 篇。",
+      queueFail: "无法加入翻译队列。",
+      xlateBanner: "翻译进行中：{queued} 排队 / {running} 翻译中",
+      xlateBannerTitle: "正在翻译",
+      xlatePolling: "自动刷新中…",
+      absTranslating: "摘要翻译中…",
+      importOpen: "导入论文",
+      importTitle: "导入论文",
+      importLead: "提供 arXiv 编号/链接或上传 PDF，并选择必填分类。",
+      importURL: "arXiv 链接 / 编号或 PDF 链接",
+      importURLPh: "2504.01990 或 https://arxiv.org/abs/…",
+      importOr: "或",
+      importPDF: "上传 PDF",
+      importSourceHint: "填写链接/编号或上传 PDF。两者都填时使用上传的文件。任何导入都必须选择分类。",
+      importTag: "分类",
+      importCancel: "取消",
+      importSubmit: "导入",
+      importWorking: "正在导入…",
+      importChecking: "正在检查是否为学术论文…",
+      importUploading: "正在上传…",
+      importOk: "已导入「{title}」。",
+      importFail: "无法导入该论文。",
+      importNeedURL: "请输入 arXiv 编号、arXiv 链接或 PDF 链接。",
+      importNeedSource: "请输入链接/编号或选择 PDF 文件。",
+      importNeedTag: "请选择分类。",
+      importErr_not_a_paper: "该 PDF 不像传统学术论文（需含摘要 / 引言 / 参考文献）。",
+      importErr_not_pdf: "该文件不是 PDF。",
+      importErr_too_large: "该 PDF 体积过大。",
+      importErr_too_small: "该文件太小，不像论文 PDF。",
+      importErr_scanned: "该 PDF 像扫描件，无法提取论文正文。",
+      importErr_tag_required: "请选择分类。",
+      importErr_need_input: "请输入链接/编号或选择 PDF 文件。",
+      tagChips: "标签",
+      reviewView: "查看解读",
+      reviewGen: "生成解读",
+      reviewGenerating: "生成解读中…",
+      reviewKicker: "论文解读",
+      reviewSec1: "方法原理与创新",
+      reviewSec2: "方法本质",
+      reviewSec3: "实验完整性",
+      reviewSec4: "论文质量总评",
+      reviewRate: "为解读评分",
+      reviewAvg: "平均 {avg} 分 · {n} 人评分",
+      reviewNoRatings: "暂无评分",
+      reviewClose: "关闭",
+      reviewGenFail: "无法生成解读。",
+      reviewRetry: "重新生成",
+      reviewTruncated: "模型输出被截断，请重试。",
+      reviewEmpty: "模型返回了空解读，请重试。",
+      reviewRateFail: "无法保存评分。",
+      reviewRateLocked: "解读生成完成后即可评分。",
+      reviewNotReady: "解读尚未生成完成。",
+      reviewNeedLLM: "请先在设置中配置 PDF 翻译引擎与 Hub LLM。",
+      reviewLoadFail: "加载解读失败。",
+      reviewUpdateRefs: "更新引用",
+      reviewRefs: "相关论文",
+      reviewRefsUpdating: "正在更新引用…",
+      reviewRefsUpdated: "已更新 {n} 条引用。",
+      reviewRefsFail: "无法更新引用。",
+      reviewRefNoReview: "尚无解读",
+      reviewRefOpen: "查看解读"
     }
   };
+
+  const VENUE_SLUGS = ["ieee-sp", "acm-ccs", "usenix-security", "ndss"];
+  const VENUE_LABELS = {
+    "ieee-sp": "IEEE S&P / Oakland",
+    "acm-ccs": "ACM CCS",
+    "usenix-security": "USENIX Security",
+    "ndss": "NDSS"
+  };
+  const VENUE_ALIASES = {
+    "ieee s and p oakland": "ieee-sp",
+    "ieee s and p": "ieee-sp",
+    "ieee sp oakland": "ieee-sp",
+    "ieee sp": "ieee-sp",
+    "s and p oakland": "ieee-sp",
+    "s and p": "ieee-sp",
+    "oakland": "ieee-sp",
+    "sp": "ieee-sp",
+    "ieee symposium on security and privacy": "ieee-sp",
+    "ieee security and privacy": "ieee-sp",
+    "acm ccs": "acm-ccs",
+    "ccs": "acm-ccs",
+    "acm conference on computer and communications security": "acm-ccs",
+    "computer and communications security": "acm-ccs",
+    "usenix security": "usenix-security",
+    "usenix sec": "usenix-security",
+    "usenix": "usenix-security",
+    "usenix security symposium": "usenix-security",
+    "ndss": "ndss",
+    "network and distributed system security": "ndss",
+    "network and distributed systems security": "ndss"
+  };
+  const TAG_KEYS = [
+    "self-evolution", "security", "security-top", "both", "llm-iot", "survey",
+    "llm-training", "agent-tools-memory", "hf-daily", "other"
+  ];
+  const TAG_LABELS = {
+    en: {
+      "self-evolution": "Agent self-evolution",
+      "security": "Agent security",
+      "security-top": "Security top venues",
+      "both": "Secure self-evolution",
+      "llm-iot": "LLM-based IoT",
+      "survey": "Survey",
+      "llm-training": "LLM training",
+      "agent-tools-memory": "Agent tools & memory",
+      "llm-quantum": "LLM + Quantum",
+      "hf-daily": "HF Daily",
+      "other": "Other"
+    },
+    zh: {
+      "self-evolution": "agent自进化",
+      "security": "agent安全",
+      "security-top": "安全顶会",
+      "both": "agent安全自进化",
+      "llm-iot": "LLM based 物联网",
+      "survey": "综述",
+      "llm-training": "LLM 训练",
+      "agent-tools-memory": "agent工具与记忆",
+      "llm-quantum": "大语言模型+量子",
+      "hf-daily": "HF 每日论文",
+      "other": "其它"
+    }
+  };
+  function tagLabel(key) {
+    const table = TAG_LABELS[currentLang()] || TAG_LABELS.en;
+    return table[key] || key;
+  }
 
   function currentLang() {
     return document.documentElement.getAttribute("data-lang") === "zh" ? "zh" : "en";
   }
   function t(k) {
     const lang = currentLang();
-    return (I18N[lang] && I18N[lang][k]) || (I18N.en[k] || k);
+    const table = I18N[lang] || I18N.en;
+    if (Object.prototype.hasOwnProperty.call(table, k)) return table[k];
+    if (Object.prototype.hasOwnProperty.call(I18N.en, k)) return I18N.en[k];
+    return k;
   }
   function applyI18n() {
     const lang = currentLang();
@@ -225,18 +1128,53 @@
       const k = el.getAttribute("data-i18n-aria");
       if (k) el.setAttribute("aria-label", t(k));
     });
+    // Re-apply sort option labels (select options use data-i18n).
+    const sort = document.getElementById("sort");
+    if (sort) {
+      Array.prototype.forEach.call(sort.options, function (opt) {
+        const k = opt.getAttribute("data-i18n");
+        if (k) opt.textContent = t(k);
+      });
+    }
+    const tagSel = document.getElementById("tag");
+    if (tagSel) {
+      Array.prototype.forEach.call(tagSel.options, function (opt) {
+        if (!opt.value) opt.textContent = t("tagAll");
+        else opt.textContent = tagLabel(opt.value);
+      });
+    }
+    const importTag = document.getElementById("import-tag");
+    if (importTag) {
+      Array.prototype.forEach.call(importTag.options, function (opt) {
+        if (!opt.value) opt.textContent = t("importTag");
+        else opt.textContent = tagLabel(opt.value);
+      });
+    }
+    renderTagChips();
     document.getElementById("lang-zh").classList.toggle("active", lang === "zh");
     document.getElementById("lang-en").classList.toggle("active", lang === "en");
+    const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    document.getElementById("theme-light").classList.toggle("active", theme === "light");
+    document.getElementById("theme-dark").classList.toggle("active", theme === "dark");
     document.documentElement.setAttribute("data-i18n-ready", "1");
+    syncZhPDFToggle();
+    document.title = currentSection === "daily" ? t("tabDaily") : (currentSection === "venue" ? venueLabel(currentVenue) : t("heading"));
+    if (currentSection === "daily") renderDateChips();
+    if (currentSection === "venue") renderVenueYears();
   }
   function setLang(lang) {
     if (lang !== "zh" && lang !== "en") lang = "en";
-    try { localStorage.setItem(KEY, lang); } catch (e) {}
+    try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
     document.documentElement.setAttribute("data-lang", lang);
     applyI18n();
-    renderMeta();
-    renderList();
+    renderAll();
+  }
+  function setTheme(theme) {
+    if (theme !== "dark") theme = "light";
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+    document.documentElement.setAttribute("data-theme", theme);
+    applyI18n();
   }
 
   function appPrefix() {
@@ -250,34 +1188,85 @@
     return "";
   }
   const prefix = appPrefix();
-  document.getElementById("settings-link").href = prefix + "/settings";
+  const urlToken = new URLSearchParams(location.search).get("token") || "";
+  document.getElementById("settings-link").href = withToken(prefix + "/settings");
+  document.getElementById("llm-settings-link").href = withToken(prefix + "/settings");
 
-  function apiURL(q, tag) {
-    let u = prefix + "/papers/api";
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (tag) params.set("tag", tag);
-    const s = params.toString();
-    return s ? u + "?" + s : u;
+  function withToken(u) {
+    if (!urlToken) return u;
+    return u + (u.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(urlToken);
+  }
+  function pageToken() { return urlToken; }
+  function authHeaders(json) {
+    const h = {};
+    if (json) h["Content-Type"] = "application/json";
+    if (urlToken) h["Authorization"] = "Bearer " + urlToken;
+    return h;
+  }
+  function apiURL() {
+    return prefix + "/papers/api";
+  }
+  function catalogURL(offset, limit) {
+    let u = prefix + "/papers/api/catalog";
+    if (typeof limit === "number" && limit > 0) {
+      u += "?offset=" + encodeURIComponent(String(offset || 0)) + "&limit=" + encodeURIComponent(String(limit));
+    }
+    return u;
+  }
+  function progressURL() {
+    return prefix + "/papers/api/progress";
   }
   function pdfURL(localPath, download) {
     let u = prefix + localPath;
     if (download) u += (u.indexOf("?") >= 0 ? "&" : "?") + "download=1";
-    return u;
+    return withToken(u);
+  }
+  function recoverURL() {
+    return withToken(prefix + "/papers/pdf/recover");
   }
 
-  let lastCatalog = { count: 0, papers: [], generated_at: "" };
-  let lastShown = 0;
-
-  function renderMeta() {
-    const when = lastCatalog.generated_at || "—";
-    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : (lastCatalog.papers || []).length;
-    const text = t("meta")
-      .replace("{shown}", String(lastShown))
-      .replace("{total}", String(total))
-      .replace("{when}", when);
-    document.getElementById("meta").innerHTML = text;
-  }
+  let lastCatalog = { count: 0, papers: [], generated_at: "", translate_progress: null, can_manage: false };
+  let lastDaily = { ok: true, date: "", count: 0, papers: [], fetched_at: "", has_trend: false };
+  let canManage = false;
+  const cardState = {};
+  let recoverAllBusy = false;
+  let catalogLoaded = false;
+  let snapshotETag = "";
+  let catalogFetch = null;
+  let currentSection = "catalog";
+  let currentVenue = "";
+  let venueYear = 0;
+  let venueYears = [];
+  let zhPDFOnly = false;
+  let venueHasTrend = false;
+  try {
+    const boot = new URLSearchParams(location.search);
+    const bootVenue = (boot.get("venue") || "").trim();
+    const bootYear = Number(boot.get("year") || 0);
+    if (VENUE_SLUGS.indexOf(bootVenue) >= 0) {
+      currentSection = "venue";
+      currentVenue = bootVenue;
+      if (bootYear > 0) venueYear = bootYear;
+    }
+    zhPDFOnly = zhPDFQueryOn(boot.get("zh_pdf"));
+  } catch (e) {}
+  let dailyDates = [];
+  let dailyDate = "";
+  const CATALOG_CACHE_KEY = "rs_papers_catalog_v2";
+  const CATALOG_CACHE_VER = 2;
+  const DAILY_CACHE_KEY = "rs_papers_daily_v1";
+  let lastAbsPending = -1;
+  let filteredPapers = [];
+  let pageIndex = 1; // 1-based
+  let pollTimer = 0;
+  const POLL_ACTIVE_MS = 4000;
+  const POLL_IDLE_MS = 30000;
+  let idlePoll = false;
+  let searchTimer = 0;
+  const generating = {};
+  let openReview = null;
+  let hashReviewOpened = false;
+  let updatingRefs = false;
 
   function esc(s) {
     return String(s == null ? "" : s)
@@ -287,99 +1276,2124 @@
       .replace(/"/g, "&quot;");
   }
 
-  function renderList() {
-    const list = document.getElementById("list");
-    const papers = lastCatalog.papers || [];
-    lastShown = papers.length;
-    renderMeta();
-    if (!papers.length) {
-      list.innerHTML = '<p class="empty">' + esc(t("empty")) + "</p>";
+  function paperDateKey(p) {
+    const pub = String(p.published || "").trim();
+    if (pub) return pub;
+    const y = Number(p.year) || 0;
+    if (y > 0) return String(y).padStart(4, "0") + "-01-01T00:00:00Z";
+    return "";
+  }
+
+  function zhPDFQueryOn(v) {
+    v = String(v || "").trim().toLowerCase();
+    return v === "1" || v === "true" || v === "yes" || v === "on";
+  }
+  // Same signal as the 中文版 link: a non-empty zh_pdf path. Status "done"
+  // without that path, and queued/running jobs that have not written the file,
+  // do not count.
+  function paperHasZhPDF(p) {
+    return !!(p && String(p.zh_pdf || "").trim());
+  }
+  function syncZhPDFToggle() {
+    const btn = document.getElementById("zh-pdf-only");
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", zhPDFOnly ? "true" : "false");
+    btn.classList.toggle("active", !!zhPDFOnly);
+  }
+  function syncZhPDFURL() {
+    try {
+      const u = new URL(location.href);
+      if (zhPDFOnly) u.searchParams.set("zh_pdf", "1");
+      else u.searchParams.delete("zh_pdf");
+      const want = u.pathname + u.search + u.hash;
+      const cur = location.pathname + location.search + (location.hash || "");
+      if (want !== cur) history.replaceState(null, "", want);
+    } catch (e) {}
+  }
+
+  function matchesQuery(p, q) {
+    if (!q) return true;
+    const blob = [
+      p.title,
+      p.brief,
+      p.abstract,
+      p.abstract_zh,
+      p.arxiv_id,
+      p.id,
+      p.filename,
+      (p.authors || []).join(" "),
+      (p.topic_tags || []).join(" "),
+      (p.topic_tags || []).map(tagLabel).join(" "),
+      p.venue,
+      p.conference
+    ].join(" ").toLowerCase();
+    return blob.indexOf(q) >= 0;
+  }
+
+  function canonVenueKey(s) {
+    return String(s || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function stripYearTokens(s) {
+    return String(s || "").split(" ").filter(function (tok) {
+      return !/^(19|20)\d{2}$/.test(tok);
+    }).join(" ").trim();
+  }
+  function normalizeSecurityVenue(raw) {
+    const canon = stripYearTokens(canonVenueKey(raw));
+    if (!canon) return "";
+    if (VENUE_ALIASES[canon]) return VENUE_ALIASES[canon];
+    let best = "";
+    let bestLen = 0;
+    Object.keys(VENUE_ALIASES).forEach(function (alias) {
+      if (alias.length < 8) return;
+      if (canon.indexOf(alias) >= 0 && alias.length > bestLen) {
+        best = VENUE_ALIASES[alias];
+        bestLen = alias.length;
+      }
+    });
+    return best;
+  }
+  function paperVenueSlug(p) {
+    return normalizeSecurityVenue((p && (p.venue || p.conference)) || "");
+  }
+  function paperYearOf(p) {
+    const y = Number(p && p.year) || 0;
+    if (y > 0) return y;
+    const pub = String((p && p.published) || "").trim();
+    if (/^(19|20)\d{2}/.test(pub)) return Number(pub.slice(0, 4));
+    return 0;
+  }
+  function paperHasSecurityTop(p) {
+    return (p.topic_tags || []).some(function (tg) {
+      return String(tg).toLowerCase() === "security-top";
+    });
+  }
+  function venueLabel(slug) {
+    return VENUE_LABELS[slug] || slug;
+  }
+  function isVenueSlug(s) {
+    return VENUE_SLUGS.indexOf(s) >= 0;
+  }
+  function isSpecialSection() {
+    return currentSection === "daily" || currentSection === "venue";
+  }
+
+  function applyFilters(resetPage) {
+    const q = document.getElementById("q").value.trim().toLowerCase();
+    const tag = isSpecialSection() ? "" : document.getElementById("tag").value;
+    const sort = document.getElementById("sort").value || "date-desc";
+    let list = ((currentSection === "daily" ? lastDaily.papers : lastCatalog.papers) || []).slice();
+    if (currentSection === "venue" && currentVenue) {
+      list = list.filter(function (p) {
+        return paperHasSecurityTop(p) && paperVenueSlug(p) === currentVenue &&
+          (!venueYear || paperYearOf(p) === venueYear);
+      });
+    }
+    if (tag) {
+      const tagL = tag.toLowerCase();
+      list = list.filter(function (p) {
+        return (p.topic_tags || []).some(function (tg) {
+          return String(tg).toLowerCase() === tagL;
+        });
+      });
+    }
+    if (q) {
+      list = list.filter(function (p) { return matchesQuery(p, q); });
+    }
+    if (zhPDFOnly) {
+      list = list.filter(paperHasZhPDF);
+    }
+    list.sort(function (a, b) {
+      const ka = paperDateKey(a);
+      const kb = paperDateKey(b);
+      if (ka !== kb) {
+        if (sort === "date-asc") return ka < kb ? -1 : 1;
+        return ka > kb ? -1 : 1;
+      }
+      const ta = String(a.title || "").toLowerCase();
+      const tb = String(b.title || "").toLowerCase();
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    filteredPapers = list;
+    const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE) || 1);
+    if (resetPage) pageIndex = 1;
+    if (pageIndex > pages) pageIndex = pages;
+    if (pageIndex < 1) pageIndex = 1;
+  }
+
+  function progressFromCatalog(cat) {
+    const p = (cat && cat.translate_progress) || null;
+    if (p && typeof p === "object") {
+      const titles = Array.isArray(p.running_titles) ? p.running_titles.filter(Boolean) : [];
+      const ids = Array.isArray(p.running_ids) ? p.running_ids.filter(Boolean) : [];
+      if (!titles.length && p.running_title) titles.push(p.running_title);
+      if (!ids.length && p.running_id) ids.push(p.running_id);
+      return {
+        queued: Number(p.queued) || 0,
+        running: Number(p.running) || 0,
+        fast_queued: Number(p.fast_queued) || 0,
+        slow_queued: Number(p.slow_queued) || 0,
+        fast_running: Number(p.fast_running) || 0,
+        slow_running: Number(p.slow_running) || 0,
+        active: !!p.active,
+        running_id: p.running_id || ids[0] || "",
+        running_title: p.running_title || titles[0] || "",
+        running_ids: ids,
+        running_titles: titles
+      };
+    }
+    let queued = 0, running = 0;
+    const titles = [], ids = [];
+    ((cat && cat.papers) || []).forEach(function (paper) {
+      const st = paper.translate_status || "";
+      if (st === "queued") queued++;
+      if (st === "running") {
+        running++;
+        if (paper.id) ids.push(paper.id);
+        if (paper.title) titles.push(paper.title);
+        else if (paper.id) titles.push(paper.id);
+      }
+    });
+    return {
+      queued: queued,
+      running: running,
+      active: queued > 0 || running > 0,
+      running_id: ids[0] || "",
+      running_title: titles[0] || "",
+      running_ids: ids,
+      running_titles: titles
+    };
+  }
+
+  function formatRunningBannerList(items) {
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+      lines.push((i + 1) + ". " + items[i]);
+    }
+    return t("xlateBannerTitle") + "：\n" + lines.join("\n");
+  }
+
+  function renderTranslateBanner() {
+    const banner = document.getElementById("xlate-banner");
+    const titleEl = document.getElementById("xlate-banner-title");
+    const detailEl = document.getElementById("xlate-banner-detail");
+    const metaEl = document.getElementById("xlate-banner-meta");
+    const prog = progressFromCatalog(currentSection === "daily" ? lastDaily : lastCatalog);
+    if (!prog.active) {
+      banner.classList.remove("active");
+      banner.hidden = true;
+      titleEl.textContent = "";
+      detailEl.textContent = "";
+      metaEl.textContent = "";
+      return prog;
+    }
+    banner.hidden = false;
+    banner.classList.add("active");
+    let bannerTitle = t("xlateBanner")
+      .replace("{queued}", String(prog.queued))
+      .replace("{running}", String(prog.running));
+    const slowN = (Number(prog.slow_queued) || 0) + (Number(prog.slow_running) || 0);
+    const fastN = (Number(prog.fast_queued) || 0) + (Number(prog.fast_running) || 0);
+    if (slowN > 0 || (fastN > 0 && (prog.slow_queued || prog.slow_running))) {
+      bannerTitle += " · " + t("xlateBannerLanes")
+        .replace("{fast}", String(fastN))
+        .replace("{slow}", String(slowN));
+    }
+    titleEl.textContent = bannerTitle;
+    const titles = (prog.running_titles && prog.running_titles.length)
+      ? prog.running_titles
+      : (prog.running_title ? [prog.running_title] : []);
+    const ids = (prog.running_ids && prog.running_ids.length)
+      ? prog.running_ids
+      : (prog.running_id ? [prog.running_id] : []);
+    const runningList = titles.length ? titles : ids;
+    if (runningList.length) {
+      detailEl.textContent = formatRunningBannerList(runningList);
+      detailEl.hidden = false;
+    } else {
+      detailEl.textContent = "";
+      detailEl.hidden = true;
+    }
+    metaEl.textContent = t("xlatePolling");
+    return prog;
+  }
+
+  function syncPolling(active) {
+    if (active) {
+      if (pollTimer && !idlePoll) return;
+      if (pollTimer) clearInterval(pollTimer);
+      idlePoll = false;
+      pollTimer = setInterval(function () { loadProgress({ silent: true }); }, POLL_ACTIVE_MS);
       return;
     }
-    list.innerHTML = papers.map(function (p) {
-      const tags = (p.topic_tags || []).map(function (tg) {
-        return '<span class="tag">' + esc(tg) + "</span>";
-      }).join("");
-      const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
-      let actions = "";
-      if (p.has_local && p.local_pdf) {
-        actions += '<a class="btn primary" href="' + esc(pdfURL(p.local_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("view")) + "</a>";
-        actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
+    if (pollTimer && idlePoll) return;
+    if (pollTimer) clearInterval(pollTimer);
+    idlePoll = true;
+    pollTimer = setInterval(function () { loadProgress({ silent: true }); }, POLL_IDLE_MS);
+  }
+
+  function briefChars(text, max) {
+    const s = String(text == null ? "" : text).trim();
+    if (!s) return "";
+    const chars = Array.from(s);
+    if (chars.length <= max) return s;
+    let cut = chars.slice(0, max);
+    for (let i = cut.length - 1; i > Math.floor(max * 2 / 3); i--) {
+      const ch = cut[i];
+      if (" \t\n，。、,.;；".indexOf(ch) >= 0) {
+        cut = cut.slice(0, i);
+        break;
+      }
+    }
+    return cut.join("").trim() + "…";
+  }
+
+  function abstractDisplay(p) {
+    const lang = currentLang();
+    const enFull = String(p.abstract || "").trim();
+    const zhFull = String(p.abstract_zh || "").trim();
+    const briefFull = String(p.brief || "").trim();
+    if (lang === "zh") {
+      if (zhFull) {
+        return { text: briefChars(zhFull, 140), full: zhFull, pending: false };
+      }
+      if (enFull) {
+        // Show English briefly while ZH translation is filling in background.
+        return { text: t("absTranslating"), full: enFull, pending: true };
+      }
+      // Snapshot may omit long abstracts but still ship `brief`.
+      if (briefFull) {
+        return { text: briefChars(briefFull, 140), full: briefFull, pending: false };
+      }
+      return { text: "", full: "", pending: false };
+    }
+    const full = enFull || briefFull;
+    if (!full) return { text: "", full: "", pending: false };
+    return { text: briefChars(full, 280), full: full, pending: false };
+  }
+
+  function statusLabel(st) {
+    if (st === "queued") return t("queued");
+    if (st === "running") return t("running");
+    if (st === "failed") return t("failed");
+    if (st === "skipped") return t("skipped");
+    return "";
+  }
+
+  function paperTooManyPages(p) {
+    if (!p) return false;
+    if (p.translate_skip_reason === "too_many_pages") return true;
+    const n = Number(p.page_count) || 0;
+    return n > TRANSLATE_MAX_PAGES;
+  }
+
+  function paperSlowLane(p) {
+    if (!p || paperTooManyPages(p)) return false;
+    if (p.translate_lane === "slow") return true;
+    const n = Number(p.page_count) || 0;
+    return n > TRANSLATE_FAST_MAX_PAGES && n <= TRANSLATE_MAX_PAGES;
+  }
+
+  function countCatalogZhPDFs(papers) {
+    const list = papers || [];
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i] || {};
+      if (p.zh_pdf || p.translate_status === "done") n++;
+    }
+    return n;
+  }
+  function renderMeta() {
+    if (currentSection === "daily") {
+      document.getElementById("meta").textContent = t("dailyMeta")
+        .replace("{count}", String(typeof lastDaily.count === "number" ? lastDaily.count : (lastDaily.papers || []).length))
+        .replace("{date}", lastDaily.date || dailyDate || "—")
+        .replace("{when}", lastDaily.fetched_at || "—");
+      return;
+    }
+    if (currentSection === "venue") {
+      document.getElementById("meta").textContent = t("venueMeta")
+        .replace("{count}", String(filteredPapers.length))
+        .replace("{venue}", venueLabel(currentVenue))
+        .replace("{year}", venueYear ? String(venueYear) : "—");
+      return;
+    }
+    const when = lastCatalog.generated_at || "—";
+    const all = lastCatalog.papers || [];
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : all.length;
+    const matched = filteredPapers.length;
+    const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
+    const visits = typeof lastCatalog.visits === "number" ? lastCatalog.visits : 0;
+    const zh = countCatalogZhPDFs(all);
+    const text = t("meta")
+      .replace("{matched}", String(matched))
+      .replace("{shown}", String(matched))
+      .replace("{total}", String(total))
+      .replace("{zh}", String(zh))
+      .replace("{page}", String(pageIndex))
+      .replace("{pages}", String(pages))
+      .replace("{visits}", String(visits))
+      .replace("{when}", when);
+    document.getElementById("meta").textContent = text;
+  }
+
+  function renderPagers() {
+    const matched = filteredPapers.length;
+    const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE) || 1);
+    const show = matched > PAGE_SIZE;
+    ["pager-top", "pager-bottom"].forEach(function (id) {
+      const el = document.getElementById(id);
+      el.classList.toggle("visible", show);
+      const prev = el.querySelector(".pager-prev");
+      const next = el.querySelector(".pager-next");
+      prev.disabled = pageIndex <= 1;
+      next.disabled = pageIndex >= pages;
+    });
+    const from = matched === 0 ? 0 : (pageIndex - 1) * PAGE_SIZE + 1;
+    const to = Math.min(matched, pageIndex * PAGE_SIZE);
+    const info = t("pageInfo")
+      .replace("{from}", String(from))
+      .replace("{to}", String(to))
+      .replace("{matched}", String(matched));
+    document.getElementById("pager-top-info").textContent = show ? info : "";
+    document.getElementById("pager-bottom-info").textContent = show ? info : "";
+  }
+
+  function applyManageUI() {
+    const pending = document.getElementById("xlate-pending");
+    if (pending) pending.hidden = !canManage || isSpecialSection();
+    const regen = document.getElementById("trend-regen");
+    if (regen) regen.hidden = !canManage || currentSection !== "daily" || !lastDaily.has_trend;
+    const tag = document.getElementById("tag");
+    if (tag) tag.hidden = isSpecialSection();
+    const chips = document.getElementById("tag-chips");
+    if (chips) chips.hidden = isSpecialSection();
+    const dailyTools = document.getElementById("daily-tools");
+    if (dailyTools) dailyTools.hidden = currentSection !== "daily";
+    const venueTools = document.getElementById("venue-tools");
+    if (venueTools) venueTools.hidden = currentSection !== "venue";
+    const tabCat = document.getElementById("tab-catalog");
+    const tabDaily = document.getElementById("tab-daily");
+    if (tabCat) tabCat.classList.toggle("active", currentSection === "catalog");
+    if (tabDaily) tabDaily.classList.toggle("active", currentSection === "daily");
+    VENUE_SLUGS.forEach(function (slug) {
+      const el = document.getElementById("tab-" + slug);
+      if (el) el.classList.toggle("active", currentSection === "venue" && currentVenue === slug);
+    });
+    syncVenueTrendButtons();
+  }
+
+
+  function paperRecoverID(p) {
+    return (p && (p.id || p.arxiv_id || p.filename || p.title)) || "";
+  }
+  function canRecover(p) {
+    return !!(canManage && p && !p.has_local && (p.arxiv_id || p.pdf_url));
+  }
+  function missingRecoverableCount() {
+    return (lastCatalog.papers || []).filter(canRecover).length;
+  }
+  function updateRecoverAll() {
+    const btn = document.getElementById("recover-all");
+    if (!btn) return;
+    const n = missingRecoverableCount();
+    btn.hidden = !canManage || currentSection === "daily" || n === 0;
+    btn.disabled = recoverAllBusy;
+    btn.textContent = recoverAllBusy ? t("recoverAllBusy") : t("recoverAll");
+  }
+  function parseRecoverAPIError(data, status) {
+    if (data && data.error) return String(data.error);
+    return "HTTP " + status;
+  }
+  function applyRecoveredPaper(updated) {
+    if (!updated) return;
+    const pid = paperRecoverID(updated);
+    const papers = lastCatalog.papers || [];
+    for (let i = 0; i < papers.length; i++) {
+      if (paperRecoverID(papers[i]) === pid || (updated.arxiv_id && papers[i].arxiv_id === updated.arxiv_id)) {
+        papers[i] = Object.assign({}, papers[i], updated);
+        break;
+      }
+    }
+  }
+  async function recoverOne(id) {
+    if (!id || (cardState[id] && cardState[id].busy)) return;
+    cardState[id] = { busy: true, msg: "", err: false };
+    renderAll(false);
+    try {
+      const res = await fetch(recoverURL(), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({ id: id })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (res.status === 401) {
+        cardState[id] = { busy: false, msg: t("unauthorized"), err: true };
+        renderAll(false);
+        location.href = withToken(prefix + "/settings");
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        cardState[id] = {
+          busy: false,
+          msg: t("recoverFail").replace("{error}", parseRecoverAPIError(data, res.status)),
+          err: true
+        };
+        renderAll(false);
+        return;
+      }
+      applyRecoveredPaper(data.paper);
+      cardState[id] = { busy: false, msg: t("recoverOk"), err: false };
+      renderAll(false);
+    } catch (e) {
+      cardState[id] = {
+        busy: false,
+        msg: t("recoverFail").replace("{error}", String(e)),
+        err: true
+      };
+      renderAll(false);
+    }
+  }
+  async function recoverAll() {
+    if (recoverAllBusy) return;
+    const status = document.getElementById("status");
+    recoverAllBusy = true;
+    status.className = "";
+    status.textContent = t("recoverAllBusy");
+    updateRecoverAll();
+    try {
+      const res = await fetch(recoverURL(), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({ all_missing: true })
+      });
+      let data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (res.status === 401) {
+        status.textContent = t("unauthorized");
+        status.className = "err";
+        location.href = withToken(prefix + "/settings");
+        return;
+      }
+      if (!res.ok) {
+        status.textContent = t("recoverFail").replace("{error}", parseRecoverAPIError(data, res.status));
+        status.className = "err";
+        return;
+      }
+      const ok = Number(data.recovered || 0);
+      const fail = Number(data.failed || 0);
+      let summary = t("recoverAllNone");
+      let summaryClass = "";
+      if (ok === 0 && fail === 0) {
+        summary = t("recoverAllNone");
+      } else if (fail === 0) {
+        summary = t("recoverAllOk").replace("{n}", String(ok));
       } else {
-        actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+        summary = t("recoverAllPartial").replace("{ok}", String(ok)).replace("{fail}", String(fail));
+        summaryClass = fail && !ok ? "err" : "";
+        (data.errors || []).forEach(function (item) {
+          if (item && item.id) {
+            cardState[item.id] = { busy: false, msg: t("recoverFail").replace("{error}", item.error || ""), err: true };
+          }
+        });
       }
-      if (p.source_url) {
-        actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
-      } else if (p.arxiv_id) {
-        actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("arxiv")) + "</a>";
-      }
-      const brief = p.brief || "";
-      return (
-        '<article class="paper">' +
-          "<h2>" + esc(p.title || "") + "</h2>" +
-          '<div class="row">' + year + tags + "</div>" +
-          (brief ? '<p class="brief">' + esc(brief) + "</p>" : "") +
-          '<div class="actions">' + actions + "</div>" +
-        "</article>"
-      );
+      await load({ silent: true });
+      status.textContent = summary;
+      status.className = summaryClass;
+    } catch (e) {
+      status.textContent = t("recoverFail").replace("{error}", String(e));
+      status.className = "err";
+    } finally {
+      recoverAllBusy = false;
+      updateRecoverAll();
+    }
+  }
+
+  function renderPaperCard(p) {
+    const tags = (p.topic_tags || []).map(function (tg) {
+      return '<span class="tag" data-tag="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</span>";
     }).join("");
+    const year = p.year ? '<span class="year">' + esc(p.year) + "</span>" : "";
+    const venueName = String(p.venue || p.conference || "").trim();
+    const venue = venueName
+      ? '<span class="venue" title="' + esc(venueName) + '">' + esc(venueName) + "</span>"
+      : "";
+    const pageCount = Number(p.page_count) || 0;
+    const pages = pageCount > 0
+      ? '<span class="pages">' + esc(t("pages").replace("{n}", String(pageCount))) + "</span>"
+      : "";
+    const tooMany = paperTooManyPages(p);
+    const authors = (p.authors || []).length
+      ? '<p class="authors">' + esc((p.authors || []).join(", ")) + "</p>"
+      : "";
+    let actions = "";
+    if (p.has_local && p.local_pdf) {
+      actions += '<a class="btn primary" href="' + esc(pdfURL(p.local_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("view")) + "</a>";
+      actions += '<a class="btn" href="' + esc(pdfURL(p.local_pdf, true)) + '">' + esc(t("download")) + "</a>";
+    } else {
+      actions += '<span class="year">' + esc(t("noLocal")) + "</span>";
+      const rpid = paperRecoverID(p);
+      const rst = cardState[rpid] || {};
+      if (canRecover(p)) {
+        actions += '<button type="button" class="btn primary recover-pdf" data-id="' + esc(rpid) + '"' +
+          (rst.busy ? " disabled" : "") + ">" + esc(rst.busy ? t("recoverBusy") : t("recover")) + "</button>";
+      }
+      if (rst.msg) {
+        actions += '<span class="card-msg' + (rst.err ? " err" : " ok") + '">' + esc(rst.msg) + "</span>";
+      }
+    }
+    if (p.zh_pdf) {
+      actions += '<a class="btn" href="' + esc(pdfURL(p.zh_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("zh")) + "</a>";
+    }
+    if (p.dual_pdf) {
+      actions += '<a class="btn" href="' + esc(pdfURL(p.dual_pdf, false)) + '" target="_blank" rel="noopener">' + esc(t("dual")) + "</a>";
+    }
+    const st = p.translate_status || "";
+    if (st && st !== "done") {
+      const title = p.translate_error ? ' title="' + esc(p.translate_error) + '"' : "";
+      actions += '<span class="status-pill ' + esc(st) + '"' + title + ">" + esc(statusLabel(st)) + "</span>";
+    }
+    const slowLane = paperSlowLane(p);
+    if (tooMany) {
+      actions += '<span class="status-pill skipped">' + esc(t("xlateSkipPages")) + "</span>";
+    } else if (slowLane) {
+      actions += '<span class="status-pill slow">' + esc(t("xlateSlowLane")) + "</span>";
+    }
+    if (!tooMany && canManage && p.has_local && st !== "running") {
+      // Manage-only. Card clicks always send priority:true so the job is
+      // inserted (or bumped) at the head of its lane, after currently
+      // running work. Translate-all stays FIFO tail.
+      // Hidden for anonymous visitors; 中文版 / 中英对照 links above stay public.
+      const completed = st === "done" || !!(p.zh_pdf || p.dual_pdf);
+      if (st === "queued") {
+        actions += '<button type="button" class="xlate-one xlate-priority" data-id="' + esc(p.id || "") + '" data-priority="1">' + esc(t("xlatePriority")) + "</button>";
+      } else if (completed) {
+        actions += '<button type="button" class="xlate-one xlate-force" data-id="' + esc(p.id || "") + '" data-force="1">' + esc(t("reXlate")) + "</button>";
+      } else {
+        actions += '<button type="button" class="primary xlate-one" data-id="' + esc(p.id || "") + '">' + esc(t("xlate")) + "</button>";
+      }
+    }
+    let errHtml = "";
+    if (tooMany) {
+      errHtml = '<p class="xlate-skip">' + esc(t("xlateSkipPages")) + "</p>";
+    } else if ((st === "failed" || st === "skipped" || st === "queued") && p.translate_error) {
+      errHtml = '<p class="xlate-err">' + esc(t("xlateErrPrefix")) + esc(p.translate_error) + "</p>";
+    }
+    if (p.source_url) {
+      actions += '<a class="btn" href="' + esc(p.source_url) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
+    } else if (p.arxiv_id) {
+      actions += '<a class="btn" href="https://arxiv.org/abs/' + esc(p.arxiv_id) + '" target="_blank" rel="noopener">' + esc(t("source")) + "</a>";
+    }
+    const pid = p.id || p.arxiv_id || "";
+    if (pid) {
+      const busy = !!generating[pid];
+      const label = busy ? t("reviewGenerating") : (p.has_review ? t("reviewView") : t("reviewGen"));
+      const cls = "review-btn" + (busy ? " busy" : "");
+      actions += '<button type="button" class="' + cls + '" data-id="' + esc(pid) + '"' +
+        (busy ? " disabled" : "") + ">" + esc(label) + "</button>";
+      if (p.has_review && Number(p.rating_count) > 0) {
+        const avg = Number(p.avg_stars) || 0;
+        actions += '<span class="review-stars-inline" title="' + esc(t("reviewAvg").replace("{avg}", String(avg)).replace("{n}", String(p.rating_count))) + '">★ ' + esc(avg) + "</span>";
+      }
+    }
+    const abs = abstractDisplay(p);
+    let briefHtml = "";
+    if (abs.text) {
+      const cls = abs.pending ? "brief pending" : "brief";
+      const titleAttr = abs.full ? ' title="' + esc(abs.full) + '"' : "";
+      briefHtml = '<p class="' + cls + '"' + titleAttr + ">" + esc(abs.text) + "</p>";
+    }
+    return (
+      '<article class="paper">' +
+        "<h2>" + esc(p.title || "") + "</h2>" +
+        authors +
+        '<div class="row">' + year + venue + pages + tags + "</div>" +
+        briefHtml +
+        '<div class="actions">' + actions + "</div>" +
+        errHtml +
+      "</article>"
+    );
+  }
+
+  function renderList() {
+    const list = document.getElementById("list");
+    const start = (pageIndex - 1) * PAGE_SIZE;
+    const pagePapers = filteredPapers.slice(start, start + PAGE_SIZE);
+    renderMeta();
+    renderPagers();
+    if (!filteredPapers.length) {
+      list.innerHTML = '<p class="empty">' + esc(currentSection === "venue" ? t("venueEmpty") : t("empty")) + "</p>";
+    } else {
+      list.innerHTML = pagePapers.map(renderPaperCard).join("");
+      list.querySelectorAll(".xlate-one").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          const payload = { id: btn.getAttribute("data-id") || "", priority: true };
+          if (btn.getAttribute("data-force") === "1") payload.force = true;
+          enqueue(payload);
+        });
+      });
+      list.querySelectorAll(".review-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          openReviewPanel(btn.getAttribute("data-id") || "");
+        });
+      });
+    }
+    const prog = renderTranslateBanner();
+    const pool = currentSection === "daily" ? (lastDaily.papers || []) : (lastCatalog.papers || []);
+    const anyInflight = pool.some(function (p) {
+      const st = p.translate_status || "";
+      return st === "queued" || st === "running";
+    });
+    const absSource = currentSection === "daily" ? lastDaily : lastCatalog;
+    const absPending = currentLang() === "zh" && (
+      (Number(absSource.abstract_zh_pending) || 0) > 0 ||
+      pool.some(function (p) {
+        return String(p.abstract || "").trim() && !String(p.abstract_zh || "").trim();
+      })
+    );
+    syncPolling(!!(prog && prog.active) || anyInflight || absPending);
+  }
+
+  function renderAll(resetPage) {
+    updateRecoverAll();
+    applyFilters(!!resetPage);
+    renderList();
   }
 
   function fillTags(papers) {
     const sel = document.getElementById("tag");
     const cur = sel.value;
-    const set = {};
+    const present = {};
     (papers || []).forEach(function (p) {
       (p.topic_tags || []).forEach(function (tg) {
-        if (tg) set[tg] = true;
+        if (tg) present[tg] = true;
       });
     });
-    const tags = Object.keys(set).sort();
+    const extras = Object.keys(present).filter(function (tg) {
+      return TAG_KEYS.indexOf(tg) < 0;
+    }).sort();
+    const tags = TAG_KEYS.concat(extras);
     sel.innerHTML = '<option value="">' + esc(t("tagAll")) + "</option>" +
       tags.map(function (tg) {
-        return '<option value="' + esc(tg) + '">' + esc(tg) + "</option>";
+        return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
       }).join("");
-    if (cur && set[cur]) sel.value = cur;
+    if (cur && (present[cur] || TAG_KEYS.indexOf(cur) >= 0)) sel.value = cur;
+    fillImportTags();
+    renderTagChips();
   }
 
-  async function load() {
-    const status = document.getElementById("status");
-    status.textContent = "";
-    status.className = "";
-    const q = document.getElementById("q").value.trim();
-    const tag = document.getElementById("tag").value;
+  function fillImportTags() {
+    const sel = document.getElementById("import-tag");
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">' + esc(t("importTag")) + "</option>" +
+      TAG_KEYS.map(function (tg) {
+        return '<option value="' + esc(tg) + '">' + esc(tagLabel(tg)) + "</option>";
+      }).join("");
+    if (cur && TAG_KEYS.indexOf(cur) >= 0) sel.value = cur;
+  }
+
+  function renderTagChips() {
+    const box = document.getElementById("tag-chips");
+    if (!box) return;
+    const cur = (document.getElementById("tag") || {}).value || "";
+    const chips = ['<button type="button" data-tag=""' + (cur ? "" : ' class="active"') + ">" + esc(t("tagAll")) + "</button>"];
+    TAG_KEYS.forEach(function (tg) {
+      chips.push(
+        '<button type="button" data-tag="' + esc(tg) + '"' +
+        (cur === tg ? ' class="active"' : "") + ">" + esc(tagLabel(tg)) + "</button>"
+      );
+    });
+    box.innerHTML = chips.join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const sel = document.getElementById("tag");
+        sel.value = btn.getAttribute("data-tag") || "";
+        renderTagChips();
+        renderAll(true);
+      });
+    });
+  }
+
+  function applyProgressData(data) {
+    if (!data || typeof data !== "object") return false;
+    let needCatalog = false;
+    if (data.snapshot_etag && snapshotETag && data.snapshot_etag !== snapshotETag) {
+      needCatalog = true;
+    }
+    if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+    if (data.translate_progress) lastCatalog.translate_progress = data.translate_progress;
+    if (typeof data.abstract_zh_pending === "number") {
+      if (lastAbsPending >= 0 && data.abstract_zh_pending < lastAbsPending) needCatalog = true;
+      lastAbsPending = data.abstract_zh_pending;
+      lastCatalog.abstract_zh_pending = data.abstract_zh_pending;
+    }
+    if (typeof data.can_manage === "boolean") {
+      canManage = data.can_manage;
+      lastCatalog.can_manage = data.can_manage;
+      applyManageUI();
+    }
+    if (typeof data.visits === "number") lastCatalog.visits = data.visits;
+    const jobs = data.jobs || {};
+    const prevInflight = {};
+    (lastCatalog.papers || []).forEach(function (p) {
+      const st = p.translate_status || "";
+      if (st === "queued" || st === "running") prevInflight[p.id || p.arxiv_id || ""] = st;
+    });
+    function applyJobs(list) {
+      (list || []).forEach(function (p) {
+        const id = p.id || p.arxiv_id || "";
+        if (!id || !jobs[id]) return;
+        const j = jobs[id];
+        p.translate_status = j.status || p.translate_status;
+        if (j.error != null) p.translate_error = j.error;
+        if (j.zh_pdf) p.zh_pdf = j.zh_pdf;
+        if (j.dual_pdf) p.dual_pdf = j.dual_pdf;
+      });
+    }
+    applyJobs(lastCatalog.papers);
+    applyJobs(lastDaily.papers);
+    Object.keys(prevInflight).forEach(function (id) {
+      if (id && !jobs[id]) needCatalog = true;
+    });
+    return needCatalog;
+  }
+
+  function readCatalogCache() {
     try {
-      const res = await fetch(apiURL(q, tag), { credentials: "same-origin" });
-      if (res.status === 401) {
-        status.textContent = t("unauthorized");
-        status.className = "err";
-        location.href = prefix + "/settings";
-        return;
+      const raw = localStorage.getItem(CATALOG_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || obj.v !== CATALOG_CACHE_VER || !obj.catalog || !Array.isArray(obj.catalog.papers)) {
+        return null;
+      }
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeCatalogCache(catalog, etag) {
+    if (!catalog || !Array.isArray(catalog.papers)) return;
+    try {
+      const copy = Object.assign({}, catalog, { can_manage: false, translate_progress: null });
+      localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify({
+        v: CATALOG_CACHE_VER,
+        etag: etag || copy.snapshot_etag || "",
+        saved_at: Date.now(),
+        catalog: copy
+      }));
+    } catch (e) {
+      // Quota or private mode — HTTP cache / gzip still apply.
+    }
+  }
+
+  function applyCatalogData(data, opts) {
+    if (!data || typeof data !== "object") return;
+    const keepProgress = lastCatalog.translate_progress;
+    const keepVisits = lastCatalog.visits;
+    const merge = !!(opts && opts.merge);
+    if (merge && Array.isArray(data.papers) && (lastCatalog.papers || []).length) {
+      const offset = Number(data.offset) || 0;
+      const papers = (lastCatalog.papers || []).slice();
+      for (let i = 0; i < data.papers.length; i++) {
+        papers[offset + i] = data.papers[i];
+      }
+      lastCatalog.papers = papers;
+      if (typeof data.count === "number") lastCatalog.count = data.count;
+      lastCatalog.partial = !!data.partial && papers.length < (data.count || papers.length);
+      lastCatalog.generated_at = data.generated_at || lastCatalog.generated_at;
+      if (data.snapshot_etag) lastCatalog.snapshot_etag = data.snapshot_etag;
+    } else {
+      lastCatalog = data;
+    }
+    lastCatalog.can_manage = canManage;
+    if (!lastCatalog.translate_progress && keepProgress) {
+      lastCatalog.translate_progress = keepProgress;
+    }
+    if (typeof keepVisits === "number") lastCatalog.visits = keepVisits;
+    fillTags(lastCatalog.papers || []);
+    catalogLoaded = true;
+    if (data.snapshot_etag) snapshotETag = data.snapshot_etag;
+  }
+
+  function hydrateCatalogCache() {
+    const cached = readCatalogCache();
+    if (!cached) return false;
+    applyCatalogData(cached.catalog);
+    if (cached.etag) snapshotETag = cached.etag;
+    canManage = false;
+    applyManageUI();
+    renderAll(false);
+    return true;
+  }
+
+  async function fetchCatalogJSON(offset, limit) {
+    const headers = authHeaders(false);
+    if (snapshotETag && !(typeof limit === "number" && limit > 0 && offset > 0)) {
+      headers["If-None-Match"] = '"' + snapshotETag + '"';
+    }
+    // Default HTTP cache (ETag + Cache-Control). Do not bypass the browser cache.
+    let res = await fetch(catalogURL(offset, limit), { credentials: "same-origin", headers: headers });
+    if (res.status === 304) {
+      return { res: res, data: null, notModified: true };
+    }
+    if (res.ok) {
+      const text = await res.text();
+      if (text) {
+        return { res: res, data: JSON.parse(text), notModified: false };
+      }
+      // Empty 200 (rare tunnel glitch): retry once without validators.
+      if (!catalogLoaded) {
+        res = await fetch(catalogURL(offset, limit), { credentials: "same-origin", headers: authHeaders(false), cache: "reload" });
+        if (res.ok) {
+          const retryText = await res.text();
+          if (retryText) {
+            return { res: res, data: JSON.parse(retryText), notModified: false };
+          }
+        }
+      }
+    }
+    return { res: res, data: null, notModified: false };
+  }
+
+  async function loadCatalogInner(opts) {
+    const silent = !!(opts && opts.silent);
+    const status = document.getElementById("status");
+    const list = document.getElementById("list");
+    const hadPapers = (lastCatalog.papers || []).length > 0;
+    if (!silent && !hadPapers) {
+      status.textContent = t("loadingCatalog");
+      status.className = "";
+      if (list) {
+        list.innerHTML = '<p class="empty">' + esc(t("loadingCatalog")) + "</p>";
+      }
+    } else if (!silent && hadPapers) {
+      status.textContent = t("updatingCatalog");
+      status.className = "";
+    }
+    try {
+      const got = await fetchCatalogJSON(0, PAGE_SIZE);
+      const res = got.res;
+      if (got.notModified) {
+        catalogLoaded = true;
+        if (!silent) {
+          status.textContent = "";
+          status.className = "";
+        }
+        loadCatalogTail(silent);
+        return true;
       }
       if (!res.ok) {
-        status.textContent = t("loadErr") + " (" + res.status + ")";
+        if (!hadPapers) {
+          status.textContent = t("catalogUnavailable") + " (" + res.status + ")";
+          status.className = "err";
+        }
+        return hadPapers;
+      }
+      if (!got.data) {
+        if (!hadPapers) {
+          status.textContent = t("catalogUnavailable");
+          status.className = "err";
+        }
+        return hadPapers;
+      }
+      applyCatalogData(got.data, { merge: false });
+      writeCatalogCache(got.data, snapshotETag);
+      if (!silent) {
+        status.textContent = "";
+        status.className = "";
+      }
+      renderAll(false);
+      if (!hashReviewOpened) {
+        const hid = parseReviewHash();
+        if (hid) {
+          hashReviewOpened = true;
+          openReviewPanel(hid);
+        }
+      }
+      loadCatalogTail(true);
+      return true;
+    } catch (e) {
+      if (!silent && !hadPapers) {
+        status.textContent = t("catalogUnavailable") + " — " + String(e);
+        status.className = "err";
+      }
+      return hadPapers;
+    }
+  }
+
+  async function loadCatalog(opts) {
+    if (catalogFetch) return catalogFetch;
+    catalogFetch = loadCatalogInner(opts).finally(function () { catalogFetch = null; });
+    return catalogFetch;
+  }
+
+  async function loadCatalogTail(silent) {
+    const have = (lastCatalog.papers || []).length;
+    const total = typeof lastCatalog.count === "number" ? lastCatalog.count : have;
+    if (total <= have) {
+      writeCatalogCache(lastCatalog, snapshotETag);
+      return;
+    }
+    try {
+      const got = await fetchCatalogJSON(have, 10000);
+      if (got.notModified || !got.res || !got.res.ok || !got.data) return;
+      applyCatalogData(got.data, { merge: true });
+      writeCatalogCache(lastCatalog, snapshotETag);
+      if (currentSection === "venue") loadVenueYears();
+      if (currentSection === "catalog" || currentSection === "venue") renderAll(false);
+    } catch (e) {
+      if (!silent) {
+        // Keep first-page cards; search will catch up on the next successful tail.
+      }
+    }
+  }
+
+  function todayYMD() {
+    const d = new Date();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return d.getUTCFullYear() + "-" + m + "-" + day;
+  }
+  function dailyURL(date, suffix) {
+    return prefix + "/papers/daily/" + encodeURIComponent(date) + (suffix || "");
+  }
+  function shiftDate(ymd, delta) {
+    const p = String(ymd || "").split("-");
+    if (p.length !== 3) return ymd;
+    const dt = new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])));
+    dt.setUTCDate(dt.getUTCDate() + delta);
+    const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(dt.getUTCDate()).padStart(2, "0");
+    return dt.getUTCFullYear() + "-" + m + "-" + d;
+  }
+  function selectDailyDate(date, opts) {
+    dailyDate = date || todayYMD();
+    const input = document.getElementById("daily-date");
+    if (input) input.value = dailyDate;
+    renderDateChips();
+    return loadDaily(opts);
+  }
+  function setSection(section, date, opts) {
+    if (section === "daily") {
+      currentSection = "daily";
+      currentVenue = "";
+      const q = document.getElementById("q");
+      if (q) q.value = "";
+      if (date) dailyDate = date;
+    } else if (isVenueSlug(section)) {
+      const changing = currentVenue !== section;
+      currentSection = "venue";
+      currentVenue = section;
+      const q = document.getElementById("q");
+      if (q) q.value = "";
+      if (date && Number(date) > 0) venueYear = Number(date);
+      else if (changing) venueYear = 0;
+    } else {
+      currentSection = "catalog";
+      currentVenue = "";
+    }
+    syncVenueURL();
+    applyManageUI();
+    applyI18n();
+    if (currentSection === "daily") return selectDailyDate(dailyDate || date || todayYMD(), opts);
+    if (currentSection === "venue") {
+      renderAll(true);
+      return loadVenueYears().then(function () {
+        renderAll(true);
+        return load(opts);
+      });
+    }
+    renderAll(true);
+    return load(opts);
+  }
+  function renderDateChips() {
+    const box = document.getElementById("daily-dates");
+    if (!box) return;
+    const dates = dailyDates || [];
+    box.innerHTML = dates.slice(0, 8).map(function (d) {
+      const active = d.date === dailyDate ? " active" : "";
+      const n = d.count ? '<span class="n">' + esc(String(d.count)) + "</span>" : "";
+      return '<button type="button" class="date-chip' + active + '" data-date="' + esc(d.date) + '">' +
+        esc(d.date.slice(5)) + n + "</button>";
+    }).join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        selectDailyDate(btn.getAttribute("data-date") || "");
+      });
+    });
+    const input = document.getElementById("daily-date");
+    if (input && dailyDate) input.value = dailyDate;
+  }
+  function securityTrendURL(slug, year, extra) {
+    let u = prefix + "/papers/security-trend";
+    const params = new URLSearchParams();
+    if (slug) params.set("venue", slug);
+    if (year) params.set("year", String(year));
+    const s = params.toString();
+    if (s) u += "?" + s;
+    return extra ? u + extra : u;
+  }
+  function syncVenueURL() {
+    try {
+      const u = new URL(location.href);
+      if (currentSection === "venue" && currentVenue) {
+        u.searchParams.set("venue", currentVenue);
+        if (venueYear) u.searchParams.set("year", String(venueYear));
+        else u.searchParams.delete("year");
+      } else {
+        u.searchParams.delete("venue");
+        u.searchParams.delete("year");
+      }
+      const want = u.pathname + u.search + u.hash;
+      const cur = location.pathname + location.search + (location.hash || "");
+      if (want !== cur) history.replaceState(null, "", want);
+    } catch (e) {}
+  }
+  function yearsFromCatalog(slug) {
+    const counts = {};
+    (lastCatalog.papers || []).forEach(function (p) {
+      if (!paperHasSecurityTop(p) || paperVenueSlug(p) !== slug) return;
+      const y = paperYearOf(p);
+      if (y > 0) counts[y] = (counts[y] || 0) + 1;
+    });
+    const nowY = new Date().getUTCFullYear();
+    let floor = 2022;
+    Object.keys(counts).forEach(function (k) {
+      const y = Number(k);
+      if (y > 0 && y < floor) floor = y;
+    });
+    const out = [];
+    for (let y = nowY; y >= floor; y--) {
+      out.push({ year: y, count: counts[y] || 0, has_trend: false });
+    }
+    return out;
+  }
+  function defaultVenueYear(years) {
+    for (let i = 0; i < (years || []).length; i++) {
+      if (years[i].count > 0) return years[i].year;
+    }
+    return (years && years[0] && years[0].year) || new Date().getUTCFullYear();
+  }
+  function renderVenueYears() {
+    const box = document.getElementById("venue-years");
+    if (!box) return;
+    const years = venueYears || [];
+    box.innerHTML = years.map(function (y) {
+      const active = y.year === venueYear ? " active" : "";
+      const n = '<span class="n">' + esc(String(y.count || 0)) + "</span>";
+      return '<button type="button" class="date-chip' + active + '" data-year="' + esc(String(y.year)) + '">' +
+        esc(String(y.year)) + n + "</button>";
+    }).join("");
+    box.querySelectorAll("button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        selectVenueYear(Number(btn.getAttribute("data-year") || 0));
+      });
+    });
+    const idx = years.findIndex(function (y) { return y.year === venueYear; });
+    const prev = document.getElementById("venue-prev");
+    const next = document.getElementById("venue-next");
+    if (prev) prev.disabled = idx < 0 || idx >= years.length - 1;
+    if (next) next.disabled = idx <= 0;
+    syncVenueTrendButtons();
+  }
+  function selectVenueYear(year) {
+    const years = venueYears || [];
+    if (year) venueYear = year;
+    else venueYear = defaultVenueYear(years);
+    const hit = years.filter(function (y) { return y.year === venueYear; })[0];
+    venueHasTrend = !!(hit && hit.has_trend);
+    syncVenueURL();
+    applyManageUI();
+    renderVenueYears();
+    renderAll(true);
+  }
+  function shiftVenueYear(delta) {
+    const years = venueYears || [];
+    const idx = years.findIndex(function (y) { return y.year === venueYear; });
+    const next = years[idx - delta]; // years are newest-first; prev year = +index
+    if (next) selectVenueYear(next.year);
+  }
+  async function loadVenueYears() {
+    if (!currentVenue) return;
+    venueYears = yearsFromCatalog(currentVenue);
+    if (!venueYear) venueYear = defaultVenueYear(venueYears);
+    renderVenueYears();
+    try {
+      const res = await fetch(securityTrendURL(currentVenue), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.years) && data.years.length) {
+        venueYears = data.years;
+        if (data.default_year && !venueYear) venueYear = data.default_year;
+      }
+      if (!venueYear) venueYear = defaultVenueYear(venueYears);
+      const hit = venueYears.filter(function (y) { return y.year === venueYear; })[0];
+      venueHasTrend = !!(hit && hit.has_trend);
+      renderVenueYears();
+    } catch (e) {}
+  }
+  function venueYearInfo() {
+    return (venueYears || []).filter(function (y) { return y.year === venueYear; })[0] || null;
+  }
+  function syncVenueTrendButtons() {
+    const open = document.getElementById("venue-trend-open");
+    const view = document.getElementById("venue-trend-view");
+    const regen = document.getElementById("venue-trend-regen");
+    const pend = document.getElementById("venue-trend-pending");
+    const inVenue = currentSection === "venue";
+    const info = venueYearInfo();
+    const count = info ? (info.count || 0) : 0;
+    const missing = inVenue && count > 0 && !venueHasTrend;
+    // Generate is admin-only. Visitors never see a button that POSTs or
+    // opens an unauthorized / please-log-in modal.
+    if (open) open.hidden = !missing || !canManage;
+    if (view) view.hidden = !inVenue || !venueHasTrend;
+    if (regen) regen.hidden = !inVenue || !canManage || !venueHasTrend;
+    if (pend) pend.hidden = !missing;
+  }
+  function setTrendKicker(kind) {
+    const el = document.querySelector("#trend-modal .modal-kicker");
+    if (el) el.textContent = kind === "security" ? t("securityTrendKicker") : t("trendKicker");
+  }
+  async function openVenueTrend(force) {
+    if (!currentVenue || !venueYear) return;
+    const info = venueYearInfo();
+    const count = info ? (info.count || 0) : 0;
+    // Visitors never POST. Missing cache → pending copy, not login/unauthorized.
+    if (!canManage && !venueHasTrend) {
+      const modal = document.getElementById("trend-modal");
+      if (modal) modal.hidden = true;
+      syncVenueTrendButtons();
+      return;
+    }
+    const modal = document.getElementById("trend-modal");
+    modal.hidden = false;
+    document.getElementById("trend-body").hidden = true;
+    setTrendKicker("security");
+    const doPost = canManage && (force || !venueHasTrend);
+    setTrendStatus(t("trendGenerating"), "busy");
+    try {
+      const url = securityTrendURL(currentVenue, venueYear);
+      const res = await fetch(url, {
+        method: doPost ? "POST" : "GET",
+        credentials: "same-origin",
+        headers: authHeaders(!!doPost),
+        body: doPost ? JSON.stringify({ force: !!force }) : undefined
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || data.error) {
+        if (data.error === "need_llm" || /not configured/i.test(String(data.error || ""))) {
+          setTrendStatus(t("trendNeedLLM"), "err");
+        } else if (res.status === 404) {
+          setTrendStatus(t("venueEmpty"), "");
+        } else if (res.status === 401) {
+          setTrendStatus(canManage ? t("unauthorized") : t("securityTrendPending"), canManage ? "err" : "");
+        } else {
+          setTrendStatus(t(force ? "trendGenFail" : "trendLoadFail"), "err");
+        }
+        return;
+      }
+      if (!data.headline && !data.overview && !data.has_trend) {
+        if (count === 0) {
+          setTrendStatus(t("venueEmpty"), "");
+          return;
+        }
+        setTrendStatus(t("securityTrendPending"), "");
+        return;
+      }
+      setTrendStatus("", "");
+      venueHasTrend = true;
+      (venueYears || []).forEach(function (y) {
+        if (y.year === venueYear) y.has_trend = true;
+      });
+      applyManageUI();
+      document.getElementById("trend-title").textContent = data.headline || (venueLabel(currentVenue) + " · " + venueYear);
+      document.getElementById("trend-overview").textContent = data.overview || "";
+      document.getElementById("trend-themes").innerHTML = (data.themes || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+      document.getElementById("trend-highlights").innerHTML = (data.highlights || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+      document.getElementById("trend-outlook").textContent = data.outlook || "";
+      document.getElementById("trend-body").hidden = false;
+    } catch (e) {
+      setTrendStatus(t("trendLoadFail") + " — " + String(e), "err");
+    }
+  }
+  function readDailyCache() {
+    try {
+      const raw = localStorage.getItem(DAILY_CACHE_KEY);
+      if (!raw) return null;
+      const obj = JSON.parse(raw);
+      if (!obj || !obj.day || !Array.isArray(obj.day.papers)) return null;
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  }
+  function writeDailyCache(day) {
+    if (!day || !day.date) return;
+    try {
+      localStorage.setItem(DAILY_CACHE_KEY, JSON.stringify({
+        saved_at: Date.now(),
+        day: day
+      }));
+    } catch (e) {}
+  }
+  function hydrateDailyCache() {
+    const cached = readDailyCache();
+    if (!cached) return false;
+    lastDaily = cached.day;
+    if (lastDaily.date) dailyDate = lastDaily.date;
+    return true;
+  }
+  async function loadDailyDates() {
+    try {
+      const res = await fetch(prefix + "/papers/daily/dates", { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      dailyDates = data.dates || [];
+      if (!dailyDate) dailyDate = data.default || todayYMD();
+      renderDateChips();
+    } catch (e) {}
+  }
+  async function loadDaily(opts) {
+    const silent = !!(opts && opts.silent);
+    const status = document.getElementById("status");
+    if (!dailyDate) dailyDate = todayYMD();
+    const had = (lastDaily.papers || []).length > 0 && lastDaily.date === dailyDate;
+    if (!silent && !had) {
+      status.textContent = t("loadingCatalog");
+      status.className = "";
+    }
+    try {
+      const res = await fetch(dailyURL(dailyDate), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) {
+        // Poll/auto-refresh must not paint a red error over a list we already have.
+        if (!silent || !had) {
+          status.textContent = t("dailyLoadErr") + " (" + res.status + ")";
+          status.className = "err";
+        }
+        if (had) renderAll(false);
+        return had;
+      }
+      const data = await res.json();
+      lastDaily = data;
+      dailyDate = data.date || dailyDate;
+      writeDailyCache(data);
+      if (!silent) {
+        status.textContent = "";
+        status.className = "";
+      }
+      applyManageUI();
+      renderDateChips();
+      renderAll(true);
+      return true;
+    } catch (e) {
+      if (!silent || !had) {
+        status.textContent = t("dailyLoadErr") + " — " + String(e);
+        status.className = "err";
+      }
+      if (had) renderAll(false);
+      return had;
+    }
+  }
+  function setTrendStatus(msg, kind) {
+    const el = document.getElementById("trend-status");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-status" + (kind ? " " + kind : "");
+  }
+  function renderTrend(data) {
+    document.getElementById("trend-title").textContent = (data && data.headline) || (lastDaily.date || dailyDate);
+    document.getElementById("trend-overview").textContent = (data && data.overview) || "";
+    const themes = document.getElementById("trend-themes");
+    const highs = document.getElementById("trend-highlights");
+    themes.innerHTML = ((data && data.themes) || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    highs.innerHTML = ((data && data.highlights) || []).map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("");
+    document.getElementById("trend-outlook").textContent = (data && data.outlook) || "";
+    document.getElementById("trend-body").hidden = false;
+  }
+  async function openTrendPanel(force) {
+    const modal = document.getElementById("trend-modal");
+    modal.hidden = false;
+    document.getElementById("trend-body").hidden = true;
+    setTrendKicker("daily");
+    setTrendStatus(t("trendGenerating"), "busy");
+    const date = dailyDate || lastDaily.date || todayYMD();
+    const paperCount = Number(lastDaily.count) || (lastDaily.papers || []).length || 0;
+    try {
+      const url = dailyURL(date, "/trend");
+      let res = await fetch(url, {
+        method: force ? "POST" : "GET",
+        credentials: "same-origin",
+        headers: authHeaders(!!force),
+        body: force ? JSON.stringify({ force: true }) : undefined
+      });
+      let data = await res.json().catch(function () { return {}; });
+      // GET with no cached trend is not "no papers" — auto-generate when the day has papers.
+      if (!force && res.ok && !data.error && !data.headline && !data.overview && !data.has_trend) {
+        if (paperCount <= 0) {
+          setTrendStatus(t("trendNoPapers") || t("trendEmpty"), "");
+          return;
+        }
+        setTrendStatus(t("trendEmpty"), "busy");
+        res = await fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(true),
+          body: JSON.stringify({ force: false })
+        });
+        data = await res.json().catch(function () { return {}; });
+      }
+      if (!res.ok || data.error) {
+        if (data.error === "translation LLM is not configured" || data.error === "need_llm") setTrendStatus(t("trendNeedLLM"), "err");
+        else if (data.error === "no papers for this date") setTrendStatus(t("trendNoPapers") || t("trendEmpty"), "err");
+        else setTrendStatus(t(force ? "trendGenFail" : "trendLoadFail"), "err");
+        return;
+      }
+      if (!data.headline && !data.overview) {
+        setTrendStatus(paperCount > 0 ? (t("trendEmpty")) : (t("trendNoPapers") || t("trendEmpty")), "");
+        return;
+      }
+      setTrendStatus("", "");
+      lastDaily.has_trend = true;
+      applyManageUI();
+      renderTrend(data);
+    } catch (e) {
+      setTrendStatus(t("trendLoadFail") + " — " + String(e), "err");
+    }
+  }
+  function closeTrendModal() {
+    document.getElementById("trend-modal").hidden = true;
+  }
+
+  async function loadProgress(opts) {
+    try {
+      const res = await fetch(progressURL(), { credentials: "same-origin", headers: authHeaders(false) });
+      if (!res.ok) return;
+      const data = await res.json();
+      const needCatalog = applyProgressData(data);
+      if ((lastCatalog.papers || []).length) renderAll(false);
+      if (needCatalog) loadCatalog({ silent: true });
+    } catch (e) {
+      // Progress is best-effort: keep the snapshot list on screen.
+    }
+  }
+
+  async function load(opts) {
+    if (currentSection === "daily") return loadDaily(opts);
+    if (currentSection === "venue") {
+      await loadCatalog(opts);
+      await loadVenueYears();
+      renderAll(false);
+      return;
+    }
+    const silent = !!(opts && opts.silent);
+    const hadCache = catalogLoaded && (lastCatalog.papers || []).length > 0;
+    await Promise.all([
+      loadCatalog({ silent: silent || hadCache }),
+      loadProgress({ silent: true })
+    ]);
+  }
+
+  async function enqueue(payload) {
+    const status = document.getElementById("status");
+    try {
+      const res = await fetch(prefix + "/papers/translate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify(payload || { all: true })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (data && data.error) {
+        if (data.error === "too_many_pages") status.textContent = t("xlateSkipPages");
+        else if (data.error === "正在翻译中") status.textContent = t("xlateBusy");
+        else status.textContent = String(data.error);
+        status.className = "err";
+        load({ silent: true });
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        status.textContent = t("queueFail");
         status.className = "err";
         return;
       }
-      const data = await res.json();
-      // Keep full tag list from unfiltered load when filtering.
-      if (!q && !tag) fillTags(data.papers || []);
-      lastCatalog = data;
-      renderList();
+      const n = (data.queued || []).length;
+      const rejected = data.rejected || {};
+      let pageSkips = 0;
+      Object.keys(rejected).forEach(function (id) {
+        if (rejected[id] === "too_many_pages") pageSkips++;
+      });
+      if (n) {
+        status.textContent = (payload && payload.priority)
+          ? t("prioritizedOk")
+          : t("queuedOk").replace("{n}", String(n));
+        status.className = "ok";
+      } else if (pageSkips) {
+        status.textContent = t("xlateSkipPages");
+        status.className = "";
+      } else {
+        status.textContent = t("queuedOk").replace("{n}", String(n));
+        status.className = "";
+      }
+      load();
     } catch (e) {
       status.textContent = String(e);
       status.className = "err";
     }
   }
 
+  function reviewURL(id, suffix) {
+    return prefix + "/papers/review/" + encodeURIComponent(id) + (suffix || "");
+  }
+
+  function findCatalogPaper(id) {
+    const pools = [lastCatalog.papers || [], lastDaily.papers || []];
+    for (let i = 0; i < pools.length; i++) {
+      const hit = pools[i].find(function (p) {
+        return (p.id || p.arxiv_id || "") === id;
+      });
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function patchCatalogReview(id, data) {
+    (lastCatalog.papers || []).forEach(function (p) {
+      if ((p.id || p.arxiv_id || "") !== id) return;
+      p.has_review = !!(data && data.has_review);
+      p.avg_stars = data && typeof data.avg_stars === "number" ? data.avg_stars : (p.avg_stars || 0);
+      p.rating_count = data && typeof data.rating_count === "number" ? data.rating_count : (p.rating_count || 0);
+    });
+  }
+
+  function setReviewStatus(msg, kind) {
+    const el = document.getElementById("review-status");
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-status" + (kind ? " " + kind : "");
+  }
+
+  function reviewErrorText(err, fallbackKey) {
+    const raw = String(err || "").trim();
+    const low = raw.toLowerCase();
+    if (!raw) return t(fallbackKey || "reviewGenFail");
+    if (raw === "translation LLM is not configured") return t("reviewNeedLLM");
+    if (raw === "review is still generating") return t("reviewGenerating");
+    if (raw === "review is not ready") return t("reviewNotReady");
+    if (raw === "truncated model response" ||
+        /unexpected end of json|unexpected eof|unexpected end of input/.test(low)) {
+      return t("reviewTruncated");
+    }
+    if (raw === "empty model response" || /empty (chat|analysis|model)/.test(low)) {
+      return t("reviewEmpty");
+    }
+    if (raw === "could not generate review" || raw === "invalid model response") {
+      return t("reviewGenFail");
+    }
+    if (low.indexOf("json") >= 0 && /parse|unexpected|token|input|syntaxerror/.test(low)) {
+      return t("reviewTruncated");
+    }
+    if (/syntaxerror/.test(low)) return t("reviewTruncated");
+    return t(fallbackKey || "reviewGenFail");
+  }
+
+  function updateReviewActions(ready) {
+    const bar = document.getElementById("review-toolbar");
+    const retry = document.getElementById("review-retry");
+    const refs = document.getElementById("review-update-refs");
+    if (bar) bar.hidden = false;
+    if (retry) retry.hidden = !!ready;
+    if (refs) refs.disabled = !ready;
+    if (openReview) openReview.ready = !!ready;
+  }
+
+  function renderStars(myStars, enabled) {
+    const row = document.getElementById("review-stars");
+    const mine = Number(myStars) || 0;
+    let html = "";
+    for (let i = 1; i <= 5; i++) {
+      html += '<button type="button" class="star-btn' + (i <= mine ? " on" : "") +
+        '" data-stars="' + i + '" aria-label="' + i + '"' +
+        (enabled ? "" : " disabled") + ">★</button>";
+    }
+    row.innerHTML = html;
+    if (!enabled) return;
+    row.querySelectorAll(".star-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        rateOpenReview(Number(btn.getAttribute("data-stars")) || 0);
+      });
+    });
+  }
+
+  function setReviewRatingEnabled(enabled, data) {
+    const box = document.getElementById("review-rate");
+    const hint = document.getElementById("review-rate-hint");
+    const avg = document.getElementById("review-avg");
+    box.hidden = false;
+    box.classList.toggle("locked", !enabled);
+    if (openReview) openReview.ready = !!enabled;
+    if (!enabled) {
+      renderStars(0, false);
+      avg.hidden = true;
+      avg.textContent = "";
+      hint.hidden = false;
+      hint.textContent = t("reviewRateLocked");
+      return;
+    }
+    hint.hidden = true;
+    avg.hidden = false;
+    renderStars(data && data.my_stars ? data.my_stars : 0, true);
+    renderReviewAvg(data);
+  }
+
+  function hideReviewRating() {
+    const box = document.getElementById("review-rate");
+    box.hidden = true;
+    box.classList.remove("locked");
+    document.getElementById("review-stars").innerHTML = "";
+    if (openReview) openReview.ready = false;
+  }
+
+  function renderReviewAvg(data) {
+    const el = document.getElementById("review-avg");
+    const n = data && Number(data.rating_count) || 0;
+    if (!n) {
+      el.textContent = t("reviewNoRatings");
+      return;
+    }
+    const avg = data && typeof data.avg_stars === "number" ? data.avg_stars : 0;
+    el.textContent = t("reviewAvg").replace("{avg}", String(avg)).replace("{n}", String(n));
+  }
+
+  function reviewHash(id) {
+    return "#review=" + encodeURIComponent(id);
+  }
+  function parseReviewHash() {
+    const h = String(location.hash || "");
+    const m = h.match(/^#review=([^&]+)/);
+    if (!m) return "";
+    try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+  }
+  function setReviewHash(id) {
+    const base = location.pathname + location.search;
+    const want = id ? base + reviewHash(id) : base;
+    const cur = location.pathname + location.search + (location.hash || "");
+    if (cur === want) return;
+    try { history.replaceState(null, "", want); } catch (e) {
+      if (id) location.hash = reviewHash(id).slice(1);
+    }
+  }
+  function bindReviewRefLinks(root) {
+    (root || document).querySelectorAll("[data-review-id]").forEach(function (el) {
+      el.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        const rid = el.getAttribute("data-review-id") || "";
+        if (rid) openReviewPanel(rid);
+      });
+    });
+  }
+  function linkReviewText(text, refs) {
+    const raw = String(text || "");
+    if (!raw) return "";
+    const needles = [];
+    (refs || []).forEach(function (ref) {
+      const id = ref.paper_id || "";
+      if (!id) return;
+      if (ref.title) needles.push({ n: ref.title, id: id });
+      if (ref.arxiv_id) {
+        needles.push({ n: "arXiv:" + ref.arxiv_id, id: id });
+        needles.push({ n: ref.arxiv_id, id: id });
+      }
+      if (id && id !== ref.arxiv_id) needles.push({ n: id, id: id });
+    });
+    needles.sort(function (a, b) { return b.n.length - a.n.length; });
+    const hits = [];
+    const lower = raw.toLowerCase();
+    needles.forEach(function (nd) {
+      const needle = String(nd.n || "");
+      if (needle.length < 6) return;
+      const nlow = needle.toLowerCase();
+      let from = 0;
+      while (from < lower.length) {
+        const i = lower.indexOf(nlow, from);
+        if (i < 0) break;
+        const end = i + needle.length;
+        const overlap = hits.some(function (h) { return i < h.end && end > h.start; });
+        if (!overlap) hits.push({ start: i, end: end, id: nd.id });
+        from = i + Math.max(1, needle.length);
+      }
+    });
+    hits.sort(function (a, b) { return a.start - b.start; });
+    let html = "";
+    let pos = 0;
+    hits.forEach(function (h) {
+      html += esc(raw.slice(pos, h.start));
+      html += '<a class="review-ref" href="' + esc(reviewHash(h.id)) + '" data-review-id="' + esc(h.id) + '">' +
+        esc(raw.slice(h.start, h.end)) + "</a>";
+      pos = h.end;
+    });
+    html += esc(raw.slice(pos));
+    return html;
+  }
+  function setRefsStatus(msg, kind) {
+    const el = document.getElementById("review-refs-status");
+    if (!el) return;
+    if (!msg) {
+      el.hidden = true;
+      el.textContent = "";
+      el.className = "review-refs-status";
+      return;
+    }
+    el.hidden = false;
+    el.textContent = msg;
+    el.className = "review-refs-status" + (kind ? " " + kind : "");
+  }
+  function renderReviewRefs(refs) {
+    const sec = document.getElementById("review-refs-section");
+    const list = document.getElementById("review-refs-list");
+    refs = refs || [];
+    if (!sec || !list) return;
+    if (!refs.length) {
+      sec.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    sec.hidden = false;
+    list.innerHTML = refs.map(function (ref) {
+      const id = ref.paper_id || "";
+      const label = ref.title || ref.arxiv_id || id;
+      const extra = ref.has_review ? "" : ' <span class="review-ref-missing">' + esc(t("reviewRefNoReview")) + "</span>";
+      return '<li><a class="review-ref" href="' + esc(reviewHash(id)) + '" data-review-id="' + esc(id) + '">' +
+        esc(label) + "</a>" + extra + "</li>";
+    }).join("");
+    bindReviewRefLinks(list);
+  }
+  function fillReviewModal(data) {
+    document.getElementById("review-title").textContent = (data && data.title) || (openReview && openReview.title) || "";
+    const refs = (data && data.refs) || [];
+    const fields = [
+      ["rev-method-principles", data && data.analysis && data.analysis.method_principles],
+      ["rev-method-essence", data && data.analysis && data.analysis.method_essence],
+      ["rev-experiment", data && data.analysis && data.analysis.experiment],
+      ["rev-quality", data && data.analysis && data.analysis.quality]
+    ];
+    fields.forEach(function (pair) {
+      const el = document.getElementById(pair[0]);
+      if (!el) return;
+      el.innerHTML = linkReviewText(pair[1] || "", refs);
+      bindReviewRefLinks(el);
+    });
+    renderReviewRefs(refs);
+    const has = !!(data && data.has_review);
+    document.getElementById("review-body").hidden = !has;
+    updateReviewActions(has);
+    if (has) {
+      setReviewRatingEnabled(true, data);
+    } else {
+      hideReviewRating();
+    }
+  }
+
+  function closeReviewModal() {
+    const modal = document.getElementById("review-modal");
+    modal.hidden = true;
+    openReview = null;
+    hideReviewRating();
+    setReviewStatus("", "");
+    setRefsStatus("", "");
+    const bar = document.getElementById("review-toolbar");
+    if (bar) bar.hidden = true;
+    const retry = document.getElementById("review-retry");
+    if (retry) retry.hidden = true;
+    const refs = document.getElementById("review-update-refs");
+    if (refs) refs.disabled = true;
+    setReviewHash("");
+  }
+
+  function showReviewModal(title) {
+    const modal = document.getElementById("review-modal");
+    document.getElementById("review-title").textContent = title || "";
+    modal.hidden = false;
+    applyI18n();
+  }
+
+  async function openReviewPanel(id) {
+    if (!id || generating[id]) return;
+    const paper = findCatalogPaper(id) || { id: id, title: id, has_review: false };
+    openReview = { id: id, title: paper.title || id, ready: false };
+    setReviewHash(id);
+    showReviewModal(openReview.title);
+    document.getElementById("review-body").hidden = true;
+    updateReviewActions(false);
+    setRefsStatus("", "");
+    hideReviewRating();
+    if (paper.has_review) {
+      setReviewStatus("", "");
+      try {
+        const res = await fetch(reviewURL(id), { credentials: "same-origin", headers: authHeaders(false) });
+        const data = await res.json().catch(function () { return { parse_error: true }; });
+        if (data && data.parse_error) {
+          setReviewStatus(t("reviewTruncated"), "err");
+          updateReviewActions(false);
+          return;
+        }
+        if (!res.ok || !data.ok) {
+          const err = data && data.error ? String(data.error) : "";
+          if (err === "review is still generating") {
+            setReviewStatus(t("reviewGenerating"), "busy");
+          } else {
+            setReviewStatus(reviewErrorText(err, "reviewLoadFail"), "err");
+            updateReviewActions(false);
+          }
+          return;
+        }
+        if (data.has_review) {
+          fillReviewModal(data);
+          return;
+        }
+        setReviewStatus(reviewErrorText(data.error, "reviewNotReady"), "err");
+        updateReviewActions(false);
+      } catch (e) {
+        setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewLoadFail"), "err");
+        updateReviewActions(false);
+        return;
+      }
+    }
+    generating[id] = true;
+    if (openReview) openReview.ready = false;
+    renderList();
+    showReviewModal(openReview.title);
+    document.getElementById("review-body").hidden = true;
+    setReviewRatingEnabled(false);
+    updateReviewActions(false);
+    setReviewStatus(t("reviewGenerating"), "busy");
+    try {
+      const res = await fetch(reviewURL(id, "/generate"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(function () { return { parse_error: true }; });
+      if (data && data.parse_error) {
+        setReviewStatus(t("reviewTruncated"), "err");
+        hideReviewRating();
+        updateReviewActions(false);
+        return;
+      }
+      if (!res.ok || !data.ok) {
+        setReviewStatus(reviewErrorText(data && data.error, "reviewGenFail"), "err");
+        hideReviewRating();
+        updateReviewActions(false);
+        return;
+      }
+      setReviewStatus("", "");
+      fillReviewModal(data);
+      patchCatalogReview(id, data);
+    } catch (e) {
+      setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewGenFail"), "err");
+      updateReviewActions(false);
+    } finally {
+      delete generating[id];
+      renderList();
+    }
+  }
+
+  async function updateOpenReviewRefs() {
+    if (!openReview || !openReview.id || updatingRefs) return;
+    if (!openReview.ready) {
+      setRefsStatus(t("reviewNotReady"), "err");
+      return;
+    }
+    updatingRefs = true;
+    const btn = document.getElementById("review-update-refs");
+    if (btn) btn.disabled = true;
+    setRefsStatus(t("reviewRefsUpdating"), "busy");
+    try {
+      const res = await fetch(reviewURL(openReview.id, "/refs"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: "{}"
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        const err = data && data.error ? String(data.error) : "";
+        if (err === "review is not ready" || err === "review is still generating") {
+          setRefsStatus(t("reviewNotReady"), "err");
+        } else {
+          setRefsStatus(reviewErrorText(err, "reviewRefsFail"), "err");
+        }
+        return;
+      }
+      fillReviewModal(data);
+      const n = (data.refs || []).length;
+      setRefsStatus(t("reviewRefsUpdated").replace("{n}", String(n)), "ok");
+    } catch (e) {
+      setRefsStatus(String(e), "err");
+    } finally {
+      updatingRefs = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function rateOpenReview(stars) {
+    if (!openReview || !openReview.id || !openReview.ready || !stars) return;
+    if (generating[openReview.id]) return;
+    try {
+      const res = await fetch(reviewURL(openReview.id, "/rate"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders(true),
+        body: JSON.stringify({ stars: stars })
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        const err = data && data.error ? String(data.error) : "";
+        if (err === "review is still generating" || err === "review is not ready") {
+          setReviewStatus(t("reviewNotReady"), "err");
+        } else {
+          setReviewStatus(reviewErrorText(err, "reviewRateFail"), "err");
+        }
+        return;
+      }
+      setReviewStatus("", "");
+      fillReviewModal(data);
+      patchCatalogReview(openReview.id, data);
+      renderList();
+    } catch (e) {
+      setReviewStatus(reviewErrorText(e && e.message ? e.message : e, "reviewRateFail"), "err");
+    }
+  }
+
+  function goPage(delta) {
+    const pages = Math.max(1, Math.ceil(filteredPapers.length / PAGE_SIZE) || 1);
+    pageIndex = Math.min(pages, Math.max(1, pageIndex + delta));
+    renderList();
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch (e) { window.scrollTo(0, 0); }
+  }
+
   document.getElementById("lang-zh").addEventListener("click", function () { setLang("zh"); });
   document.getElementById("lang-en").addEventListener("click", function () { setLang("en"); });
-  document.getElementById("apply").addEventListener("click", load);
-  document.getElementById("q").addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter") { ev.preventDefault(); load(); }
+  document.getElementById("theme-light").addEventListener("click", function () { setTheme("light"); });
+  document.getElementById("theme-dark").addEventListener("click", function () { setTheme("dark"); });
+  document.getElementById("apply").addEventListener("click", function () { renderAll(true); });
+  document.getElementById("zh-pdf-only").addEventListener("click", function () {
+    zhPDFOnly = !zhPDFOnly;
+    syncZhPDFToggle();
+    syncZhPDFURL();
+    renderAll(true);
   });
-  document.getElementById("tag").addEventListener("change", load);
+  document.getElementById("xlate-pending").addEventListener("click", function () { enqueue({ all: true }); });
+  document.getElementById("recover-all").addEventListener("click", recoverAll);
+  document.getElementById("list").addEventListener("click", function (ev) {
+    const btn = ev.target.closest("button.recover-pdf");
+    if (!btn) return;
+    ev.preventDefault();
+    recoverOne(btn.getAttribute("data-id"));
+  });
+  document.getElementById("q").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); renderAll(true); }
+  });
+  document.getElementById("q").addEventListener("input", function () {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () { renderAll(true); }, 220);
+  });
+  document.getElementById("tag").addEventListener("change", function () {
+    renderTagChips();
+    renderAll(true);
+  });
+
+  function importDialog() {
+    return document.getElementById("import-dialog");
+  }
+  function openImport() {
+    fillImportTags();
+    const st = document.getElementById("import-status");
+    st.textContent = "";
+    st.className = "";
+    const pdfEl = document.getElementById("import-pdf");
+    if (pdfEl) pdfEl.value = "";
+    const dlg = importDialog();
+    if (dlg && dlg.showModal) dlg.showModal();
+    else if (dlg) dlg.setAttribute("open", "open");
+    const urlEl = document.getElementById("import-url");
+    if (urlEl) urlEl.focus();
+  }
+  function closeImport() {
+    const dlg = importDialog();
+    if (!dlg) return;
+    if (dlg.close) dlg.close();
+    else dlg.removeAttribute("open");
+  }
+  function importErrorText(data) {
+    const code = (data && (data.error_code || data.code)) || "";
+    if (code) {
+      const key = "importErr_" + code;
+      const mapped = t(key);
+      if (mapped && mapped !== key) return mapped;
+    }
+    return (data && data.error) || t("importFail");
+  }
+  async function submitImport() {
+    const status = document.getElementById("import-status");
+    const url = document.getElementById("import-url").value.trim();
+    const tag = document.getElementById("import-tag").value;
+    const fileEl = document.getElementById("import-pdf");
+    const file = fileEl && fileEl.files && fileEl.files[0];
+    const btn = document.getElementById("import-submit");
+    // Category is mandatory for URL/id and PDF upload — never submit without a tag.
+    if (!tag) {
+      status.textContent = t("importNeedTag");
+      status.className = "err";
+      return;
+    }
+    if (!file && !url) {
+      status.textContent = t("importNeedSource");
+      status.className = "err";
+      return;
+    }
+    btn.disabled = true;
+    status.className = "";
+    try {
+      let res;
+      if (file) {
+        status.textContent = t("importChecking");
+        const fd = new FormData();
+        fd.append("tag", tag);
+        fd.append("file", file, file.name || "paper.pdf");
+        status.textContent = t("importUploading");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(false),
+          body: fd
+        });
+      } else {
+        status.textContent = t("importWorking");
+        res = await fetch(prefix + "/papers/import", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: authHeaders(true),
+          body: JSON.stringify({ url_or_id: url, tag: tag })
+        });
+      }
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        status.textContent = importErrorText(data);
+        status.className = "err";
+        return;
+      }
+      const title = (data.paper && data.paper.title) || (file && file.name) || url;
+      status.textContent = t("importOk").replace("{title}", title);
+      status.className = "ok";
+      document.getElementById("status").textContent = t("importOk").replace("{title}", title);
+      document.getElementById("status").className = "ok";
+      closeImport();
+      await load();
+    } catch (e) {
+      status.textContent = String(e);
+      status.className = "err";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  document.getElementById("import-open").addEventListener("click", openImport);
+  document.getElementById("import-cancel").addEventListener("click", closeImport);
+  document.getElementById("import-submit").addEventListener("click", submitImport);
+  document.getElementById("import-url").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); submitImport(); }
+  });
+  document.getElementById("sort").addEventListener("change", function () { renderAll(true); });
+  document.querySelectorAll(".pager-prev").forEach(function (btn) {
+    btn.addEventListener("click", function () { goPage(-1); });
+  });
+  document.querySelectorAll(".pager-next").forEach(function (btn) {
+    btn.addEventListener("click", function () { goPage(1); });
+  });
+  fillImportTags();
+  document.querySelectorAll("[data-review-close]").forEach(function (el) {
+    el.addEventListener("click", function () { closeReviewModal(); });
+  });
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== "Escape") return;
+    if (!document.getElementById("review-modal").hidden) {
+      closeReviewModal();
+      return;
+    }
+    if (!document.getElementById("trend-modal").hidden) {
+      closeTrendModal();
+    }
+  });
+  document.getElementById("review-update-refs").addEventListener("click", updateOpenReviewRefs);
+  document.getElementById("review-retry").addEventListener("click", function () {
+    if (!openReview || !openReview.id || generating[openReview.id]) return;
+    const paper = findCatalogPaper(openReview.id);
+    if (paper) paper.has_review = false;
+    openReviewPanel(openReview.id);
+  });
+  window.addEventListener("hashchange", function () {
+    const hid = parseReviewHash();
+    if (!hid) {
+      if (openReview) closeReviewModal();
+      return;
+    }
+    if (!openReview || openReview.id !== hid) openReviewPanel(hid);
+  });
+  document.getElementById("tab-catalog").addEventListener("click", function () {
+    setSection("catalog");
+  });
+  document.getElementById("tab-daily").addEventListener("click", function () {
+    setSection("daily");
+  });
+  VENUE_SLUGS.forEach(function (slug) {
+    const el = document.getElementById("tab-" + slug);
+    if (el) el.addEventListener("click", function () { setSection(slug); });
+  });
+  document.getElementById("venue-prev").addEventListener("click", function () { shiftVenueYear(-1); });
+  document.getElementById("venue-next").addEventListener("click", function () { shiftVenueYear(1); });
+  document.getElementById("venue-trend-open").addEventListener("click", function () { openVenueTrend(false); });
+  document.getElementById("venue-trend-view").addEventListener("click", function () { openVenueTrend(false); });
+  document.getElementById("venue-trend-regen").addEventListener("click", function () { openVenueTrend(true); });
+  document.getElementById("daily-prev").addEventListener("click", function () {
+    selectDailyDate(shiftDate(dailyDate || todayYMD(), -1));
+  });
+  document.getElementById("daily-next").addEventListener("click", function () {
+    selectDailyDate(shiftDate(dailyDate || todayYMD(), 1));
+  });
+  document.getElementById("daily-date").addEventListener("change", function () {
+    selectDailyDate(this.value || todayYMD());
+  });
+  document.getElementById("trend-open").addEventListener("click", function () { openTrendPanel(false); });
+  document.getElementById("trend-regen").addEventListener("click", function () { openTrendPanel(true); });
+  document.querySelectorAll("[data-trend-close]").forEach(function (el) {
+    el.addEventListener("click", function () { closeTrendModal(); });
+  });
   applyI18n();
+  applyManageUI();
+  renderTagChips();
+  hydrateCatalogCache();
+  hydrateDailyCache();
+  loadDailyDates();
+  if (currentSection === "venue") loadVenueYears();
   load();
 })();
 </script>

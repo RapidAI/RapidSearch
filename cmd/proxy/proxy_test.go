@@ -44,7 +44,7 @@ func TestProxySearch401IgnoresSettingsCookie(t *testing.T) {
 
 func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 	h := testProxy(t)
-	for _, path := range []string{"/settings", "/settings/", "/settings/login"} {
+	for _, path := range []string{"/settings", "/settings/", "/settings/login", "/settings/translate"} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		h.serveHTTP(rr, req)
@@ -59,7 +59,17 @@ func TestProxySettingsSkipsBearerSoLoginCanRender(t *testing.T) {
 
 func TestProxyPapersSkipsBearerSoLoginCanRender(t *testing.T) {
 	h := testProxy(t)
-	for _, path := range []string{"/papers", "/papers/", "/papers/api", "/papers/pdf/x.pdf"} {
+	for _, path := range []string{
+		"/papers", "/papers/", "/papers/api", "/papers/api/catalog", "/papers/static/catalog-snapshot.json", "/papers/api/progress", "/papers/pdf/x.pdf",
+		"/papers/daily/dates", "/papers/daily/2026-09-14", "/papers/daily/2026-09-14/trend",
+		"/papers/security-trend", "/papers/security-trend/usenix-security/2025",
+		"/papers/pdf/zh/2401.05459", "/papers/pdf/dual/2401.05459",
+		"/papers/translate", "/papers/translate/config",
+		"/papers/review/2401.05459", "/papers/review/2401.05459/generate",
+		"/papers/review/2401.05459/rate",
+		"/papers/daily/dates", "/papers/daily/2026-09-14",
+		"/papers/daily/2026-09-14/trend",
+	} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		h.serveHTTP(rr, req)

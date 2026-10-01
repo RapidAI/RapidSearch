@@ -5,7 +5,17 @@ import argparse, json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-TAG_CN = {"self-evolution": "自进化", "security": "安全", "both": "自进化+安全", "survey": "综述"}
+TAG_CN = {
+    "self-evolution": "agent自进化",
+    "security": "agent安全",
+    "security-top": "安全顶会",
+    "both": "agent安全自进化",
+    "llm-iot": "LLM based 物联网",
+    "survey": "综述",
+    "llm-training": "LLM 训练",
+    "agent-tools-memory": "agent工具与记忆",
+    "other": "其它",
+}
 
 def brief(title, abstract, tags):
     t = (title or "").lower()
@@ -19,10 +29,18 @@ def brief(title, abstract, tags):
         return "自改进 agent 护栏与约束相关讨论。"
     if "audit" in t:
         return "面向 agent 应用的安全审计/分析。"
+    if "security-top" in tags:
+        return "安全顶会论文（S&P / CCS / USENIX Security / NDSS）。"
     if "security" in tags or "safety" in t or "security" in t:
         if any(x in t for x in ("evolv", "improv", "self-")):
             return "交叉：自改进与安全/治理。"
         return "LLM agent 安全、威胁或防护。"
+    if "llm-iot" in tags or "iot" in t or "aiot" in t or "internet of things" in t or "internet of things" in a:
+        return "LLM / agent 驱动的物联网（AIoT）系统。"
+    if "llm-training" in tags or "rlhf" in t or "sft" in t or "fine-tun" in t or "pretrain" in t:
+        return "大语言模型训练 / 后训练（SFT、RLHF、对齐等）。"
+    if "agent-tools-memory" in tags or "tool" in t or "function call" in t or "memory" in t:
+        return "Agent 工具调用或记忆 / RAG 相关工作。"
     if any(x in t for x in ("evolv", "improv", "mutab")):
         return "agent 自进化/自改进或持续适应。"
     abs0 = (abstract or "").strip().split(". ")[0]
